@@ -1,9 +1,10 @@
+from automl.problems.problem_type import ProblemType
 import numpy as np
 import pandas as pd
 
 from sklearn.preprocessing import LabelEncoder as _LabelEncoder
 
-from ..component import Component
+from .transformer import Transformer, DataType
 from ..compatibility.pandas import PandasSeriesTransformerMixin
 
 from sklearn.utils import column_or_1d
@@ -109,6 +110,12 @@ class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
         return {"X_types": ["1dlabels"]}
 
 
-class LabelEncoder(Component):
+class LabelEncoder(Transformer):
     _component_class = PandasLabelEncoder
-
+    _allowed_dtypes = {
+        DataType.CATEGORICAL
+    }
+    _problem_types = {
+        ProblemType.BINARY,
+        ProblemType.MULTICLASS,
+    }

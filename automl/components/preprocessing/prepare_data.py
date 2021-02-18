@@ -1,0 +1,165 @@
+from typing import Optional, List
+
+import pandas as pd
+import numpy as np
+from pandas.api.types import (
+    is_integer_dtype,
+    is_float_dtype,
+    is_numeric_dtype,
+    is_datetime64_any_dtype,
+)
+
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
+
+import warnings
+
+
+def _is_id_column(col):
+    return (
+        is_integer_dtype(col.dtype)
+        and not col.isnull().any()
+        and (col == sorted(col)).sum() == len(col)
+        and len(col) == len(col.unique())
+    )
+
+
+def _clean_df(df):
+    df.columns = [str(col) for col in df.columns]
+    df.replace([np.inf, -np.inf], None, inplace=True)
+    return df
+
+
+class PrepareDataFrame(TransformerMixin, BaseEstimator):
+    _datetime_dtype = "datetime64[ns]"
+
+    def __init__(
+        self,
+        allowed_dtypes: Optional[List[type]] = None,
+        find_id_column: bool = True,
+        float_dtype: type = np.float32,
+        int_dtype: Optional[type] = None,
+        copy_X: bool = True,
+    ) -> None:
+        if allowed_dtypes is not None and not allowed_dtypes:
+            raise ValueError("allowed_dtypes cannot be empty")
+
+        self.allowed_dtypes = allowed_dtypes
+        self.find_id_column = find_id_column
+        self.float_dtype = float_dtype
+        self.int_dtype = int_dtype
+        self.copy_X = copy_X
+
+    def _set_index_to_id_column(self, X):
+        possible_id_columns = X.apply(_is_id_column)
+        possible_id_columns = possible_id_columns[possible_id_columns]
+        if len(possible_id_columns) > 1:
+            warnings.warn(
+                f"{len(possible_id_columns)} possible ID columns found ({list(possible_id_columns.index)}). Will not set any as index."
+            )
+        elif len(possible_id_columns) == 1:
+            warnings.warn(
+                f"Setting ID column '{possible_id_columns.index[0]}' as index."
+            )
+            self.id_column_ = possible_id_columns.index[0]
+            return X.set_index(self.id_column_)
+        return X
+
+    def _infer_dtypes(self, col):
+        if is_float_dtype(col.dtype):
+            return col.astype(self.float_dtype)
+
+        if is_datetime64_any_dtype(col.dtype):
+            return col.astype(self._datetime_dtype)
+
+        if is_integer_dtype(col.dtype):
+            if self.int_dtype is None:
+                ii32 = np.iinfo(np.int32)
+                # err on the safe side - 20%
+                min_32_limit, max_32_limit = ii32.min * 0.8, ii32.max * 0.8
+                if col.min() >= min_32_limit and col.max() <= max_32_limit:
+                    col = col.astype(np.int32)
+                else:
+                    col = col.astype(np.int64)
+            else:
+                col = col.astype(self.int_dtype)
+
+        col_unqiue = col.unique()
+        if (
+            not is_numeric_dtype(col.dtype)
+            or is_integer_dtype(col.dtype)
+            and len(col_unqiue) <= 20
+        ):
+            try:
+                col = pd.to_datetime(
+                    col, infer_datetime_format=True, utc=False, errors="raise"
+                )
+                col = col.astype(self._datetime_dtype)
+            except:
+                pass
+            try:
+                return col.astype(pd.CategoricalDtype(col_unqiue))
+            except:
+                return col.astype("object").astype(pd.CategoricalDtype(col_unqiue))
+
+        return col
+
+    def _convert_dtypes(self, col):
+        if col.name in self.datetime_columns_:
+            col = pd.to_datetime(
+                col, infer_datetime_format=True, utc=False, errors="raise"
+            )
+        return col.astype(self.final_dtypes_[col.name])
+
+    def fit(self, X, y=None):
+        self.fit_transform(X, y=y)
+
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self)
+
+        if self.copy_X:
+            X = X.copy()
+
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+        X = X.infer_objects()
+
+        X = _clean_df(X)
+
+        if self.id_column_ is not None:
+            X[self.id_column_] = X[self.id_column_].astype(int)
+            X.set_index(self.id_column_, inplace=True)
+
+        X = X[self.final_columns_]
+
+        X = X.apply(self._convert_dtypes)
+
+        return X
+
+    def fit_transform(self, X, y=None):
+        X = X.copy()
+
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+        X = X.infer_objects()
+
+        X = _clean_df(X)
+        X.dropna(axis=0, how="all", inplace=True)
+        X.dropna(axis=1, how="all", inplace=True)
+
+        self.id_column_ = None
+        if X.shape[1] > 1 and self.find_id_column:
+            X = self._set_index_to_id_column(X)
+
+        X = X.apply(self._infer_dtypes)
+
+        self.final_columns_ = X.columns
+        self.final_dtypes_ = X.dtypes
+        self.datetime_columns_ = self.final_dtypes_.apply(is_datetime64_any_dtype)
+        self.datetime_columns_ = set(
+            self.datetime_columns_[self.datetime_columns_].index
+        )
+
+        return X
