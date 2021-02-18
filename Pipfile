@@ -1,0 +1,23 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+ipython = "*"
+ipykernel = "*"
+
+[packages]
+scikit-learn = "*"
+pandas = "*"
+optuna = "*"
+sklearn-pandas = "*"
+imbalanced-learn = "*"
+deslib = "*"
+category-encoders = "*"
+catboost = "*"
+lightgbm = "*"
+xgboost = "*"
+
+[requires]
+python_version = "3.8"
