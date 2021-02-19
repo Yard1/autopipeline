@@ -3,8 +3,9 @@ import pandas as pd
 
 from sklearn.preprocessing import OneHotEncoder as _OneHotEncoder
 
-from .transformer import Transformer, DataType
-from ..compatibility.pandas import PandasDataFrameTransformerMixin
+from ..transformer import Transformer, DataType
+from ...component import ComponentLevel
+from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
 
 class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
@@ -33,3 +34,4 @@ class OneHotEncoder(Transformer):
     _allowed_dtypes = {
         DataType.CATEGORICAL
     }
+    _component_level = ComponentLevel.NECESSARY

@@ -1,7 +1,7 @@
 from scipy.sparse import issparse
 import pandas as pd
 from pandas.api.types import is_categorical
-
+from ...utils import validate_type
 
 def col_categorical_to_int(column):
     if is_categorical(column):
@@ -24,8 +24,7 @@ class PandasSeriesTransformerMixin:
             self.name_ = X.name
         except:
             self.name_ = None
-        if not isinstance(X, pd.Series):
-            raise TypeError(f"Expected pd.Series, got '{type(X)}'")
+        validate_type(X, "X", pd.Series)
         try:
             return super().fit(X.to_numpy(), y=y)
         except TypeError:
@@ -34,8 +33,7 @@ class PandasSeriesTransformerMixin:
     def transform(self, X):
         if isinstance(X, pd.DataFrame) and X.shape[1] == 1:
             X = X.squeeze(axis=1)
-        if not isinstance(X, pd.Series):
-            raise TypeError(f"Expected pd.Series, got '{type(X)}'")
+        validate_type(X, "X", pd.Series)
         Xt = super().transform(col_categorical_to_int(X).to_numpy())
         if not isinstance(Xt, pd.Series):
             if issparse(Xt):
@@ -71,8 +69,7 @@ class PandasDataFrameTransformerMixin:
             self.columns_ = X.columns
         except:
             self.columns_ = None
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError(f"Expected pd.DataFrame, got '{type(X)}'")
+        validate_type(X, "X", pd.DataFrame)
         try:
             return super().fit(categorical_to_int(X).to_numpy(), y=y)
         except TypeError:
@@ -81,8 +78,7 @@ class PandasDataFrameTransformerMixin:
     def transform(self, X):
         if isinstance(X, pd.Series):
             X = pd.DataFrame(X, columns=self.columns_)
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError(f"Expected pd.DataFrame, got '{type(X)}'")
+        validate_type(X, "X", pd.DataFrame)
         if not sorted(self.columns_) == sorted(X.columns):
             raise ValueError(
                 f"Column mismatch. Expected {self.columns_}, got {X.columns}"

@@ -29,17 +29,6 @@ class ModelType(Enum):
 
 
 class Estimator(Component):
-    _model_type = None
-    _problem_types = {}
-
     def __init__(self, **parameters) -> None:
-        if not isinstance(self._model_type, ModelType):
-            raise TypeError(
-                f"_model_type must be of type ModelType, got '{type(self._model_type)}'"
-            )
-        if len(self._problem_types) != 1:
-            raise ValueError(
-                f"_problem_types must have length 1, got {len(self._problem_types)}"
-            )
         super().__init__(**parameters)
 

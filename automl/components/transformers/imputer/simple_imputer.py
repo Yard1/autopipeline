@@ -1,12 +1,13 @@
 from sklearn.impute import SimpleImputer as _SimpleImputer
 
-from .transformer import Transformer, DataType
-from ..compatibility.pandas import PandasDataFrameTransformerMixin
+from ..transformer import Transformer, DataType
+from ...component import ComponentLevel
+from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
 class PandasSimpleImputer(PandasDataFrameTransformerMixin, _SimpleImputer):
     pass
 
-class SimpleNumericalImputer(Transformer):
+class SimpleNumericImputer(Transformer):
     _component_class = PandasSimpleImputer
     _default_parameters = {
         "strategy": "mean",
@@ -19,8 +20,9 @@ class SimpleNumericalImputer(Transformer):
         "strategy": ["mean", "median", "constant"]
     }
     _allowed_dtypes = {
-        DataType.NUMERICAL
+        DataType.NUMERIC
     }
+    _component_level = ComponentLevel.NECESSARY
 
 class SimpleCategoricalImputer(Transformer):
     _component_class = PandasSimpleImputer
@@ -37,3 +39,4 @@ class SimpleCategoricalImputer(Transformer):
     _allowed_dtypes = {
         DataType.CATEGORICAL
     }
+    _component_level = ComponentLevel.NECESSARY
