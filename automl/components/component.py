@@ -57,7 +57,6 @@ class Component(ABC):
         }
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}()"
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
         return f"{self.__class__.__name__}({', '.join(params)})"
 

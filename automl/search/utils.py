@@ -1,3 +1,6 @@
+from automl.components.estimators.linear_model.logistic_regression import (
+    LogisticRegression,
+)
 from typing import Optional, Union
 
 from ..components.estimators.tree.decision_tree import DecisionTreeClassifier
@@ -57,7 +60,7 @@ def create_pipeline_blueprint(
                 ],
             ),
         ),
-        ("Estimator", [DecisionTreeClassifier()]),
+        ("Estimator", [DecisionTreeClassifier(), LogisticRegression()]),
     ]
     pipeline_steps_y = [LabelEncoder()]
 

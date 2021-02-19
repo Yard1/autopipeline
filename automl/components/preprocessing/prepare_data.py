@@ -24,8 +24,11 @@ def _is_id_column(col):
     )
 
 
-def _clean_df(df):
-    df.columns = [str(col) for col in df.columns]
+def clean_df(df):
+    if isinstance(df, pd.DataFrame):
+        df.columns = [str(col) for col in df.columns]
+    else:
+        df.name = str(df.name)
     df.replace([np.inf, -np.inf], None, inplace=True)
     return df
 
@@ -43,6 +46,10 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:
             raise ValueError("allowed_dtypes cannot be empty")
+        if not is_float_dtype(float_dtype):
+            raise TypeError(f"Expected float_dtype to be a float dtype, got {type(float_dtype)}")
+        if int_dtype is not None and not is_integer_dtype(int_dtype):
+            raise TypeError(f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}")
 
         self.allowed_dtypes = allowed_dtypes
         self.find_id_column = find_id_column
@@ -122,11 +129,13 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if self.copy_X:
             X = X.copy()
 
+        was_series = isinstance(X, pd.Series)
+
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
         X = X.infer_objects()
 
-        X = _clean_df(X)
+        X = clean_df(X)
 
         if self.id_column_ is not None:
             X[self.id_column_] = X[self.id_column_].astype(int)
@@ -136,16 +145,21 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         X = X.apply(self._convert_dtypes)
 
+        if was_series:
+            X = X.squeeze()
+
         return X
 
     def fit_transform(self, X, y=None):
         X = X.copy()
 
+        was_series = isinstance(X, pd.Series)
+
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
         X = X.infer_objects()
 
-        X = _clean_df(X)
+        X = clean_df(X)
         X.dropna(axis=0, how="all", inplace=True)
         X.dropna(axis=1, how="all", inplace=True)
 
@@ -161,5 +175,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         self.datetime_columns_ = set(
             self.datetime_columns_[self.datetime_columns_].index
         )
+
+        if was_series:
+            X = X.squeeze()
 
         return X

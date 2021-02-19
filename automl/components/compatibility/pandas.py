@@ -44,11 +44,11 @@ class PandasSeriesTransformerMixin:
             else:
                 Xt = pd.Series(
                     Xt,
-                    index=self.get_index(X),
-                    name=self.get_name(X),
+                    index=self.get_index(Xt, X),
+                    name=self.get_name(Xt, X),
                 )
             Xt = Xt.infer_objects()
-            Xt = Xt.astype(self.get_dtype(X))
+            Xt = Xt.astype(self.get_dtype(Xt, X))
         return Xt
 
     def get_index(self, Xt, X, y=None):

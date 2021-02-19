@@ -76,6 +76,8 @@ class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
                 diff = set(y.unique()) - set(self.classes_)
                 raise ValueError(f"y contains previously unseen labels: {list(diff)}")
             yt = yt.cat.rename_categories(self.indices_)
+            yt.index = y.index
+            yt.name = y.name
             y = yt
         else:
             return super().fit(y)
