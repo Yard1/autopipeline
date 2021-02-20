@@ -2,7 +2,7 @@ from enum import IntEnum
 
 class AutoMLStage(IntEnum):
     PREPROCESSING = 1
-    SUGGEST = 2
-    TEST = 3
-    OBSERVE = 4
+    PRE_TUNE = 2
+    TUNE = 3
+    ENSEMBLE = 4
     VERIFY = 5

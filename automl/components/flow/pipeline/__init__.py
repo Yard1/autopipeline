@@ -1,1 +1,1 @@
-from .base_pipeline import Pipeline, BasePipeline
+from .base_pipeline import Pipeline, BasePipeline, TopPipeline

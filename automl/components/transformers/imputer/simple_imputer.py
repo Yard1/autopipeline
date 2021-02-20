@@ -3,6 +3,7 @@ from sklearn.impute import SimpleImputer as _SimpleImputer
 from ..transformer import Transformer, DataType
 from ...component import ComponentLevel
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
+from ....search.distributions import CategoricalDistribution
 
 class PandasSimpleImputer(PandasDataFrameTransformerMixin, _SimpleImputer):
     pass
@@ -17,7 +18,7 @@ class SimpleNumericImputer(Transformer):
         "add_indicator": False,
     }
     _default_tuning_grid = {
-        "strategy": ["mean", "median", "constant"]
+        "strategy": CategoricalDistribution(["mean", "median", "constant"])
     }
     _allowed_dtypes = {
         DataType.NUMERIC
@@ -34,7 +35,7 @@ class SimpleCategoricalImputer(Transformer):
         "add_indicator": False,
     }
     _default_tuning_grid = {
-        "strategy": ["most_frequent", "constant"]
+        "strategy": CategoricalDistribution(["most_frequent", "constant"])
     }
     _allowed_dtypes = {
         DataType.CATEGORICAL

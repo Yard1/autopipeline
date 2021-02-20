@@ -1,12 +1,14 @@
-from typing import Iterable
+from typing import Iterable, Union
 from numpy import isin
 from .flow import Flow
 from ..component import ComponentConfig
 from ...search.stage import AutoMLStage
+from ...search.distributions import CategoricalDistribution
 
-def get_step_choice_grid(step):
+
+def get_step_choice_grid(step, return_distribution: bool = False):
     if isinstance(step, Iterable):
-        grid = [(substep, substep.get_tuning_grid()) for substep in step]
+        grid = step if not return_distribution else CategoricalDistribution(step)
     else:
         grid = step.get_tuning_grid()
     return grid
@@ -57,3 +59,21 @@ def is_component_valid_iterable(
             for x in component
         )
     return component.is_component_valid(config=pipeline_config, stage=current_stage)
+
+
+def convert_tuning_grid(
+    grid: Union[list, dict]
+) -> dict:
+    def convert_tuning_grid_step(
+        grid: Union[list, dict], param_dict: dict, level:int = 0, level_name: str = ""
+    ) -> None:
+        if isinstance(grid, list):
+            param_dict[level_name] = grid
+            return
+        for k, v in grid.items():
+            convert_tuning_grid_step(v, param_dict,level+1, f"{level_name+'__' if level_name else ''}{k}")
+        return
+    
+    param_dict = {}
+    convert_tuning_grid_step(grid, param_dict)
+    return param_dict

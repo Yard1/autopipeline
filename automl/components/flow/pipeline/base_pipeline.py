@@ -10,11 +10,13 @@ from ..utils import (
     is_component_valid_iterable,
     get_step_choice_grid,
 )
+from ..utils import convert_tuning_grid
 from ...transformers import *
 from ...estimators import *
 from ...component import ComponentLevel, ComponentConfig
 from ....problems import ProblemType
 from ....search.stage import AutoMLStage
+from ....search.distributions import CategoricalDistribution
 
 
 class BasePipeline(_Pipeline):
@@ -50,7 +52,7 @@ class Pipeline(Flow):
 
         return self._component_class(**params)
 
-    def remove_invalid_components(
+    def get_valid_components(
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
         steps = self.components
@@ -66,9 +68,7 @@ class Pipeline(Flow):
                 step, pipeline_config=pipeline_config, current_stage=current_stage
             )
         ]
-        self.components = steps
-
-        return self
+        return steps
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_grid = super().get_tuning_grid(use_extended=use_extended)
@@ -77,3 +77,21 @@ class Pipeline(Flow):
             for name, step in self.final_parameters["steps"]
         }
         return {**step_grids, **default_grid}
+
+
+class TopPipeline(Pipeline):
+    def get_estimator_distribution(self):
+        return (self.components[-1][0], CategoricalDistribution(self.components[-1][1]))
+
+    def get_preprocessor_distribution(self):
+        grid = self.get_tuning_grid()
+        grid.pop(self.components[-1][0])
+        return {k: CategoricalDistribution(v) for k,v in convert_tuning_grid(grid).items()}
+
+    def __init__(self, tuning_grid=None, **parameters) -> None:
+        self.parameters = parameters
+        self.tuning_grid = tuning_grid or {}
+        assert "steps" in self.parameters
+        assert len(self.parameters["steps"]) == 2
+        assert "Estimator" == self.parameters["steps"][-1][0]
+        assert "Preprocessor" == self.parameters["steps"][0][0]

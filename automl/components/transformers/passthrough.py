@@ -5,5 +5,9 @@ from ...search.stage import AutoMLStage
 class Passthrough(Transformer):
     _component_class = None
     _component_level = ComponentLevel.NECESSARY
-    def __call__(self, pipeline_config: dict, current_stage: AutoMLStage):
+    def __call__(
+        self,
+        pipeline_config: dict = None,
+        current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+    ):
         return "passthrough"

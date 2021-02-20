@@ -79,7 +79,7 @@ class ColumnTransformer(Flow):
 
         return self._component_class(**params)
 
-    def remove_invalid_components(
+    def get_valid_components(
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
         transformers = self.components
@@ -100,9 +100,7 @@ class ColumnTransformer(Flow):
                 current_stage=current_stage,
             )
         ]
-        self.components = transformers
-
-        return self
+        return transformers
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_grid = super().get_tuning_grid(use_extended=use_extended)

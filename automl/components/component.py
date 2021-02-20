@@ -15,8 +15,8 @@ class ComponentLevel(IntEnum):
 class ComponentConfig:
     def __init__(
         self,
-        level: ComponentLevel,
-        problem_type: ProblemType,
+        level: Optional[ComponentLevel] = None,
+        problem_type: Optional[ProblemType] = None,
         estimator: Optional[type] = None,
         component: Optional[type] = None,
     ) -> None:
@@ -46,7 +46,16 @@ class Component(ABC):
         self.parameters = parameters
         self.tuning_grid = tuning_grid or {}
 
-    def __call__(self, pipeline_config: dict = None, current_stage: AutoMLStage = AutoMLStage.PREPROCESSING):
+        for k in self._default_tuning_grid.keys():
+            if not k in self._default_parameters:
+                raise KeyError(f"_default_parameters is missing key {k} present in _default_tuning_grid")
+            self._default_tuning_grid[k].default = self._default_parameters[k]
+
+    def __call__(
+        self,
+        pipeline_config: dict = None,
+        current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+    ):
         return self._component_class(**self.final_parameters)
 
     @property
@@ -61,17 +70,19 @@ class Component(ABC):
         return f"{self.__class__.__name__}({', '.join(params)})"
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
-        default_grid = (
+        default_tuning_grid = (
             self._default_tuning_grid_extended
             if use_extended
             else self._default_tuning_grid
         )
-        return {**default_grid, **self.tuning_grid}
+        return {**default_tuning_grid, **self.tuning_grid}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:
             return True
-        is_level_good = self._component_level <= config.level
-        is_problem_type_good = config.problem_type in self._problem_types
+        is_level_good = config.level is None or (self._component_level <= config.level)
+        is_problem_type_good = config.problem_type is None or (
+            config.problem_type in self._problem_types
+        )
 
         return is_level_good and is_problem_type_good

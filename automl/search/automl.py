@@ -1,3 +1,4 @@
+from automl.utils.logging import make_header
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -8,14 +9,17 @@ from pandas.api.types import is_numeric_dtype, is_integer_dtype, is_float_dtype
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 
-from .utils import create_pipeline_blueprint, convert_tuning_grid
+from .trainers.trainer import Trainer
+from .utils import create_pipeline_blueprint
 from ..components import DataType
 from ..problems import ProblemType
 from ..components import PrepareDataFrame, clean_df, LabelEncoder
 from ..utils import validate_type
 
 import warnings
+import logging
 
+logger = logging.getLogger(__name__)
 
 class AutoML(BaseEstimator):
     def __init__(
@@ -38,6 +42,8 @@ class AutoML(BaseEstimator):
     def _validate(self):
         validate_type(self.problem_type, "problem_type", (str, ProblemType, type(None)))
         validate_type(self.validation_size, "validation_size", float)
+        if self.validation_size < 0 or self.validation_size > 0.9:
+            raise ValueError(f"validation_size must be in range (0.0, 0.9)")
         if not is_float_dtype(self.float_dtype):
             raise TypeError(
                 f"Expected float_dtype to be a float dtype, got {type(self.float_dtype)}"
@@ -50,8 +56,9 @@ class AutoML(BaseEstimator):
     def _drop_y_nan_rows(self, X, y):
         y_reset_index = y.reset_index(drop=True)
         nan_ilocs = y_reset_index[pd.isnull(y_reset_index)].index
-        warnings.warn(f"Dropping {len(nan_ilocs)} y rows with NaNs: {list(nan_ilocs)}")
-        X.drop(X.index[nan_ilocs], inplace=True)
+        if len(nan_ilocs) > 0:
+            logger.warn(f"Dropping {len(nan_ilocs)} y rows with NaNs: {list(nan_ilocs)}")
+            X.drop(X.index[nan_ilocs], inplace=True)
 
     def _translate_problem_type(self, problem_type) -> ProblemType:
         if problem_type is None:
@@ -85,14 +92,16 @@ class AutoML(BaseEstimator):
         elif problem_type is None:
             raise ValueError("Could not determine problem type.")
         else:
-            warnings.warn("Could not determine problem type.")
+            logger.warn("Could not determine problem type.")
+
+        logger.info(f"Problem type determined as {determined_problem_type}")
 
         if (
             determined_problem_type is not None
             and problem_type is not None
             and determined_problem_type != problem_type
         ):
-            warnings.warn(
+            logger.warn(
                 f"Determined problem type {determined_problem_type} doesn't match given problem type {problem_type}, forcing {problem_type}."
             )
 
@@ -117,6 +126,8 @@ class AutoML(BaseEstimator):
         return train_test_split(X, y, test_size=self.validation_size, random_state=self.random_seed_, stratify=y if self.problem_type_.is_classification() else None)
 
     def fit(self, X: pd.DataFrame, y: pd.Series, X_validation:Optional[pd.DataFrame]=None, y_validation:Optional[pd.Series]=None):
+        logger.info(make_header("AutoML Fit"))
+
         self._validate()
 
         if isinstance(y, pd.DataFrame) and y.shape[1] == 1:
@@ -141,6 +152,8 @@ class AutoML(BaseEstimator):
         y = clean_df(y)
         self._drop_y_nan_rows(X, y)
 
+        logger.info("Preparing DataFrames")
+
         y_validator = PrepareDataFrame(
             float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False
         )
@@ -162,19 +175,30 @@ class AutoML(BaseEstimator):
         self.X_steps_.append(X_validator)
 
         if self.problem_type_.is_classification():
+            logger.info("Encoding labels in y")
             y_encoder = LabelEncoder()()
             y = y_encoder.fit_transform(y)
             self.y_steps_.append(y_encoder)
 
         if X_validation is not None and y_validation is not None:
+            logger.info("Using predefined validation sets")
             self.X_validation_ = X_validator.transform(X_validation)
             self.y_validation_ = y_validator.transform(y_validation)
         elif X_validation is not None or y_validation is not None:
             raise ValueError(f"When passing either X_validation or y_validation, the other parameter must not be None as well, got X_validation: {type(X_validation)}, y_validation: {type(y_validation)}")
         elif self.validation_size <= 0:
+            logger.info("validation_size <= 0, no validation will be performed")
             self.X_validation_ = None
             self.y_validation_ = None
         else:
+            logger.info(f"Splitting data into training and validation sets ({1-(self.validation_size*100)}-{(self.validation_size*100)})")
             X, self.X_validation_, y, self.y_validation_ = self._make_validation_split(X, y)
+
+        self.trainer_ = Trainer(
+            problem_type=self.problem_type_,
+            random_state=self.random_seed_
+        )
+
+        self.trainer_.fit(X, y)
 
         return X, y
