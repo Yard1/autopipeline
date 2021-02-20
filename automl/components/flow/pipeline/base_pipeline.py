@@ -1,9 +1,7 @@
-from typing import Iterable
 from copy import deepcopy
-from sklearn.pipeline import Pipeline as _Pipeline, make_pipeline
+from sklearn.pipeline import Pipeline as _Pipeline
 
 from ..flow import Flow
-from ..column_transformer import ColumnTransformer
 from ..utils import (
     recursively_remove_invalid_components,
     get_single_component_from_iterable,
@@ -13,8 +11,7 @@ from ..utils import (
 from ..utils import convert_tuning_grid
 from ...transformers import *
 from ...estimators import *
-from ...component import ComponentLevel, ComponentConfig
-from ....problems import ProblemType
+from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ....search.distributions import CategoricalDistribution
 
@@ -25,6 +22,11 @@ class BasePipeline(_Pipeline):
 
 class Pipeline(Flow):
     _component_class = BasePipeline
+
+    _default_parameters = {
+        "memory": None,
+        "verbose": False,
+    }
 
     @property
     def components_name(self) -> str:
@@ -86,7 +88,9 @@ class TopPipeline(Pipeline):
     def get_preprocessor_distribution(self):
         grid = self.get_tuning_grid()
         grid.pop(self.components[-1][0])
-        return {k: CategoricalDistribution(v) for k,v in convert_tuning_grid(grid).items()}
+        return {
+            k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
+        }
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters

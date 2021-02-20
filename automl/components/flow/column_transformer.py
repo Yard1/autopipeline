@@ -8,14 +8,12 @@ from .utils import (
     is_component_valid_iterable,
     get_step_choice_grid,
 )
-from ..component import ComponentLevel, ComponentConfig
+from ..component import ComponentConfig
 from ...search.stage import AutoMLStage
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
-
-from sklearn.utils.validation import check_array
 
 
 class PandasColumnTransformer(_ColumnTransformer):

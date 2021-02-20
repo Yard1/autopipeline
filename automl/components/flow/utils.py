@@ -1,5 +1,4 @@
 from typing import Iterable, Union
-from numpy import isin
 from .flow import Flow
 from ..component import ComponentConfig
 from ...search.stage import AutoMLStage
@@ -14,7 +13,7 @@ def get_step_choice_grid(step, return_distribution: bool = False):
     return grid
 
 
-def append_components_name_if_possible(name:str, flow:Flow) -> str:
+def append_components_name_if_possible(name: str, flow: Flow) -> str:
     try:
         return f"{name}__{flow.components_name}"
     except:
@@ -61,19 +60,19 @@ def is_component_valid_iterable(
     return component.is_component_valid(config=pipeline_config, stage=current_stage)
 
 
-def convert_tuning_grid(
-    grid: Union[list, dict]
-) -> dict:
+def convert_tuning_grid(grid: Union[list, dict]) -> dict:
     def convert_tuning_grid_step(
-        grid: Union[list, dict], param_dict: dict, level:int = 0, level_name: str = ""
+        grid: Union[list, dict], param_dict: dict, level: int = 0, level_name: str = ""
     ) -> None:
         if isinstance(grid, list):
             param_dict[level_name] = grid
             return
         for k, v in grid.items():
-            convert_tuning_grid_step(v, param_dict,level+1, f"{level_name+'__' if level_name else ''}{k}")
+            convert_tuning_grid_step(
+                v, param_dict, level + 1, f"{level_name+'__' if level_name else ''}{k}"
+            )
         return
-    
+
     param_dict = {}
     convert_tuning_grid_step(grid, param_dict)
     return param_dict

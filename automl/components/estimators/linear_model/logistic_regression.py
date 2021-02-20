@@ -1,7 +1,8 @@
 from sklearn.linear_model import LogisticRegression as _LogisticRegression
 from .linear_model_estimator import LinearModelEstimator
 from ....problems import ProblemType
-from ....search.distributions import *
+from ....search.distributions import UniformDistribution
+
 
 class LogisticRegression(LinearModelEstimator):
     _component_class = _LogisticRegression
@@ -30,7 +31,4 @@ class LogisticRegression(LinearModelEstimator):
     }
     _default_tuning_grid_extended = {}
 
-    _problem_types = {
-        ProblemType.BINARY,
-        ProblemType.MULTICLASS
-    }
+    _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}

@@ -21,7 +21,9 @@ class Flow(Transformer):
     def remove_invalid_components(
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
-        self.components = self.get_valid_components(pipeline_config=pipeline_config, current_stage=current_stage)
+        self.components = self.get_valid_components(
+            pipeline_config=pipeline_config, current_stage=current_stage
+        )
 
         return self
 

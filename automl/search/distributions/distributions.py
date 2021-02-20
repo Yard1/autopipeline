@@ -1,10 +1,6 @@
-from typing import Dict, Hashable, Optional
+from typing import Dict, Optional
 
-try:
-    from collections.abc import Hashable
-except:
-    from collections import Hashable
-
+from collections.abc import Hashable
 import numpy as np
 from copy import copy
 
@@ -18,6 +14,7 @@ class _OptunaParam:
 
 
 optuna_param = _OptunaParam()
+
 
 class Distribution:
     def __init__(self):
@@ -46,7 +43,7 @@ class Distribution:
         if not hasattr(self, "_default"):
             raise KeyError("default value has not been set.")
         return self._default
-    
+
     @default.setter
     def default(self, val):
         self._validate_default(val)
@@ -74,7 +71,9 @@ class UniformDistribution(Distribution):
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
-            raise ValueError(f"default value {default} must be between {self.lower} and {self.upper}")
+            raise ValueError(
+                f"default value {default} must be between {self.lower} and {self.upper}"
+            )
 
     def get_skopt(self):
         import skopt.space
@@ -85,8 +84,6 @@ class UniformDistribution(Distribution):
             return skopt.space.Real(self.lower, self.upper, prior="uniform")
 
     def get_optuna(self, label):
-        import optuna
-
         if self.log:
             return optuna_param.suggest_loguniform(label, self.lower, self.upper)
         else:
@@ -140,7 +137,9 @@ class IntUniformDistribution(Distribution):
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
-            raise ValueError(f"default value {default} must be between {self.lower} and {self.upper}")
+            raise ValueError(
+                f"default value {default} must be between {self.lower} and {self.upper}"
+            )
 
     def get_skopt(self):
         import skopt.space
@@ -151,8 +150,6 @@ class IntUniformDistribution(Distribution):
             return skopt.space.Integer(self.lower, self.upper, prior="uniform")
 
     def get_optuna(self, label):
-        import optuna
-
         if self.log:
             return optuna_param.suggest_int(label, self.lower, self.upper, log=True)
         else:
@@ -177,24 +174,22 @@ class IntUniformDistribution(Distribution):
         )
 
     def get_tune(self):
-        from ray import tune
         from ray.tune.sample import Integer
         from ray.tune.sample import LogUniform
 
         class LogUniformInteger(Integer):
             class _LogUniform(LogUniform):
-                def sample(self,
-                        domain: "Integer",
-                        spec = None,
-                        size: int = 1):
-                    assert domain.lower > 0, \
-                        "LogUniform needs a lower bound greater than 0"
-                    assert 0 < domain.upper < float("inf"), \
-                        "LogUniform needs a upper bound greater than 0"
+                def sample(self, domain: "Integer", spec=None, size: int = 1):
+                    assert (
+                        domain.lower > 0
+                    ), "LogUniform needs a lower bound greater than 0"
+                    assert (
+                        0 < domain.upper < float("inf")
+                    ), "LogUniform needs a upper bound greater than 0"
                     logmin = np.log(domain.lower) / np.log(self.base)
                     logmax = np.log(domain.upper) / np.log(self.base)
 
-                    items = self.base**(np.random.uniform(logmin, logmax, size=size))
+                    items = self.base ** (np.random.uniform(logmin, logmax, size=size))
                     items = np.round(items).astype(int)
                     return items if len(items) > 1 else domain.cast(items[0])
 
@@ -204,13 +199,15 @@ class IntUniformDistribution(Distribution):
                         "LogUniform requires a lower bound greater than 0."
                         f"Got: {self.lower}. Did you pass a variable that has "
                         "been log-transformed? If so, pass the non-transformed value "
-                        "instead.")
+                        "instead."
+                    )
                 if not 0 < self.upper < float("inf"):
                     raise ValueError(
                         "LogUniform requires a upper bound greater than 0. "
                         f"Got: {self.lower}. Did you pass a variable that has "
                         "been log-transformed? If so, pass the non-transformed value "
-                        "instead.")
+                        "instead."
+                    )
                 new = copy(self)
                 new.set_sampler(self._LogUniform(base))
                 return new
@@ -250,7 +247,9 @@ class DiscreteUniformDistribution(Distribution):
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
-            raise ValueError(f"default value {default} must be between {self.lower} and {self.upper}")
+            raise ValueError(
+                f"default value {default} must be between {self.lower} and {self.upper}"
+            )
 
     def get_skopt(self):
         import skopt.space
@@ -259,8 +258,6 @@ class DiscreteUniformDistribution(Distribution):
         return skopt.space.Real(self.lower, self.upper, prior="uniform")
 
     def get_optuna(self, label):
-        import optuna
-
         return optuna_param.suggest_discrete_uniform(
             label, self.lower, self.upper, self.q
         )
@@ -316,8 +313,6 @@ class CategoricalDistribution(Distribution):
         )
 
     def get_optuna(self, label):
-        import optuna
-
         return optuna_param.suggest_categorical(label, self.values)
 
     def get_hyperopt(self, label):

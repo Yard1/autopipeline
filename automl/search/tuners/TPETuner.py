@@ -1,22 +1,20 @@
 from time import time
-from typing import Optional, Union, Dict, List, Tuple, final
+from typing import Optional, Union, Dict, List, Tuple
 
-from copy import deepcopy, copy
+from copy import copy
 
 import numpy as np
 import pandas as pd
 
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 
-import ray
 from ray import tune
 from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.suggestion import (
-    UNRESOLVED_SEARCH_SPACE,
     UNDEFINED_METRIC_MODE,
     UNDEFINED_SEARCH_SPACE,
 )
-from ray.tune.utils.util import flatten_dict, unflatten_dict
+from ray.tune.utils.util import unflatten_dict
 
 import optuna as ot
 from optuna.samplers import BaseSampler
@@ -25,6 +23,7 @@ from sklearn.base import clone
 from sklearn.model_selection import cross_validate
 
 from .tuner import Tuner
+from .utils import ray_context
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
 from ..utils import call_component_if_needed
@@ -33,11 +32,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def get_optuna_dist(ot_trial, value, label, use_default: bool = False):
     if use_default:
         return value.default
     fn, args, kwargs = value.get_optuna(label)
     return getattr(ot_trial, fn)(*args, **kwargs)
+
 
 class ConditionalOptunaSearch(OptunaSearch):
     def __init__(
@@ -76,18 +77,18 @@ class ConditionalOptunaSearch(OptunaSearch):
         spec = copy(spec)
         config = {}
         estimator_name, estimators_distributon = spec.get_estimator_distribution()
-        estimator = get_optuna_dist(ot_trial, estimators_distributon, estimator_name, use_default=use_default)
+        estimator = get_optuna_dist(
+            ot_trial, estimators_distributon, estimator_name, use_default=use_default
+        )
         spec.remove_invalid_components(
-            pipeline_config=ComponentConfig(
-                estimator=estimator
-            ),
+            pipeline_config=ComponentConfig(estimator=estimator),
             current_stage=AutoMLStage.TUNE,
         )
         config[estimator_name] = estimator
         preprocessors_grid = spec.get_preprocessor_distribution()
-        for k,v in preprocessors_grid.items():
+        for k, v in preprocessors_grid.items():
             config[k] = get_optuna_dist(ot_trial, v, k, use_default=use_default)
-        
+
         hyperparams = {}
 
         for k, v in config.items():
@@ -96,7 +97,6 @@ class ConditionalOptunaSearch(OptunaSearch):
                 choice = get_optuna_dist(ot_trial, v2, name, use_default=use_default)
                 hyperparams[name] = call_component_if_needed(choice)
             config[k] = call_component_if_needed(v)
-        
 
         final_config = {**config, **hyperparams}
         return final_config
@@ -127,10 +127,9 @@ class ConditionalOptunaSearch(OptunaSearch):
             params = self._fetch_params(ot_trial, self._space)
         return unflatten_dict(params)
 
+
 class TPETuner(Tuner):
-    def __init__(
-        self, pipeline_blueprint, random_state
-    ) -> None:
+    def __init__(self, pipeline_blueprint, random_state) -> None:
         self.pipeline_blueprint = pipeline_blueprint
         self.random_state = random_state
         super().__init__()
@@ -144,7 +143,7 @@ class TPETuner(Tuner):
             estimator,
             self.X_,
             self.y_,
-            #cv=self.cv,
+            # cv=self.cv,
             # error_score=self.error_score,
             # fit_params=self.fit_params,
             # groups=self.groups,
@@ -158,17 +157,19 @@ class TPETuner(Tuner):
         self.X_ = X
         self.y_ = y
         time_start = time()
-        analysis = tune.run(
-            self._trial_with_cv,
-            search_alg=ConditionalOptunaSearch(
-                space=self.pipeline_blueprint,
-                metric="mean_test_score",
-                mode="max",
-            ),
-            fail_fast=True,
-            num_samples=10,
-            verbose=2,
-        )
+        with ray_context():
+            analysis = tune.run(
+                self._trial_with_cv,
+                search_alg=ConditionalOptunaSearch(
+                    space=self.pipeline_blueprint,
+                    metric="mean_test_score",
+                    mode="max",
+                ),
+                num_samples=50,
+                verbose=1,
+                reuse_actors=True,
+                fail_fast=True,
+            )
 
     def fit(self, X, y):
         return self._search(X, y)

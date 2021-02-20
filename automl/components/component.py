@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Optional
 from enum import IntEnum
 from ..problems import ProblemType
@@ -47,8 +47,10 @@ class Component(ABC):
         self.tuning_grid = tuning_grid or {}
 
         for k in self._default_tuning_grid.keys():
-            if not k in self._default_parameters:
-                raise KeyError(f"_default_parameters is missing key {k} present in _default_tuning_grid")
+            if k not in self._default_parameters:
+                raise KeyError(
+                    f"_default_parameters is missing key {k} present in _default_tuning_grid"
+                )
             self._default_tuning_grid[k].default = self._default_parameters[k]
 
     def __call__(

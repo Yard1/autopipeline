@@ -1,4 +1,5 @@
-from enum import Enum, auto
+from enum import Enum
+
 
 class ProblemType(Enum):
     REGRESSION = "regression"
@@ -14,6 +15,11 @@ class ProblemType(Enum):
             return ProblemType.REGRESSION
         if problem_type in ("binary", "binary_classification"):
             return ProblemType.BINARY
-        if problem_type in ("multiclass", "multilabel", "multiclass_classification", "multilabel_classification"):
+        if problem_type in (
+            "multiclass",
+            "multilabel",
+            "multiclass_classification",
+            "multilabel_classification",
+        ):
             return ProblemType.MULTICLASS
         raise ValueError(f"Cannot translate '{problem_type}' to a ProblemType object!")

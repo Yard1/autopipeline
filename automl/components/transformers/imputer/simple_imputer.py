@@ -5,8 +5,10 @@ from ...component import ComponentLevel
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ....search.distributions import CategoricalDistribution
 
+
 class PandasSimpleImputer(PandasDataFrameTransformerMixin, _SimpleImputer):
     pass
+
 
 class SimpleNumericImputer(Transformer):
     _component_class = PandasSimpleImputer
@@ -20,10 +22,9 @@ class SimpleNumericImputer(Transformer):
     _default_tuning_grid = {
         "strategy": CategoricalDistribution(["mean", "median", "constant"])
     }
-    _allowed_dtypes = {
-        DataType.NUMERIC
-    }
+    _allowed_dtypes = {DataType.NUMERIC}
     _component_level = ComponentLevel.NECESSARY
+
 
 class SimpleCategoricalImputer(Transformer):
     _component_class = PandasSimpleImputer
@@ -37,7 +38,5 @@ class SimpleCategoricalImputer(Transformer):
     _default_tuning_grid = {
         "strategy": CategoricalDistribution(["most_frequent", "constant"])
     }
-    _allowed_dtypes = {
-        DataType.CATEGORICAL
-    }
+    _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY

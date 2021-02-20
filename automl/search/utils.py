@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional
 
 from ..components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..components.estimators.linear_model.logistic_regression import LogisticRegression
@@ -18,6 +18,7 @@ def call_component_if_needed(possible_component):
         return possible_component()
     else:
         return possible_component
+
 
 def create_pipeline_blueprint(
     problem_type: ProblemType,
