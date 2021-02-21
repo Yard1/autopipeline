@@ -1,4 +1,7 @@
 import ray
+import os
+from unittest.mock import patch
+import contextlib
 
 
 class ray_context:
@@ -15,11 +18,21 @@ class ray_context:
     def __enter__(self):
         self.ray_init = ray.is_initialized()
         if not self.ray_init:
-            ray.init(
-                **self.ray_config
-                # log_to_driver=self.verbose == 2
-            )
+            with patch.dict(
+                "os.environ", {"TUNE_GLOBAL_CHECKPOINT_S": "1000000"}
+            ) if "TUNE_GLOBAL_CHECKPOINT_S" not in os.environ else contextlib.nullcontext():
+                ray.init(
+                    **self.ray_config
+                    # log_to_driver=self.verbose == 2
+                )
 
     def __exit__(self, type, value, traceback):
         if not self.ray_init and ray.is_initialized():
             ray.shutdown()
+
+
+def split_list_into_chunks(lst: list, chunk_size: int):
+    return [
+        lst[i * chunk_size : (i + 1) * chunk_size]
+        for i in range((len(lst) + chunk_size - 1) // chunk_size)
+    ]

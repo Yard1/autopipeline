@@ -1,10 +1,10 @@
 from scipy.sparse import issparse
 import pandas as pd
-from pandas.api.types import is_categorical
+from pandas.api.types import is_categorical_dtype
 from ...utils import validate_type
 
 def col_categorical_to_int(column):
-    if is_categorical(column):
+    if is_categorical_dtype(column.dtype):
         try:
             return column.astype(int)
         except ValueError:

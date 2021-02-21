@@ -17,7 +17,7 @@ class LogisticRegression(LinearModelEstimator):
         "class_weight": None,
         "random_state": None,
         "solver": "saga",
-        "max_iter": 1000,
+        "max_iter": 10000,
         "multi_class": "auto",
         "verbose": 0,
         "warm_start": False,

@@ -6,10 +6,10 @@ from copy import copy
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
 
 from ray import tune
+from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.suggestion import (
     UNDEFINED_METRIC_MODE,
@@ -21,7 +21,8 @@ import optuna as ot
 from optuna.samplers import BaseSampler
 
 from .tuner import RayTuneTuner
-from .utils import ray_context
+from .utils import ray_context, split_list_into_chunks
+from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
 
@@ -45,6 +46,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         mode: Optional[str] = None,
         points_to_evaluate: Optional[List[Dict]] = None,
         sampler: Optional[BaseSampler] = None,
+        seed: Optional[int] = None,
     ):
         assert ot is not None, "Optuna must be installed! Run `pip install optuna`."
         super(OptunaSearch, self).__init__(
@@ -54,9 +56,13 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._space = space
 
         self._points_to_evaluate = points_to_evaluate
+        n_startup_trials = min(10 - len(points_to_evaluate), 1)
 
         self._study_name = "optuna"  # Fixed study name for in-memory storage
-        self._sampler = sampler or ot.samplers.TPESampler()
+        self._sampler = sampler or ot.samplers.TPESampler(
+            n_startup_trials=n_startup_trials,
+            seed=seed,
+        )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "
             "as a sampler to `OptunaSearcher`."
@@ -130,9 +136,23 @@ class ConditionalOptunaSearch(OptunaSearch):
 
 
 class OptunaTPETuner(RayTuneTuner):
-    def __init__(self, pipeline_blueprint, random_state) -> None:
+    def __init__(
+        self,
+        problem_type: ProblemType,
+        pipeline_blueprint,
+        cv,
+        random_state,
+        early_stopping=True,
+        early_stopping_splits=3,
+        early_stopping_brackets=1,
+    ) -> None:
+        self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
+        self.cv = cv
         self.random_state = random_state
+        self.early_stopping = early_stopping
+        self.early_stopping_splits = early_stopping_splits
+        self.early_stopping_brackets = early_stopping_brackets
         super().__init__()
 
     def _get_single_default_hyperparams(self, components):
@@ -155,6 +175,19 @@ class OptunaTPETuner(RayTuneTuner):
     def _search(self, X, y):
         self.X_ = X
         self.y_ = y
+
+        if self.early_stopping:
+            min_dist = self.cv.get_n_splits(self.X_, self.y_) * 2
+            if self.problem_type.is_classification():
+                min_dist *= len(self.y_.cat.categories)
+            min_dist /= self.X_.shape[0]
+
+            # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
+            self.early_stopping_fractions_ = 1.0 * np.power(3, -np.linspace(self.early_stopping_splits-1, 0, self.early_stopping_splits))
+            self.early_stopping_fractions_[0] = max(self.early_stopping_fractions_[0], min_dist)
+        else:
+            self.early_stopping_fractions_ = [1]
+
         default_grid = self._get_default_components(self.pipeline_blueprint)
         preset_configurations = [
             config
@@ -162,6 +195,18 @@ class OptunaTPETuner(RayTuneTuner):
             if config not in default_grid
         ]
         default_grid += preset_configurations
+
+        scheluder = (
+            ASHAScheduler(
+                metric="mean_test_score",
+                mode="max",
+                reduction_factor=3,
+                max_t=self.early_stopping_splits,
+                brackets=self.early_stopping_brackets
+            )
+            if self.early_stopping
+            else None
+        )
 
         with ray_context():
             self.analysis_ = tune.run(
@@ -171,11 +216,13 @@ class OptunaTPETuner(RayTuneTuner):
                     metric="mean_test_score",
                     mode="max",
                     points_to_evaluate=default_grid,
+                    seed=self.random_state,
                 ),
-                metric="mean_test_score",
-                mode="max",
-                num_samples=10,
-                # num_samples=50 + len(default_grid),
+                scheduler=scheluder,
+                #metric="mean_test_score",
+                #mode="max",
+                #num_samples=10,
+                num_samples=50 + len(default_grid),
                 verbose=1,
                 reuse_actors=True,
                 fail_fast=True,
