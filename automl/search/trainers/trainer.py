@@ -35,11 +35,15 @@ class Trainer:
         self.random_state = random_state
 
     def fit(self, X, y):
+        missing_values = X.isnull().values.any()
+        if missing_values:
+            logger.info("Found at least one missing value in X, imputers will be used")
         self.pipeline_blueprint_ = create_pipeline_blueprint(
-            self.problem_type,
-            self.categorical_columns,
-            self.numeric_columns,
-            self.level,
+            problem_type=self.problem_type,
+            categorical_columns=self.categorical_columns,
+            numeric_columns=self.numeric_columns,
+            missing_values=missing_values,
+            level=self.level,
         )
 
         self.tuner_ = self.tuner(

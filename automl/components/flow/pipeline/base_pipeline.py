@@ -36,6 +36,7 @@ class Pipeline(Flow):
         self,
         pipeline_config: ComponentConfig = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        return_prefix_mixin: bool = False,
     ):
         params = deepcopy(self.final_parameters)
         steps = [
@@ -43,7 +44,7 @@ class Pipeline(Flow):
                 name,
                 get_single_component_from_iterable(
                     step, pipeline_config=pipeline_config, current_stage=current_stage
-                )(pipeline_config=pipeline_config, current_stage=current_stage),
+                )(pipeline_config=pipeline_config, current_stage=current_stage, return_prefix_mixin=return_prefix_mixin),
             )
             for name, step in params["steps"]
             if is_component_valid_iterable(
@@ -88,6 +89,12 @@ class TopPipeline(Pipeline):
     def get_preprocessor_distribution(self):
         grid = self.get_tuning_grid()
         grid.pop(self.components[-1][0])
+        return {
+            k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
+        }
+
+    def get_all_distributions(self):
+        grid = self.get_tuning_grid()
         return {
             k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
         }

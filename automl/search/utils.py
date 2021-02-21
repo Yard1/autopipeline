@@ -13,9 +13,9 @@ from ..utils import validate_type
 from sklearn.compose import make_column_selector
 
 
-def call_component_if_needed(possible_component):
+def call_component_if_needed(possible_component, return_prefix_mixin: bool = False):
     if isinstance(possible_component, Component):
-        return possible_component()
+        return possible_component(return_prefix_mixin=return_prefix_mixin)
     else:
         return possible_component
 
@@ -24,6 +24,7 @@ def create_pipeline_blueprint(
     problem_type: ProblemType,
     categorical_columns: Optional[list] = None,
     numeric_columns: Optional[list] = None,
+    missing_values: bool = True,
     level: ComponentLevel = ComponentLevel.COMMON,
 ) -> TopPipeline:
     if categorical_columns is None:
@@ -73,6 +74,7 @@ def create_pipeline_blueprint(
         pipeline_config=ComponentConfig(
             level=level,
             problem_type=problem_type,
+            missing_values=missing_values,
         ),
         current_stage=AutoMLStage.PREPROCESSING,
     )

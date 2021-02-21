@@ -29,6 +29,5 @@ class ModelType(Enum):
 
 
 class Estimator(Component):
-    def __init__(self, **parameters) -> None:
-        super().__init__(**parameters)
+    pass
 

@@ -3,6 +3,7 @@ from typing import Optional
 from enum import IntEnum
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
+from .compatibility.mixin import PrefixParamsMixin
 
 
 class ComponentLevel(IntEnum):
@@ -17,17 +18,20 @@ class ComponentConfig:
         self,
         level: Optional[ComponentLevel] = None,
         problem_type: Optional[ProblemType] = None,
+        missing_values: Optional[bool] = None,
         estimator: Optional[type] = None,
         component: Optional[type] = None,
     ) -> None:
         self.level = level
         self.problem_type = problem_type
+        self.missing_values = missing_values
         self.component = component
         self.estimator = estimator
 
 
 class Component(ABC):
     _component_class = None
+    _component_class_prefix = None
 
     _default_parameters = {}
 
@@ -53,11 +57,23 @@ class Component(ABC):
                 )
             self._default_tuning_grid[k].default = self._default_parameters[k]
 
+        try:
+            self._component_class_prefix = type(
+                self._component_class.__name__,
+                (PrefixParamsMixin, self._component_class),
+                {"_automl_prefix": self.prefix},
+            )
+        except AttributeError:
+            self._component_class_prefix = self._component_class
+
     def __call__(
         self,
         pipeline_config: dict = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        return_prefix_mixin: bool = False,
     ):
+        if return_prefix_mixin:
+            return self._component_class_prefix(**self.final_parameters)
         return self._component_class(**self.final_parameters)
 
     @property
@@ -66,6 +82,10 @@ class Component(ABC):
             **self._default_parameters,
             **self.parameters,
         }
+
+    @property
+    def prefix(self):
+        return self.__class__.__name__
 
     def __repr__(self) -> str:
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]

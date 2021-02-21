@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+from sklearn.model_selection._search import ParameterGrid
 
 from ray import tune
 from ray.tune.suggest.optuna import OptunaSearch
@@ -93,10 +94,10 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         for k, v in config.items():
             for k2, v2 in v.get_tuning_grid().items():
-                name = f"{k}__{k2}"
+                name = f"{k}__{v.prefix}_{k2}"
                 choice = get_optuna_dist(ot_trial, v2, name, use_default=use_default)
-                hyperparams[name] = call_component_if_needed(choice)
-            config[k] = call_component_if_needed(v)
+                hyperparams[name] = choice
+            config[k] = v
 
         final_config = {**config, **hyperparams}
         return final_config
@@ -122,6 +123,12 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         if self._points_to_evaluate:
             params = self._points_to_evaluate.pop(0)
+            hyperparams = {}
+            for k, v in params.items():
+                for k2, v2 in v.get_tuning_grid().items():
+                    name = f"{k}__{v.prefix}_{k2}"
+                    hyperparams[name] = v2.default
+            params = {**params, **hyperparams}
         else:
             # getattr will fetch the trial.suggest_ function on Optuna trials
             params = self._fetch_params(ot_trial, self._space)
@@ -137,7 +144,12 @@ class TPETuner(Tuner):
     def _trial_with_cv(self, config):
         estimator = self.pipeline_blueprint()
 
-        estimator.set_params(**config)
+        config_called = {
+            k: call_component_if_needed(v, return_prefix_mixin=True)
+            for k, v in config.items()
+        }
+
+        estimator.set_params(**config_called)
 
         scores = cross_validate(
             estimator,
@@ -156,6 +168,13 @@ class TPETuner(Tuner):
     def _search(self, X, y):
         self.X_ = X
         self.y_ = y
+        default_grid = {
+            k: v.values
+            for k, v in self.pipeline_blueprint.get_all_distributions().items()
+        }
+        default_grid = list(ParameterGrid(default_grid))
+        #print(default_grid)
+
         time_start = time()
         with ray_context():
             analysis = tune.run(
@@ -164,9 +183,11 @@ class TPETuner(Tuner):
                     space=self.pipeline_blueprint,
                     metric="mean_test_score",
                     mode="max",
+                    points_to_evaluate=default_grid,
                 ),
-                num_samples=50,
-                verbose=1,
+                #num_samples = 10,
+                num_samples=50 + len(default_grid),
+                verbose=2,
                 reuse_actors=True,
                 fail_fast=True,
             )

@@ -16,6 +16,7 @@ class ray_context:
         self.ray_init = ray.is_initialized()
         if not self.ray_init:
             ray.init(
+                **self.ray_config
                 # log_to_driver=self.verbose == 2
             )
 
