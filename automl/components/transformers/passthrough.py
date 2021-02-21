@@ -11,6 +11,7 @@ class Passthrough(Transformer):
         self,
         pipeline_config: dict = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        random_state=None,
         return_prefix_mixin: bool = False,
     ):
         return "passthrough"

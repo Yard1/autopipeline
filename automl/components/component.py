@@ -70,11 +70,17 @@ class Component(ABC):
         self,
         pipeline_config: dict = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        random_state=None,
         return_prefix_mixin: bool = False,
     ):
+        params = self.final_parameters
+
+        if "random_state" in self._default_parameters:
+            params["random_state"] = random_state
+
         if return_prefix_mixin:
-            return self._component_class_prefix(**self.final_parameters)
-        return self._component_class(**self.final_parameters)
+            return self._component_class_prefix(**params)
+        return self._component_class(**params)
 
     @property
     def final_parameters(self):

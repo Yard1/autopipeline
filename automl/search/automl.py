@@ -142,7 +142,7 @@ class AutoML(BaseEstimator):
 
         self.X_steps_ = []
         self.y_steps_ = []
-        self.random_seed_ = self.random_state
+        self.random_seed_ = self.random_state or np.random.randint(0, 10000)
 
         problem_type = self._translate_problem_type(self.problem_type)
 

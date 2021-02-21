@@ -13,9 +13,9 @@ from ..utils import validate_type
 from sklearn.compose import make_column_selector
 
 
-def call_component_if_needed(possible_component, return_prefix_mixin: bool = False):
+def call_component_if_needed(possible_component, **kwargs):
     if isinstance(possible_component, Component):
-        return possible_component(return_prefix_mixin=return_prefix_mixin)
+        return possible_component(**kwargs)
     else:
         return possible_component
 
@@ -58,7 +58,7 @@ def create_pipeline_blueprint(
                         Pipeline(
                             steps=[
                                 ("Imputer", [SimpleNumericImputer()]),
-                                ("ScalerNormalizer", [StandardScaler(), Passthrough()]),
+                                ("ScalerNormalizer", [StandardScaler()]),
                             ]
                         ),
                         numeric_columns,

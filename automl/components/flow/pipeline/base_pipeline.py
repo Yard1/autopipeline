@@ -36,6 +36,7 @@ class Pipeline(Flow):
         self,
         pipeline_config: ComponentConfig = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        random_state=None,
         return_prefix_mixin: bool = False,
     ):
         params = deepcopy(self.final_parameters)
@@ -44,7 +45,12 @@ class Pipeline(Flow):
                 name,
                 get_single_component_from_iterable(
                     step, pipeline_config=pipeline_config, current_stage=current_stage
-                )(pipeline_config=pipeline_config, current_stage=current_stage, return_prefix_mixin=return_prefix_mixin),
+                )(
+                    pipeline_config=pipeline_config,
+                    current_stage=current_stage,
+                    random_state=random_state,
+                    return_prefix_mixin=return_prefix_mixin,
+                ),
             )
             for name, step in params["steps"]
             if is_component_valid_iterable(

@@ -142,10 +142,12 @@ class TPETuner(Tuner):
         super().__init__()
 
     def _trial_with_cv(self, config):
-        estimator = self.pipeline_blueprint()
+        estimator = self.pipeline_blueprint(random_state=self.random_state)
 
         config_called = {
-            k: call_component_if_needed(v, return_prefix_mixin=True)
+            k: call_component_if_needed(
+                v, random_state=self.random_state, return_prefix_mixin=True
+            )
             for k, v in config.items()
         }
 
@@ -173,7 +175,6 @@ class TPETuner(Tuner):
             for k, v in self.pipeline_blueprint.get_all_distributions().items()
         }
         default_grid = list(ParameterGrid(default_grid))
-        #print(default_grid)
 
         time_start = time()
         with ray_context():
@@ -185,9 +186,9 @@ class TPETuner(Tuner):
                     mode="max",
                     points_to_evaluate=default_grid,
                 ),
-                #num_samples = 10,
+                # num_samples = 10,
                 num_samples=50 + len(default_grid),
-                verbose=2,
+                verbose=1,
                 reuse_actors=True,
                 fail_fast=True,
             )
