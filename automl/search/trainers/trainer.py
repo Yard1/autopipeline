@@ -6,8 +6,8 @@ import pandas as pd
 from collections import defaultdict
 
 from ..tuners.tuner import Tuner
-from ..tuners.TPETuner import TPETuner
-from ..utils import create_pipeline_blueprint
+from ..tuners.TPETuner import OptunaTPETuner
+from ..blueprints.pipeline import create_pipeline_blueprint
 from ..stage import AutoMLStage
 from ...components.component import ComponentLevel, ComponentConfig
 from ...problems.problem_type import ProblemType
@@ -24,7 +24,7 @@ class Trainer:
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
-        tuner: Tuner = TPETuner,
+        tuner: Tuner = OptunaTPETuner,
         random_state=None,
     ) -> None:
         self.problem_type = problem_type
@@ -52,3 +52,5 @@ class Trainer:
         )
 
         self.tuner_.fit(X, y)
+
+        return self

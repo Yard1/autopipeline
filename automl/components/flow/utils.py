@@ -23,6 +23,8 @@ def append_components_name_if_possible(name: str, flow: Flow) -> str:
 def recursively_remove_invalid_components(
     component, pipeline_config: ComponentConfig, current_stage: AutoMLStage
 ):
+    if isinstance(component, CategoricalDistribution):
+        component = component.values
     if isinstance(component, Iterable):
         for subcomponent in component:
             recursively_remove_invalid_components(
@@ -40,8 +42,10 @@ def recursively_remove_invalid_components(
 def get_single_component_from_iterable(
     component, pipeline_config: ComponentConfig, current_stage: AutoMLStage
 ):
+    if isinstance(component, CategoricalDistribution):
+        component = component.values
     if isinstance(component, Iterable):
-        return next(
+        component = next(
             y
             for y in sorted(component, key=lambda x: x._component_level)
             if y.is_component_valid(config=pipeline_config, stage=current_stage)
@@ -52,6 +56,8 @@ def get_single_component_from_iterable(
 def is_component_valid_iterable(
     component, pipeline_config: ComponentConfig, current_stage: AutoMLStage
 ):
+    if isinstance(component, CategoricalDistribution):
+        component = component.values
     if isinstance(component, Iterable):
         return any(
             x.is_component_valid(config=pipeline_config, stage=current_stage)

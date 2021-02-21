@@ -18,6 +18,13 @@ class Flow(Transformer):
     def components(self, x):
         self.parameters[self.components_name] = x
 
+    def get_default_components_configuration(
+        self,
+        pipeline_config: ComponentConfig = None,
+        current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+    ):
+        raise NotImplementedError()
+
     def remove_invalid_components(
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):

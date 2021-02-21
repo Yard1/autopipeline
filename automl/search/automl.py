@@ -10,7 +10,6 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 
 from .trainers.trainer import Trainer
-from .utils import create_pipeline_blueprint
 from ..components import DataType
 from ..problems import ProblemType
 from ..components import PrepareDataFrame, clean_df, LabelEncoder

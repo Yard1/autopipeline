@@ -20,21 +20,17 @@ from ray.tune.utils.util import unflatten_dict
 import optuna as ot
 from optuna.samplers import BaseSampler
 
-from sklearn.base import clone
-from sklearn.model_selection import cross_validate
-
-from .tuner import Tuner
+from .tuner import RayTuneTuner
 from .utils import ray_context
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
-from ..utils import call_component_if_needed
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def get_optuna_dist(ot_trial, value, label, use_default: bool = False):
+def get_optuna_trial_suggestion(ot_trial, value, label, use_default: bool = False):
     if use_default:
         return value.default
     fn, args, kwargs = value.get_optuna(label)
@@ -78,7 +74,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         spec = copy(spec)
         config = {}
         estimator_name, estimators_distributon = spec.get_estimator_distribution()
-        estimator = get_optuna_dist(
+        estimator = get_optuna_trial_suggestion(
             ot_trial, estimators_distributon, estimator_name, use_default=use_default
         )
         spec.remove_invalid_components(
@@ -88,14 +84,18 @@ class ConditionalOptunaSearch(OptunaSearch):
         config[estimator_name] = estimator
         preprocessors_grid = spec.get_preprocessor_distribution()
         for k, v in preprocessors_grid.items():
-            config[k] = get_optuna_dist(ot_trial, v, k, use_default=use_default)
+            config[k] = get_optuna_trial_suggestion(
+                ot_trial, v, k, use_default=use_default
+            )
 
         hyperparams = {}
 
         for k, v in config.items():
             for k2, v2 in v.get_tuning_grid().items():
                 name = f"{k}__{v.prefix}_{k2}"
-                choice = get_optuna_dist(ot_trial, v2, name, use_default=use_default)
+                choice = get_optuna_trial_suggestion(
+                    ot_trial, v2, name, use_default=use_default
+                )
                 hyperparams[name] = choice
             config[k] = v
 
@@ -123,62 +123,48 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         if self._points_to_evaluate:
             params = self._points_to_evaluate.pop(0)
-            hyperparams = {}
-            for k, v in params.items():
-                for k2, v2 in v.get_tuning_grid().items():
-                    name = f"{k}__{v.prefix}_{k2}"
-                    hyperparams[name] = v2.default
-            params = {**params, **hyperparams}
         else:
             # getattr will fetch the trial.suggest_ function on Optuna trials
             params = self._fetch_params(ot_trial, self._space)
         return unflatten_dict(params)
 
 
-class TPETuner(Tuner):
+class OptunaTPETuner(RayTuneTuner):
     def __init__(self, pipeline_blueprint, random_state) -> None:
         self.pipeline_blueprint = pipeline_blueprint
         self.random_state = random_state
         super().__init__()
 
-    def _trial_with_cv(self, config):
-        estimator = self.pipeline_blueprint(random_state=self.random_state)
+    def _get_single_default_hyperparams(self, components):
+        hyperparams = {}
+        for k, v in components.items():
+            for k2, v2 in v.get_tuning_grid().items():
+                name = f"{k}__{v.prefix}_{k2}"
+                hyperparams[name] = v2.default
+        return {**components, **hyperparams}
 
-        config_called = {
-            k: call_component_if_needed(
-                v, random_state=self.random_state, return_prefix_mixin=True
-            )
-            for k, v in config.items()
+    def _get_default_components(self, pipeline_blueprint) -> dict:
+        default_grid = {
+            k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
         }
-
-        estimator.set_params(**config_called)
-
-        scores = cross_validate(
-            estimator,
-            self.X_,
-            self.y_,
-            # cv=self.cv,
-            # error_score=self.error_score,
-            # fit_params=self.fit_params,
-            # groups=self.groups,
-            # return_train_score=self.return_train_score,
-            # scoring=self.scoring,
-        )
-
-        tune.report(mean_test_score=np.mean(scores["test_score"]))
+        return [
+            self._get_single_default_hyperparams(components)
+            for components in ParameterGrid(default_grid)
+        ]
 
     def _search(self, X, y):
         self.X_ = X
         self.y_ = y
-        default_grid = {
-            k: v.values
-            for k, v in self.pipeline_blueprint.get_all_distributions().items()
-        }
-        default_grid = list(ParameterGrid(default_grid))
+        default_grid = self._get_default_components(self.pipeline_blueprint)
+        preset_configurations = [
+            config
+            for config in self.pipeline_blueprint.preset_configurations
+            if config not in default_grid
+        ]
+        default_grid += preset_configurations
 
-        time_start = time()
         with ray_context():
-            analysis = tune.run(
+            self.analysis_ = tune.run(
                 self._trial_with_cv,
                 search_alg=ConditionalOptunaSearch(
                     space=self.pipeline_blueprint,
@@ -186,12 +172,16 @@ class TPETuner(Tuner):
                     mode="max",
                     points_to_evaluate=default_grid,
                 ),
-                # num_samples = 10,
-                num_samples=50 + len(default_grid),
+                metric="mean_test_score",
+                mode="max",
+                num_samples=10,
+                # num_samples=50 + len(default_grid),
                 verbose=1,
                 reuse_actors=True,
                 fail_fast=True,
             )
+
+        return self
 
     def fit(self, X, y):
         return self._search(X, y)

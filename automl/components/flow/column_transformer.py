@@ -50,14 +50,11 @@ class ColumnTransformer(Flow):
     def components_name(self) -> str:
         return "transformers"
 
-    def __call__(
+    def get_default_components_configuration(
         self,
         pipeline_config: ComponentConfig = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
-        random_state=None,
-        return_prefix_mixin: bool = False,
     ):
-        params = deepcopy(self.final_parameters)
         transformers = [
             (
                 name,
@@ -65,7 +62,34 @@ class ColumnTransformer(Flow):
                     transformer,
                     pipeline_config=pipeline_config,
                     current_stage=current_stage,
-                )(
+                ),
+                columns,
+            )
+            for name, transformer, columns in self.components
+            if is_component_valid_iterable(
+                transformer,
+                pipeline_config=pipeline_config,
+                current_stage=current_stage,
+            )
+        ]
+        return transformers
+
+    def __call__(
+        self,
+        pipeline_config: ComponentConfig = None,
+        current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
+        random_state=None,
+        return_prefix_mixin: bool = False,
+    ):
+        params = self.final_parameters.copy()
+        transformers = self.get_default_components_configuration(
+            pipeline_config=pipeline_config,
+            current_stage=current_stage,
+        )
+        transformers = [
+            (
+                name,
+                component(
                     pipeline_config=pipeline_config,
                     current_stage=current_stage,
                     random_state=random_state,
@@ -73,12 +97,7 @@ class ColumnTransformer(Flow):
                 ),
                 columns,
             )
-            for name, transformer, columns in params["transformers"]
-            if is_component_valid_iterable(
-                transformer,
-                pipeline_config=pipeline_config,
-                current_stage=current_stage,
-            )
+            for name, component, columns in transformers
         ]
         params["transformers"] = transformers
 
