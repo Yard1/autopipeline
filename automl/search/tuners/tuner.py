@@ -18,8 +18,8 @@ class Tuner:
 
 def remove_component_suffix(key: str):
     if key[-1] == Component._automl_id_sign:
-        suffix_idx = key.rfind(
-            f"_{Component._automl_id_sign}"
+        suffix_idx = key[:-1].rfind(
+            Component._automl_id_sign
         )
         if suffix_idx >= 0:
             return key[:suffix_idx]

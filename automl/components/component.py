@@ -44,7 +44,7 @@ class Component(ABC):
     }
     _component_level = ComponentLevel.COMMON
 
-    _automl_id_sign = "$"
+    _automl_id_sign = "|"
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters
@@ -82,7 +82,7 @@ class Component(ABC):
         return f"{self._automl_id_sign}{self.__class__.__name__}{self._automl_id_sign}"
 
     def get_hyperparameter_key_suffix(self, prefix, hyperparam_name):
-        return f"{prefix}__{hyperparam_name}_{self.automl_id}"
+        return f"{prefix}__{hyperparam_name}{self.automl_id}"
 
     def __repr__(self) -> str:
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
