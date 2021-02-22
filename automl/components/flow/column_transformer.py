@@ -79,7 +79,6 @@ class ColumnTransformer(Flow):
         pipeline_config: ComponentConfig = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
         random_state=None,
-        return_prefix_mixin: bool = False,
     ):
         params = self.final_parameters.copy()
         transformers = self.get_default_components_configuration(
@@ -93,7 +92,6 @@ class ColumnTransformer(Flow):
                     pipeline_config=pipeline_config,
                     current_stage=current_stage,
                     random_state=random_state,
-                    return_prefix_mixin=return_prefix_mixin,
                 ),
                 columns,
             )

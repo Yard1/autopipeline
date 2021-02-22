@@ -58,7 +58,6 @@ class Pipeline(Flow):
         pipeline_config: ComponentConfig = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
         random_state=None,
-        return_prefix_mixin: bool = False,
     ):
         params = self.final_parameters.copy()
         steps = self.get_default_components_configuration(
@@ -72,7 +71,6 @@ class Pipeline(Flow):
                     pipeline_config=pipeline_config,
                     current_stage=current_stage,
                     random_state=random_state,
-                    return_prefix_mixin=return_prefix_mixin,
                 ),
             )
             for name, component in steps
@@ -177,7 +175,9 @@ class TopPipeline(Pipeline):
 
                 parameters = {**default_hyperparameters, **parameters}
                 parameters = {
-                    f"{name}__{component.prefix}_{parameter_name}": parameter
+                    component.get_hyperparameter_key_suffix(
+                        name, parameter_name
+                    ): parameter
                     for parameter_name, parameter in parameters.items()
                 }
                 hyperparams = {**hyperparams, **parameters}

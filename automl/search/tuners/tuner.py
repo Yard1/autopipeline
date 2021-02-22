@@ -7,6 +7,8 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 
 from ..utils import call_component_if_needed
+from ...components import Component
+from ...utils.string import removesuffix
 
 
 class Tuner:
@@ -14,13 +16,23 @@ class Tuner:
         pass
 
 
+def remove_component_suffix(key: str):
+    if key[-1] == Component._automl_id_sign:
+        suffix_idx = key.rfind(
+            f"_{Component._automl_id_sign}"
+        )
+        if suffix_idx >= 0:
+            return key[:suffix_idx]
+    return key
+
+
 class RayTuneTuner(Tuner):
     def _trial_with_cv(self, config, checkpoint_dir=None):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
         config_called = {
-            k: call_component_if_needed(
-                v, random_state=self.random_state, return_prefix_mixin=True
+            remove_component_suffix(k): call_component_if_needed(
+                v, random_state=self.random_state
             )
             for k, v in config.items()
         }
@@ -33,7 +45,7 @@ class RayTuneTuner(Tuner):
                     base_cv=self.cv,
                     fraction=fraction,
                     subsample_test=True,
-                    random_state=self.random_state
+                    random_state=self.random_state,
                 )
             else:
                 subsample_cv = self.cv

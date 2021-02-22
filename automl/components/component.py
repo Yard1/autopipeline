@@ -3,7 +3,6 @@ from typing import Optional
 from enum import IntEnum
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
-from .compatibility.mixin import PrefixParamsMixin
 
 
 class ComponentLevel(IntEnum):
@@ -31,7 +30,6 @@ class ComponentConfig:
 
 class Component(ABC):
     _component_class = None
-    _component_class_prefix = None
 
     _default_parameters = {}
 
@@ -46,6 +44,8 @@ class Component(ABC):
     }
     _component_level = ComponentLevel.COMMON
 
+    _automl_id_sign = "$"
+
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters
         self.tuning_grid = tuning_grid or {}
@@ -57,29 +57,17 @@ class Component(ABC):
                 )
             self._default_tuning_grid[k].default = self._default_parameters[k]
 
-        try:
-            self._component_class_prefix = type(
-                self._component_class.__name__,
-                (PrefixParamsMixin, self._component_class),
-                {"_automl_prefix": self.prefix},
-            )
-        except AttributeError:
-            self._component_class_prefix = self._component_class
-
     def __call__(
         self,
         pipeline_config: dict = None,
         current_stage: AutoMLStage = AutoMLStage.PREPROCESSING,
         random_state=None,
-        return_prefix_mixin: bool = False,
     ):
         params = self.final_parameters
 
         if "random_state" in self._default_parameters:
             params["random_state"] = random_state
 
-        if return_prefix_mixin:
-            return self._component_class_prefix(**params)
         return self._component_class(**params)
 
     @property
@@ -90,8 +78,11 @@ class Component(ABC):
         }
 
     @property
-    def prefix(self):
-        return self.__class__.__name__
+    def automl_id(self):
+        return f"{self._automl_id_sign}{self.__class__.__name__}{self._automl_id_sign}"
+
+    def get_hyperparameter_key_suffix(self, prefix, hyperparam_name):
+        return f"{prefix}__{hyperparam_name}_{self.automl_id}"
 
     def __repr__(self) -> str:
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]

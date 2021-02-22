@@ -98,7 +98,7 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         for k, v in config.items():
             for k2, v2 in v.get_tuning_grid().items():
-                name = f"{k}__{v.prefix}_{k2}"
+                name = v.get_hyperparameter_key_suffix(k, k2)
                 choice = get_optuna_trial_suggestion(
                     ot_trial, v2, name, use_default=use_default
                 )
@@ -159,7 +159,7 @@ class OptunaTPETuner(RayTuneTuner):
         hyperparams = {}
         for k, v in components.items():
             for k2, v2 in v.get_tuning_grid().items():
-                name = f"{k}__{v.prefix}_{k2}"
+                name = v.get_hyperparameter_key_suffix(k, k2)
                 hyperparams[name] = v2.default
         return {**components, **hyperparams}
 
