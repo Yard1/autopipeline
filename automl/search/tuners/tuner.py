@@ -11,14 +11,14 @@ from ...components import Component
 from ...utils.string import removesuffix
 
 
-class Tuner:
-    def __init__(self) -> None:
-        pass
-
-
 def remove_component_suffix(key: str):
     split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
     return "__".join(split_key)
+
+
+class Tuner:
+    def __init__(self) -> None:
+        pass
 
 
 class RayTuneTuner(Tuner):
@@ -44,12 +44,14 @@ class RayTuneTuner(Tuner):
                 )
             else:
                 subsample_cv = self.cv
+
             scores = cross_validate(
                 estimator,
                 self.X_,
                 self.y_,
                 cv=subsample_cv,
-                # error_score=self.error_score,
+                groups=self.groups_,
+                error_score="raise",
                 # fit_params=self.fit_params,
                 # groups=self.groups,
                 # return_train_score=self.return_train_score,

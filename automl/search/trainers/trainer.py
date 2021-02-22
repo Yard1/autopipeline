@@ -11,6 +11,7 @@ from ..tuners.tuner import Tuner
 from ..tuners.TPETuner import OptunaTPETuner
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..stage import AutoMLStage
+from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
 from ...problems.problem_type import ProblemType
 from ...utils import validate_type
@@ -41,26 +42,16 @@ class Trainer:
 
     def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
         validate_type(cv, "cv", (BaseCrossValidator, int, None))
-        if cv is None:
-            cv = 5
-        if isinstance(cv, BaseCrossValidator):
-            return cv
-        if isinstance(cv, int):
-            if problem_type == ProblemType.REGRESSION:
-                return KFold(n_splits=cv)
-            else:
-                return StratifiedKFold(n_splits=cv)
+        return get_cv_for_problem_type(problem_type, n_splits=cv)
 
-    def fit(self, X, y):
-        missing_values = X.isnull().values.any()
-        if missing_values:
-            logger.info("Found at least one missing value in X, imputers will be used")
+    def fit(self, X, y, groups=None):
         self.pipeline_blueprint_ = create_pipeline_blueprint(
             problem_type=self.problem_type,
             categorical_columns=self.categorical_columns,
             numeric_columns=self.numeric_columns,
-            missing_values=missing_values,
             level=self.level,
+            X=X,
+            y=y,
         )
 
         self.cv_ = self._get_cv(self.problem_type, self.cv)
@@ -72,6 +63,6 @@ class Trainer:
             cv=self.cv_,
         )
 
-        self.tuner_.fit(X, y)
+        self.tuner_.fit(X, y, groups=groups)
 
         return self

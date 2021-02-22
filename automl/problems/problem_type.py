@@ -10,7 +10,9 @@ class ProblemType(Enum):
         return self in {self.BINARY, self.MULTICLASS}
 
     @staticmethod
-    def translate(problem_type: str):
+    def translate(problem_type: str) -> "ProblemType":
+        if isinstance(problem_type, ProblemType):
+            return problem_type
         if problem_type == "regression":
             return ProblemType.REGRESSION
         if problem_type in ("binary", "binary_classification"):

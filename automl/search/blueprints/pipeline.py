@@ -18,22 +18,19 @@ from automl.components import estimators
 
 def create_pipeline_blueprint(
     problem_type: ProblemType,
+    X = None,
+    y = None,
     categorical_columns: Optional[list] = None,
     numeric_columns: Optional[list] = None,
-    missing_values: bool = True,
     level: ComponentLevel = ComponentLevel.COMMON,
 ) -> TopPipeline:
-    if categorical_columns is None:
-        categorical_columns = make_column_selector(dtype_include="category")
-
-    if numeric_columns is None:
-        numeric_columns = make_column_selector(dtype_include=[int, float])
-
     validate_type(problem_type, "problem_type", ProblemType)
     validate_type(level, "level", ComponentLevel)
 
     # steps in [] are tunable
 
+    passthrough = {"Passthrough": Passthrough()}
+    imbalance = {"AutoSMOTE": AutoSMOTE()}
     numeric_imputers = {
         "SimpleNumericImputer": SimpleNumericImputer(),
     }
@@ -51,6 +48,8 @@ def create_pipeline_blueprint(
         "LogisticRegression": LogisticRegression(),
     }
     components = {
+        **passthrough,
+        **imbalance,
         **numeric_imputers,
         **scalers_normalizers,
         **categorical_imputers,
@@ -59,15 +58,19 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
+        ("Imbalance", list(imbalance.values()) + [components["Passthrough"]]),
         (
-            "Preprocessor",
+            "ColumnTransformer",
             ColumnTransformer(
                 transformers=[
                     (
                         "Categorical",
                         Pipeline(
                             steps=[
-                                ("Imputer", list(numeric_imputers.values())),
+                                (
+                                    "Imputer",
+                                    list(numeric_imputers.values()),
+                                ),
                                 (
                                     "CategoricalEncoder",
                                     list(categorical_encoders.values()),
@@ -80,7 +83,10 @@ def create_pipeline_blueprint(
                         "Numeric",
                         Pipeline(
                             steps=[
-                                ("Imputer", list(categorical_imputers.values())),
+                                (
+                                    "Imputer",
+                                    list(categorical_imputers.values()),
+                                ),
                                 (
                                     "ScalerNormalizer",
                                     list(scalers_normalizers.values()),
@@ -99,36 +105,48 @@ def create_pipeline_blueprint(
     ]
 
     d = {
-        "Preprocessor__Categorical__Imputer": (
+        "Preprocessor__ColumnTransformer__Categorical__Imputer": (
             components["SimpleCategoricalImputer"],
             {},
         ),
-        "Preprocessor__Categorical__CategoricalEncoder": (
+        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
             components["OneHotEncoder"],
             {},
         ),
-        "Preprocessor__Numeric__Imputers": (
+        "Preprocessor__ColumnTransformer__Numeric__Imputers": (
             components["SimpleNumericImputer"],
             {},
         ),
-        "Preprocessor__Numeric__ScalerNormalizer": (components["StandardScaler"], {}),
+        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
+            components["StandardScaler"],
+            {},
+        ),
         "Estimator": (components["LogisticRegression"], {"C": 4.0}),
     }
     d2 = {
-        "Preprocessor__Categorical__CategoricalEncoder": (
+        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
             components["OneHotEncoder"],
             {},
         ),
-        "Preprocessor__Numeric__ScalerNormalizer": (components["StandardScaler"], {}),
+        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
+            components["StandardScaler"],
+            {},
+        ),
         "Estimator": (components["LogisticRegression"], {"C": 1.0}),
     }
 
-    pipeline = TopPipeline(steps=pipeline_steps, preset_configurations=[d, d2])
+    pipeline = TopPipeline(
+        steps=pipeline_steps,
+        # preset_configurations=[d, d2]
+    )
     pipeline.remove_invalid_components(
         pipeline_config=ComponentConfig(
             level=level,
             problem_type=problem_type,
-            missing_values=missing_values,
+            categorical_columns=categorical_columns,
+            numeric_columns=numeric_columns,
+            X=X,
+            y=y,
         ),
         current_stage=AutoMLStage.PREPROCESSING,
     )

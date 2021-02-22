@@ -15,7 +15,7 @@ from sklearn.preprocessing._label import _num_samples
 
 class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
     def get_dtype(self, r, X, y=None):
-        return pd.CategoricalDtype(self.indices_.values)
+        return pd.CategoricalDtype(self.indices_.values())
 
     def fit(self, y):
         """Fit label encoder

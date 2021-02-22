@@ -1,7 +1,14 @@
 from typing import List, Optional
 
 from copy import copy
-from sklearn.pipeline import Pipeline as _Pipeline
+from sklearn.base import clone
+from imblearn.pipeline import Pipeline as _ImblearnPipeline
+from sklearn.pipeline import Pipeline as _Pipeline, _fit_transform_one
+from sklearn.utils import (
+    Bunch,
+    _print_elapsed_time,
+)
+from sklearn.utils.validation import check_memory
 
 from ..flow import Flow
 from ..utils import (
@@ -17,13 +24,138 @@ from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ....search.distributions import CategoricalDistribution
 
-
 class BasePipeline(_Pipeline):
-    pass
+    def _fit(self, X, y=None, **fit_params_steps):
+        # shallow copy of steps - this should really be steps_
+        self.steps = list(self.steps)
+        self._validate_steps()
+        # Setup the memory
+        memory = check_memory(self.memory)
 
+        fit_transform_one_cached = memory.cache(_fit_transform_one)
 
+        for (step_idx,
+             name,
+             transformer) in self._iter(with_final=False,
+                                        filter_passthrough=False):
+            if (transformer is None or transformer == 'passthrough'):
+                with _print_elapsed_time('Pipeline',
+                                         self._log_message(step_idx)):
+                    continue
+
+            if hasattr(memory, 'location'):
+                # joblib >= 0.12
+                if memory.location is None:
+                    # we do not clone when caching is disabled to
+                    # preserve backward compatibility
+                    cloned_transformer = transformer
+                else:
+                    cloned_transformer = clone(transformer)
+            elif hasattr(memory, 'cachedir'):
+                # joblib < 0.11
+                if memory.cachedir is None:
+                    # we do not clone when caching is disabled to
+                    # preserve backward compatibility
+                    cloned_transformer = transformer
+                else:
+                    cloned_transformer = clone(transformer)
+            else:
+                cloned_transformer = clone(transformer)
+            # Fit or load from cache the current transformer
+            result = fit_transform_one_cached(
+                cloned_transformer, X, y, None,
+                message_clsname='Pipeline',
+                message=self._log_message(step_idx),
+                **fit_params_steps[name])
+            if len(result) == 3:
+                X, y, fitted_transformer = result
+            else:
+                X, fitted_transformer = result
+            # Replace the transformer of the step with the fitted
+            # transformer. This is necessary when loading the transformer
+            # from the cache.
+            self.steps[step_idx] = (name, fitted_transformer)
+        return X, y
+
+    def fit(self, X, y=None, **fit_params):
+        """Fit the model
+
+        Fit all the transforms one after the other and transform the
+        data, then fit the transformed data using the final estimator.
+
+        Parameters
+        ----------
+        X : iterable
+            Training data. Must fulfill input requirements of first step of the
+            pipeline.
+
+        y : iterable, default=None
+            Training targets. Must fulfill label requirements for all steps of
+            the pipeline.
+
+        **fit_params : dict of string -> object
+            Parameters passed to the ``fit`` method of each step, where
+            each parameter name is prefixed such that parameter ``p`` for step
+            ``s`` has key ``s__p``.
+
+        Returns
+        -------
+        self : Pipeline
+            This estimator
+        """
+        fit_params_steps = self._check_fit_params(**fit_params)
+        Xt, y = self._fit(X, y, **fit_params_steps)
+        with _print_elapsed_time('Pipeline',
+                                 self._log_message(len(self.steps) - 1)):
+            if self._final_estimator != 'passthrough':
+                fit_params_last_step = fit_params_steps[self.steps[-1][0]]
+                self._final_estimator.fit(Xt, y, **fit_params_last_step)
+
+        return self
+
+    def fit_transform(self, X, y=None, **fit_params):
+        """Fit the model and transform with the final estimator
+
+        Fits all the transforms one after the other and transforms the
+        data, then uses fit_transform on transformed data with the final
+        estimator.
+
+        Parameters
+        ----------
+        X : iterable
+            Training data. Must fulfill input requirements of first step of the
+            pipeline.
+
+        y : iterable, default=None
+            Training targets. Must fulfill label requirements for all steps of
+            the pipeline.
+
+        **fit_params : dict of string -> object
+            Parameters passed to the ``fit`` method of each step, where
+            each parameter name is prefixed such that parameter ``p`` for step
+            ``s`` has key ``s__p``.
+
+        Returns
+        -------
+        Xt : array-like of shape  (n_samples, n_transformed_features)
+            Transformed samples
+        """
+        fit_params_steps = self._check_fit_params(**fit_params)
+        Xt, y = self._fit(X, y, **fit_params_steps)
+
+        last_step = self._final_estimator
+        with _print_elapsed_time('Pipeline',
+                                 self._log_message(len(self.steps) - 1)):
+            if last_step == 'passthrough':
+                return Xt
+            fit_params_last_step = fit_params_steps[self.steps[-1][0]]
+            if hasattr(last_step, 'fit_transform'):
+                return last_step.fit_transform(Xt, y, **fit_params_last_step)
+            else:
+                return last_step.fit(Xt, y,
+                                     **fit_params_last_step).transform(Xt)
 class Pipeline(Flow):
-    _component_class = BasePipeline
+    _component_class = _ImblearnPipeline
 
     _default_parameters = {
         "memory": None,
@@ -201,6 +333,4 @@ class TopPipeline(Pipeline):
         self.tuning_grid = tuning_grid or {}
         self.preset_configurations = preset_configurations or []
         assert "steps" in self.parameters
-        assert len(self.parameters["steps"]) == 2
         assert "Estimator" == self.parameters["steps"][-1][0]
-        assert "Preprocessor" == self.parameters["steps"][0][0]

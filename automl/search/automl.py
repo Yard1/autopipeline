@@ -1,3 +1,4 @@
+from automl.components.component import ComponentLevel
 from automl.utils.logging import make_header
 from typing import Any, Optional, Union
 
@@ -7,9 +8,10 @@ from pandas.core.algorithms import isin
 from pandas.api.types import is_numeric_dtype, is_integer_dtype, is_float_dtype
 
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, BaseCrossValidator
 
 from .trainers.trainer import Trainer
+from .cv import get_cv_for_problem_type
 from ..components import DataType
 from ..problems import ProblemType
 from ..components import PrepareDataFrame, clean_df, LabelEncoder
@@ -20,17 +22,22 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class AutoML(BaseEstimator):
     def __init__(
         self,
         problem_type: Optional[Union[str, ProblemType]] = None,
         validation_size: float = 0.2,
-        random_state: Optional[int] = None, # TODO: support other random states
+        cv: Union[int, BaseCrossValidator] = 5,
+        level: Union[str, int, ComponentLevel] = ComponentLevel.COMMON,
+        random_state: Optional[int] = None,  # TODO: support other random states
         float_dtype: type = np.float32,
         int_dtype: Optional[type] = None,
     ) -> None:
-        self.validation_size = validation_size
         self.problem_type = problem_type
+        self.validation_size = validation_size
+        self.level = level
+        self.cv = cv
         self.random_state = random_state
         self.float_dtype = float_dtype
         self.int_dtype = int_dtype
@@ -39,8 +46,12 @@ class AutoML(BaseEstimator):
         self._validate()
 
     def _validate(self):
+        validate_type(self.level, "level", (str, int, ComponentLevel))
         validate_type(self.problem_type, "problem_type", (str, ProblemType, type(None)))
+        validate_type(self.cv, "cv", (int, BaseCrossValidator))
         validate_type(self.validation_size, "validation_size", float)
+        if isinstance(self.cv, int) and self.cv < 2:
+            raise ValueError(f"If cv is an int, it must be bigger than 2. Got {self.cv}.")
         if self.validation_size < 0 or self.validation_size > 0.9:
             raise ValueError(f"validation_size must be in range (0.0, 0.9)")
         if not is_float_dtype(self.float_dtype):
@@ -56,7 +67,9 @@ class AutoML(BaseEstimator):
         y_reset_index = y.reset_index(drop=True)
         nan_ilocs = y_reset_index[pd.isnull(y_reset_index)].index
         if len(nan_ilocs) > 0:
-            logger.warn(f"Dropping {len(nan_ilocs)} y rows with NaNs: {list(nan_ilocs)}")
+            logger.warn(
+                f"Dropping {len(nan_ilocs)} y rows with NaNs: {list(nan_ilocs)}"
+            )
             X.drop(X.index[nan_ilocs], inplace=True)
 
     def _translate_problem_type(self, problem_type) -> ProblemType:
@@ -122,9 +135,31 @@ class AutoML(BaseEstimator):
         return determined_problem_type, y
 
     def _make_validation_split(self, X, y):
-        return train_test_split(X, y, test_size=self.validation_size, random_state=self.random_seed_, stratify=y if self.problem_type_.is_classification() else None)
+        return train_test_split(
+            X,
+            y,
+            test_size=self.validation_size,
+            random_state=self.random_seed_,
+            stratify=y if self.problem_type_.is_classification() else None,
+        )
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, X_validation:Optional[pd.DataFrame]=None, y_validation:Optional[pd.Series]=None):
+    def _shuffle_data(self, X, y):
+        X, _, y, _ = train_test_split(
+            X,
+            y,
+            test_size=0,
+            random_state=self.random_seed_,
+            stratify=y if self.problem_type_.is_classification() else None,
+        )
+        return X, y
+
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        X_validation: Optional[pd.DataFrame] = None,
+        y_validation: Optional[pd.Series] = None,
+    ):
         logger.info(make_header("AutoML Fit"))
 
         self._validate()
@@ -144,6 +179,8 @@ class AutoML(BaseEstimator):
         self.random_seed_ = self.random_state or np.random.randint(0, 10000)
 
         problem_type = self._translate_problem_type(self.problem_type)
+
+        self.level_ = ComponentLevel.translate(self.level)
 
         X = X.copy()
         y = y.copy()
@@ -168,6 +205,8 @@ class AutoML(BaseEstimator):
 
         self.problem_type_, y = self._determine_problem_type(problem_type, y)
 
+        self.cv_ = get_cv_for_problem_type(self.problem_type_, self.cv)
+
         y.index = list(X.index)
 
         self.y_steps_.append(y_validator)
@@ -183,19 +222,35 @@ class AutoML(BaseEstimator):
             logger.info("Using predefined validation sets")
             self.X_validation_ = X_validator.transform(X_validation)
             self.y_validation_ = y_validator.transform(y_validation)
+            X, y = self._shuffle_data(X, y)
         elif X_validation is not None or y_validation is not None:
-            raise ValueError(f"When passing either X_validation or y_validation, the other parameter must not be None as well, got X_validation: {type(X_validation)}, y_validation: {type(y_validation)}")
+            raise ValueError(
+                f"When passing either X_validation or y_validation, the other parameter must not be None as well, got X_validation: {type(X_validation)}, y_validation: {type(y_validation)}"
+            )
         elif self.validation_size <= 0:
             logger.info("validation_size <= 0, no validation will be performed")
             self.X_validation_ = None
             self.y_validation_ = None
+            X, y = self._shuffle_data(X, y)
         else:
-            logger.info(f"Splitting data into training and validation sets ({1-(self.validation_size*100)}-{(self.validation_size*100)})")
-            X, self.X_validation_, y, self.y_validation_ = self._make_validation_split(X, y)
+            logger.info(
+                f"Splitting data into training and validation sets ({1-(self.validation_size*100)}-{(self.validation_size*100)})"
+            )
+            X, self.X_validation_, y, self.y_validation_ = self._make_validation_split(
+                X, y
+            )
+
+        categorical_columns = X.dtypes.apply(lambda x: DataType.is_categorical(x))
+        numeric_columns = list(categorical_columns[~categorical_columns].index)
+        categorical_columns = list(categorical_columns[categorical_columns].index)
 
         self.trainer_ = Trainer(
             problem_type=self.problem_type_,
-            random_state=self.random_seed_
+            random_state=self.random_seed_,
+            level=self.level_,
+            cv=self.cv_,
+            categorical_columns=categorical_columns,
+            numeric_columns=numeric_columns
         )
 
         self.trainer_.fit(X, y)

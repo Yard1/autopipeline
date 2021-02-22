@@ -30,7 +30,7 @@ class SimpleNumericImputer(Transformer):
         if config is None:
             return True
         super_check = super().is_component_valid(config, stage)
-        return super_check and (config.missing_values is None or config.missing_values)
+        return super_check and (config.X is None or config.X.isnull().values.any())
 
 
 class SimpleCategoricalImputer(Transformer):
@@ -52,4 +52,4 @@ class SimpleCategoricalImputer(Transformer):
         if config is None:
             return True
         super_check = super().is_component_valid(config, stage)
-        return super_check and (config.missing_values is None or config.missing_values)
+        return super_check and (config.X is None or config.X.isnull().values.any())

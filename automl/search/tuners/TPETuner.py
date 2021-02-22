@@ -22,6 +22,7 @@ from optuna.samplers import BaseSampler
 
 from .tuner import RayTuneTuner
 from .utils import ray_context, split_list_into_chunks
+from ..distributions import CategoricalDistribution
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 def get_optuna_trial_suggestion(ot_trial, value, label, use_default: bool = False):
     if use_default:
         return value.default
+    if isinstance(value, CategoricalDistribution) and len(value.values) <= 1:
+        return value.values[0]
     fn, args, kwargs = value.get_optuna(label)
     return getattr(ot_trial, fn)(*args, **kwargs)
 
@@ -56,7 +59,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._space = space
 
         self._points_to_evaluate = points_to_evaluate
-        n_startup_trials = min(10 - len(points_to_evaluate), 1)
+        n_startup_trials = 10
 
         self._study_name = "optuna"  # Fixed study name for in-memory storage
         self._sampler = sampler or ot.samplers.TPESampler(
@@ -172,19 +175,27 @@ class OptunaTPETuner(RayTuneTuner):
             for components in ParameterGrid(default_grid)
         ]
 
-    def _search(self, X, y):
+    def _search(self, X, y, groups=None):
         self.X_ = X
         self.y_ = y
+        self.groups_ = groups
 
         if self.early_stopping:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_) * 2
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
 
             # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
-            self.early_stopping_fractions_ = 1.0 * np.power(3, -np.linspace(self.early_stopping_splits-1, 0, self.early_stopping_splits))
-            self.early_stopping_fractions_[0] = max(self.early_stopping_fractions_[0], min_dist)
+            self.early_stopping_fractions_ = 1.0 * np.power(
+                3,
+                -np.linspace(
+                    self.early_stopping_splits - 1, 0, self.early_stopping_splits
+                ),
+            )
+            self.early_stopping_fractions_[0] = max(
+                self.early_stopping_fractions_[0], min_dist
+            )
         else:
             self.early_stopping_fractions_ = [1]
 
@@ -202,7 +213,7 @@ class OptunaTPETuner(RayTuneTuner):
                 mode="max",
                 reduction_factor=3,
                 max_t=self.early_stopping_splits,
-                brackets=self.early_stopping_brackets
+                brackets=self.early_stopping_brackets,
             )
             if self.early_stopping
             else None
@@ -219,16 +230,16 @@ class OptunaTPETuner(RayTuneTuner):
                     seed=self.random_state,
                 ),
                 scheduler=scheluder,
-                #metric="mean_test_score",
-                #mode="max",
+                # metric="mean_test_score",
+                # mode="max",
                 #num_samples=10,
                 num_samples=50 + len(default_grid),
-                verbose=1,
+                verbose=2,
                 reuse_actors=True,
                 fail_fast=True,
             )
 
         return self
 
-    def fit(self, X, y):
-        return self._search(X, y)
+    def fit(self, X, y, groups=None):
+        return self._search(X, y, groups=groups)

@@ -3,6 +3,7 @@ import pandas as pd
 from pandas.api.types import is_categorical_dtype
 from ...utils import validate_type
 
+
 def col_categorical_to_int(column):
     if is_categorical_dtype(column.dtype):
         try:
@@ -17,7 +18,7 @@ def categorical_to_int(df):
 
 
 class PandasSeriesTransformerMixin:
-    def fit(self, X, y=None):
+    def fit(self, X, **fit_params):
         if isinstance(X, pd.DataFrame) and X.shape[1] == 1:
             X = X.squeeze(axis=1)
         try:
@@ -26,7 +27,7 @@ class PandasSeriesTransformerMixin:
             self.name_ = None
         validate_type(X, "X", pd.Series)
         try:
-            return super().fit(X.to_numpy(), y=y)
+            return super().fit(X.to_numpy(), **fit_params)
         except TypeError:
             return super().fit(X.to_numpy())
 
@@ -62,7 +63,7 @@ class PandasSeriesTransformerMixin:
 
 
 class PandasDataFrameTransformerMixin:
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, **fit_params):
         if isinstance(X, pd.Series):
             X = pd.DataFrame(X)
         try:
@@ -71,7 +72,7 @@ class PandasDataFrameTransformerMixin:
             self.columns_ = None
         validate_type(X, "X", pd.DataFrame)
         try:
-            return super().fit(categorical_to_int(X).to_numpy(), y=y)
+            return super().fit(categorical_to_int(X).to_numpy(), y=y, **fit_params)
         except TypeError:
             return super().fit(categorical_to_int(X).to_numpy())
 

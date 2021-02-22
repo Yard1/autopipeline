@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Optional
+from typing import Optional, Union
 from enum import IntEnum
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
@@ -11,21 +11,32 @@ class ComponentLevel(IntEnum):
     UNCOMMON = 3
     RARE = 4
 
+    @staticmethod
+    def translate(label: Union[str, int]) -> "ComponentLevel":
+        if isinstance(label, ComponentLevel):
+            return label
+        if label in (1, "NECESSARY", "NECESSARY".lower()):
+            return ComponentLevel.NECESSARY
+        if label in (2, "COMMON", "COMMON".lower()):
+            return ComponentLevel.COMMON
+        if label in (3, "UNCOMMON", "UNCOMMON".lower()):
+            return ComponentLevel.UNCOMMON
+        if label in (4, "RARE", "RARE".lower()):
+            return ComponentLevel.RARE
+        raise ValueError(f"Cannot translate '{label}' to a ComponentLevel object!")
+
 
 class ComponentConfig:
-    def __init__(
-        self,
-        level: Optional[ComponentLevel] = None,
-        problem_type: Optional[ProblemType] = None,
-        missing_values: Optional[bool] = None,
-        estimator: Optional[type] = None,
-        component: Optional[type] = None,
-    ) -> None:
-        self.level = level
-        self.problem_type = problem_type
-        self.missing_values = missing_values
-        self.component = component
-        self.estimator = estimator
+    def __init__(self, **params) -> None:
+        self.params = params
+
+    def __getattr__(self, name: str):
+        try:
+            return self.params[name]
+        except KeyError:
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{name}'"
+            )
 
 
 class Component(ABC):
@@ -44,7 +55,7 @@ class Component(ABC):
     }
     _component_level = ComponentLevel.COMMON
 
-    _automl_id_sign = u"\u200B"
+    _automl_id_sign = "\u200B"
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters

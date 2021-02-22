@@ -9,6 +9,8 @@ class ray_context:
         "ignore_reinit_error": True,
         "configure_logging": False,
         "include_dashboard": False,
+        #"local_mode": True,
+        #"num_cpus": 1,
     }
 
     def __init__(self, **ray_config):
