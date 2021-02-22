@@ -17,13 +17,8 @@ class Tuner:
 
 
 def remove_component_suffix(key: str):
-    if key[-1] == Component._automl_id_sign:
-        suffix_idx = key[:-1].rfind(
-            Component._automl_id_sign
-        )
-        if suffix_idx >= 0:
-            return key[:suffix_idx]
-    return key
+    split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
+    return "__".join(split_key)
 
 
 class RayTuneTuner(Tuner):
