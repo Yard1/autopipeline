@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+import gc
+
 from ray import tune
 
 from sklearn.model_selection import cross_validate
@@ -9,8 +11,10 @@ from sklearn.model_selection._search import ParameterGrid
 
 from .utils import ray_context, split_list_into_chunks
 from ..utils import call_component_if_needed
-from ...components import Component
+from ...components import Component, ComponentConfig
+from ...components.flow.pipeline import TopPipeline
 from ...problems import ProblemType
+from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
 
 
@@ -40,14 +44,32 @@ class Tuner:
                 hyperparams[name] = v2.default
         return {**components, **hyperparams}
 
+    def _are_components_valid(self, components: dict) -> bool:
+        for k, v in components.items():
+            if k == "Estimator":
+                continue
+            if isinstance(v, Component):
+                if not v.is_component_valid(
+                    config=ComponentConfig(estimator=components["Estimator"]),
+                    stage=AutoMLStage.TUNE,
+                ):
+                    return False
+        return True
+
     def _get_default_components(self, pipeline_blueprint) -> dict:
         default_grid = {
             k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
         }
-        return [
+        default_grid_list = [
             self._get_single_default_hyperparams(components)
             for components in ParameterGrid(default_grid)
         ]
+        default_grid_list = [
+            components
+            for components in default_grid_list
+            if self._are_components_valid(components)
+        ]
+        return default_grid_list
 
     def _pre_search(self, X, y, groups=None):
         self.X_ = X
@@ -108,7 +130,7 @@ class RayTuneTuner(Tuner):
 
         estimator.set_params(**config_called)
 
-        for fraction in self.early_stopping_fractions_:
+        for idx, fraction in enumerate(self.early_stopping_fractions_):
             if len(self.early_stopping_fractions_) > 1:
                 subsample_cv = _SubsampleMetaSplitter(
                     base_cv=self.cv,
@@ -132,7 +154,10 @@ class RayTuneTuner(Tuner):
                 # scoring=self.scoring,
             )
 
-            tune.report(mean_test_score=np.mean(scores["test_score"]))
+            tune.report(
+                done=idx + 1 >= len(self.early_stopping_fractions_),
+                mean_test_score=np.mean(scores["test_score"]),
+            )
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
@@ -140,5 +165,6 @@ class RayTuneTuner(Tuner):
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
-        with ray_context():
+        gc.collect()
+        with ray_context(self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)):
             self.analysis_ = tune.run(**tune_kwargs)

@@ -156,6 +156,7 @@ class OptunaTPETuner(RayTuneTuner):
             random_state=random_state,
             **tune_kwargs,
         )
+        self._tune_kwargs["TUNE_GLOBAL_CHECKPOINT_S"] = 10000
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping:

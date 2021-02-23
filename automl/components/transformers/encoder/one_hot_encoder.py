@@ -3,7 +3,8 @@ import pandas as pd
 
 from sklearn.preprocessing import OneHotEncoder as _OneHotEncoder
 
-from ..transformer import Transformer, DataType
+from .encoder import Encoder
+from ..transformer import DataType
 from ...component import ComponentLevel
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
@@ -12,7 +13,9 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
     def get_columns(self, Xt, X, y=None):
         columns = []
         for column, categories in zip(self.columns_, self.categories_):
-            if self.drop == "first" or (self.drop == "if_binary" and len(categories) == 2):
+            if self.drop == "first" or (
+                self.drop == "if_binary" and len(categories) == 2
+            ):
                 categories = categories[1:]
             columns.extend([f"{column}_{category}" for category in categories])
         return columns
@@ -21,8 +24,7 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
         return pd.CategoricalDtype([0, 1])
 
 
-
-class OneHotEncoder(Transformer):
+class OneHotEncoder(Encoder):
     _component_class = PandasOneHotEncoder
     _default_parameters = {
         "categories": "auto",
@@ -31,7 +33,5 @@ class OneHotEncoder(Transformer):
         "dtype": np.int,
         "handle_unknown": "error",
     }
-    _allowed_dtypes = {
-        DataType.CATEGORICAL
-    }
+    _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY

@@ -4,7 +4,8 @@ import pandas as pd
 
 from sklearn.preprocessing import LabelEncoder as _LabelEncoder
 
-from ..transformer import Transformer, DataType
+from .encoder import Encoder
+from ..transformer import DataType
 from ...component import ComponentLevel
 from ...compatibility.pandas import PandasSeriesTransformerMixin
 
@@ -113,7 +114,7 @@ class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
         return {"X_types": ["1dlabels"]}
 
 
-class LabelEncoder(Transformer):
+class LabelEncoder(Encoder):
     _component_class = PandasLabelEncoder
     _allowed_dtypes = {DataType.CATEGORICAL}
     _problem_types = {

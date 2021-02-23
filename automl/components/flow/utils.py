@@ -1,6 +1,6 @@
 from typing import Iterable, Union
 from .flow import Flow
-from ..component import ComponentConfig
+from ..component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
 from ...search.distributions import CategoricalDistribution
 
@@ -26,12 +26,20 @@ def recursively_remove_invalid_components(
     if isinstance(component, CategoricalDistribution):
         component = component.values
     if isinstance(component, Iterable):
-        for subcomponent in component:
+        component = [
             recursively_remove_invalid_components(
                 subcomponent,
                 pipeline_config=pipeline_config,
                 current_stage=current_stage,
             )
+            for subcomponent in component
+            if (
+                not isinstance(subcomponent, Component)
+                or subcomponent.is_component_valid(
+                    config=pipeline_config, stage=current_stage
+                )
+            )
+        ]
     elif isinstance(component, Flow):
         component.remove_invalid_components(
             pipeline_config=pipeline_config, current_stage=current_stage

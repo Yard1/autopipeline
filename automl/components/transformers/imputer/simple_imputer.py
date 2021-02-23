@@ -1,17 +1,17 @@
 from sklearn.impute import SimpleImputer as _SimpleImputer
 
+from .imputer import Imputer
 from ..transformer import Transformer, DataType
-from ...component import ComponentLevel, ComponentConfig
+from ...component import ComponentLevel
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ....search.distributions import CategoricalDistribution
-from ....search.stage import AutoMLStage
 
 
 class PandasSimpleImputer(PandasDataFrameTransformerMixin, _SimpleImputer):
     pass
 
 
-class SimpleNumericImputer(Transformer):
+class SimpleNumericImputer(Imputer):
     _component_class = PandasSimpleImputer
     _default_parameters = {
         "strategy": "mean",
@@ -26,14 +26,8 @@ class SimpleNumericImputer(Transformer):
     _allowed_dtypes = {DataType.NUMERIC}
     _component_level = ComponentLevel.NECESSARY
 
-    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
-        if config is None:
-            return True
-        super_check = super().is_component_valid(config, stage)
-        return super_check and (config.X is None or config.X.isnull().values.any())
 
-
-class SimpleCategoricalImputer(Transformer):
+class SimpleCategoricalImputer(Imputer):
     _component_class = PandasSimpleImputer
     _default_parameters = {
         "strategy": "most_frequent",
@@ -47,9 +41,3 @@ class SimpleCategoricalImputer(Transformer):
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY
-
-    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
-        if config is None:
-            return True
-        super_check = super().is_component_valid(config, stage)
-        return super_check and (config.X is None or config.X.isnull().values.any())

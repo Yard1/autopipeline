@@ -9,6 +9,7 @@ from ...components.transformers import *
 from ...components.estimators import *
 from ...components.flow import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
+from ...components.estimators.tree.tree_estimator import TreeEstimator
 from ...utils import validate_type
 
 from sklearn.compose import make_column_selector
@@ -18,8 +19,8 @@ from automl.components import estimators
 
 def create_pipeline_blueprint(
     problem_type: ProblemType,
-    X = None,
-    y = None,
+    X=None,
+    y=None,
     categorical_columns: Optional[list] = None,
     numeric_columns: Optional[list] = None,
     level: ComponentLevel = ComponentLevel.COMMON,
@@ -29,7 +30,14 @@ def create_pipeline_blueprint(
 
     # steps in [] are tunable
 
-    passthrough = {"Passthrough": Passthrough()}
+    passthrough = {
+        "Passthrough": Passthrough(),
+        "Passthrough_Scaler": Passthrough(
+            validity_condition=lambda config, stage: (
+                config.estimator is None or isinstance(config.estimator, TreeEstimator)
+            )
+        ),
+    }
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     numeric_imputers = {
         "SimpleNumericImputer": SimpleNumericImputer(),
@@ -89,7 +97,8 @@ def create_pipeline_blueprint(
                                 ),
                                 (
                                     "ScalerNormalizer",
-                                    list(scalers_normalizers.values()),
+                                    list(scalers_normalizers.values())
+                                    + [components["Passthrough_Scaler"]],
                                 ),
                             ]
                         ),

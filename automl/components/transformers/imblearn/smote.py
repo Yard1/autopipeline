@@ -6,7 +6,8 @@ from imblearn.over_sampling import (
 from sklearn.base import BaseEstimator, clone
 
 from ...compatibility.pandas import *
-from ..transformer import Transformer, DataType
+from .imblearn import ImblearnSampler
+from ..transformer import DataType
 from ...component import ComponentLevel, ComponentConfig
 from ....problems import ProblemType
 from ....search.stage import AutoMLStage
@@ -103,7 +104,7 @@ class PandasAutoSMOTE(BaseEstimator):
 
         return Xt, yt
 
-class AutoSMOTE(Transformer):
+class AutoSMOTE(ImblearnSampler):
     _component_class = PandasAutoSMOTE
     _default_parameters = {
         "k_neighbors": 5,
@@ -113,16 +114,3 @@ class AutoSMOTE(Transformer):
     }
     _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
-
-    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
-        if config is None:
-            return True
-        super_check = super().is_component_valid(config, stage)
-        if not super_check or config.y is None:
-            return super_check
-
-        counts = config.y.value_counts()
-        max = counts[0]
-        min = counts[-1]
-        # pretty conservative here, ratio could probably be higher
-        return super_check and (max/min) >= 2

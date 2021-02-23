@@ -9,11 +9,12 @@ class ray_context:
         "ignore_reinit_error": True,
         "configure_logging": False,
         "include_dashboard": False,
-        #"local_mode": True,
-        #"num_cpus": 1,
+        # "local_mode": True,
+        # "num_cpus": 1,
     }
 
-    def __init__(self, **ray_config):
+    def __init__(self, global_checkpoint_s=10, **ray_config):
+        self.global_checkpoint_s = global_checkpoint_s
         self.ray_config = {**self.DEFAULT_CONFIG, **ray_config}
         self.ray_init = False
 
@@ -21,7 +22,8 @@ class ray_context:
         self.ray_init = ray.is_initialized()
         if not self.ray_init:
             with patch.dict(
-                "os.environ", {"TUNE_GLOBAL_CHECKPOINT_S": "1000000"}
+                "os.environ",
+                {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s)},
             ) if "TUNE_GLOBAL_CHECKPOINT_S" not in os.environ else contextlib.nullcontext():
                 ray.init(
                     **self.ray_config

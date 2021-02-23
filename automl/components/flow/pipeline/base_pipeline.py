@@ -155,6 +155,11 @@ class BasePipeline(_Pipeline):
             else:
                 return last_step.fit(Xt, y, **fit_params_last_step).transform(Xt)
 
+    def set_params(self, **kwargs):
+        # ConfigSpace workaround
+        kwargs = {k: (None if v == "!None" else v) for k, v in kwargs.items()}
+        return super().set_params(**kwargs)
+
 
 class Pipeline(Flow):
     _component_class = _ImblearnPipeline

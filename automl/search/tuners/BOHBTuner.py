@@ -1,7 +1,7 @@
 from time import time
 from typing import Optional, Union, Dict, List, Tuple
 
-from copy import copy
+from copy import copy, deepcopy
 
 import numpy as np
 import pandas as pd
@@ -53,7 +53,6 @@ class ConditionalTuneBOHB(TuneBOHB):
         self._space = ConditionalTuneBOHB.convert_search_space(space, seed=self._seed)
 
         self._points_to_evaluate = points_to_evaluate
-        n_startup_trials = 10
 
         self._bohb_config = bohb_config
         self._max_concurrent = max_concurrent
@@ -86,7 +85,6 @@ class ConditionalTuneBOHB(TuneBOHB):
                 cs.add_condition(cond)
 
         preprocessors_grid = spec.get_preprocessor_distribution()
-        print(preprocessors_grid)
         for k, v in preprocessors_grid.items():
             dist = v.get_CS(k)
             cs.add_hyperparameter(dist)
@@ -106,9 +104,7 @@ class ConditionalTuneBOHB(TuneBOHB):
                 pipeline_config=ComponentConfig(estimator=estimator),
                 current_stage=AutoMLStage.TUNE,
             )
-
             grid = spec_copy.get_preprocessor_distribution()
-            # print(grid)
             removed_components = {
                 k: [v2 for v2 in v.values if v2 not in grid[k].values]
                 if k in grid
@@ -125,7 +121,6 @@ class ConditionalTuneBOHB(TuneBOHB):
                             v2,
                         )
                     )
-        print(len(conditions))
         for est_name, est, param_name, param in conditions:
             cond = CS.ForbiddenAndConjunction(
                 CS.ForbiddenEqualsClause(est_name, est),
@@ -165,7 +160,7 @@ class ConditionalTuneBOHB(TuneBOHB):
             else:
                 # This parameter is not used in hpbandster implementation.
                 config, info = self.bohber.get_config(None)
-            self.trial_to_params[trial_id] = copy.deepcopy(config)
+            self.trial_to_params[trial_id] = copy(config)
             self.running.add(trial_id)
             return unflatten_dict(config)
         return None
@@ -180,12 +175,10 @@ class BOHBTuner(RayTuneTuner):
         random_state,
         early_stopping=True,
         early_stopping_splits=3,
-        early_stopping_brackets=1,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
         self.early_stopping_splits = early_stopping_splits
-        self.early_stopping_brackets = early_stopping_brackets
         super().__init__(
             problem_type=problem_type,
             pipeline_blueprint=pipeline_blueprint,
@@ -195,7 +188,35 @@ class BOHBTuner(RayTuneTuner):
         )
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        pass
+        if self.early_stopping:
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
+            if self.problem_type.is_classification():
+                min_dist *= len(self.y_.cat.categories)
+            min_dist /= self.X_.shape[0]
+
+            # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
+            self.early_stopping_fractions_ = 1.0 * np.power(
+                3,
+                -np.linspace(
+                    self.early_stopping_splits - 1, 0, self.early_stopping_splits
+                ),
+            )
+            self.early_stopping_fractions_[0] = max(
+                self.early_stopping_fractions_[0], min_dist
+            )
+        else:
+            self.early_stopping_fractions_ = [1]
+
+        self._tune_kwargs["scheduler"] = (
+            HyperBandForBOHB(
+                metric="mean_test_score",
+                mode="max",
+                reduction_factor=3,
+                max_t=self.early_stopping_splits,
+            )
+            if self.early_stopping
+            else None
+        )
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
@@ -203,7 +224,7 @@ class BOHBTuner(RayTuneTuner):
             space=self.pipeline_blueprint,
             metric="mean_test_score",
             mode="max",
-            # points_to_evaluate=self.default_grid,
+            points_to_evaluate=self.default_grid,
             seed=self.random_state,
         )
 
