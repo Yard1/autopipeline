@@ -31,12 +31,10 @@ class ComponentConfig:
         self.params = params
 
     def __getattr__(self, name: str):
-        try:
-            return self.params[name]
-        except KeyError:
-            raise AttributeError(
-                f"'{self.__class__.__name__}' object has no attribute '{name}'"
-            )
+        return self.params.get(name, None)
+
+    def __repr__(self) -> str:
+        return str(self.params)
 
 
 class Component(ABC):

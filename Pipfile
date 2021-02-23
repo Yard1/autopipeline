@@ -20,6 +20,8 @@ catboost = "*"
 lightgbm = "*"
 xgboost = "*"
 ray = {extras = ["tune"],version = "*"}
+configspace = "*"
+hpbandster = "*"
 
 [requires]
 python_version = "3.8"

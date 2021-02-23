@@ -124,5 +124,5 @@ class AutoSMOTE(Transformer):
         counts = config.y.value_counts()
         max = counts[0]
         min = counts[-1]
-        # pretty conservative here, ratio could probably be 2
-        return super_check and (max/min) >= 1
+        # pretty conservative here, ratio could probably be higher
+        return super_check and (max/min) >= 2

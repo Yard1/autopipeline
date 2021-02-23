@@ -5,9 +5,12 @@ from ray import tune
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+from sklearn.model_selection._search import ParameterGrid
 
+from .utils import ray_context, split_list_into_chunks
 from ..utils import call_component_if_needed
 from ...components import Component
+from ...problems import ProblemType
 from ...utils.string import removesuffix
 
 
@@ -17,11 +20,82 @@ def remove_component_suffix(key: str):
 
 
 class Tuner:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        problem_type: ProblemType,
+        pipeline_blueprint,
+        cv,
+        random_state,
+    ) -> None:
+        self.problem_type = problem_type
+        self.pipeline_blueprint = pipeline_blueprint
+        self.cv = cv
+        self.random_state = random_state
+
+    def _get_single_default_hyperparams(self, components):
+        hyperparams = {}
+        for k, v in components.items():
+            for k2, v2 in v.get_tuning_grid().items():
+                name = v.get_hyperparameter_key_suffix(k, k2)
+                hyperparams[name] = v2.default
+        return {**components, **hyperparams}
+
+    def _get_default_components(self, pipeline_blueprint) -> dict:
+        default_grid = {
+            k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
+        }
+        return [
+            self._get_single_default_hyperparams(components)
+            for components in ParameterGrid(default_grid)
+        ]
+
+    def _pre_search(self, X, y, groups=None):
+        self.X_ = X
+        self.y_ = y
+        self.groups_ = groups
+        self.default_grid = self._get_default_components(self.pipeline_blueprint)
+        preset_configurations = [
+            config
+            for config in self.pipeline_blueprint.preset_configurations
+            if config not in self.default_grid
+        ]
+        self.default_grid += preset_configurations
+
+        self._set_up_early_stopping(X, y, groups=groups)
+
+    def _set_up_early_stopping(self, X, y, groups=None):
         pass
+
+    def _run_search(self):
+        raise NotImplementedError()
 
 
 class RayTuneTuner(Tuner):
+    def __init__(
+        self,
+        problem_type: ProblemType,
+        pipeline_blueprint,
+        cv,
+        random_state,
+        **tune_kwargs,
+    ) -> None:
+        self.tune_kwargs = tune_kwargs
+        self._tune_kwargs = {
+            "run_or_experiment": self._trial_with_cv,
+            "search_alg": None,
+            "scheduler": None,
+            "num_samples": 10,
+            "verbose": 2,
+            "reuse_actors": True,
+            "fail_fast": True,
+        }
+        super().__init__(
+            problem_type=problem_type,
+            pipeline_blueprint=pipeline_blueprint,
+            cv=cv,
+            random_state=random_state,
+        )
+
     def _trial_with_cv(self, config, checkpoint_dir=None):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
@@ -59,3 +133,12 @@ class RayTuneTuner(Tuner):
             )
 
             tune.report(mean_test_score=np.mean(scores["test_score"]))
+
+    def _pre_search(self, X, y, groups=None):
+        super()._pre_search(X, y, groups=groups)
+        self._tune_kwargs["num_samples"] = 50 + len(self.default_grid)
+
+    def _run_search(self):
+        tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
+        with ray_context():
+            self.analysis_ = tune.run(**tune_kwargs)

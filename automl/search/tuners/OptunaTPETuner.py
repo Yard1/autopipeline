@@ -6,9 +6,6 @@ from copy import copy
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection._search import ParameterGrid
-
-from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.suggestion import (
@@ -21,7 +18,6 @@ import optuna as ot
 from optuna.samplers import BaseSampler
 
 from .tuner import RayTuneTuner
-from .utils import ray_context, split_list_into_chunks
 from ..distributions import CategoricalDistribution
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
@@ -148,38 +144,20 @@ class OptunaTPETuner(RayTuneTuner):
         early_stopping=True,
         early_stopping_splits=3,
         early_stopping_brackets=1,
+        **tune_kwargs,
     ) -> None:
-        self.problem_type = problem_type
-        self.pipeline_blueprint = pipeline_blueprint
-        self.cv = cv
-        self.random_state = random_state
         self.early_stopping = early_stopping
         self.early_stopping_splits = early_stopping_splits
         self.early_stopping_brackets = early_stopping_brackets
-        super().__init__()
+        super().__init__(
+            problem_type=problem_type,
+            pipeline_blueprint=pipeline_blueprint,
+            cv=cv,
+            random_state=random_state,
+            **tune_kwargs,
+        )
 
-    def _get_single_default_hyperparams(self, components):
-        hyperparams = {}
-        for k, v in components.items():
-            for k2, v2 in v.get_tuning_grid().items():
-                name = v.get_hyperparameter_key_suffix(k, k2)
-                hyperparams[name] = v2.default
-        return {**components, **hyperparams}
-
-    def _get_default_components(self, pipeline_blueprint) -> dict:
-        default_grid = {
-            k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
-        }
-        return [
-            self._get_single_default_hyperparams(components)
-            for components in ParameterGrid(default_grid)
-        ]
-
-    def _search(self, X, y, groups=None):
-        self.X_ = X
-        self.y_ = y
-        self.groups_ = groups
-
+    def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
             if self.problem_type.is_classification():
@@ -199,15 +177,7 @@ class OptunaTPETuner(RayTuneTuner):
         else:
             self.early_stopping_fractions_ = [1]
 
-        default_grid = self._get_default_components(self.pipeline_blueprint)
-        preset_configurations = [
-            config
-            for config in self.pipeline_blueprint.preset_configurations
-            if config not in default_grid
-        ]
-        default_grid += preset_configurations
-
-        scheluder = (
+        self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
                 metric="mean_test_score",
                 mode="max",
@@ -219,25 +189,20 @@ class OptunaTPETuner(RayTuneTuner):
             else None
         )
 
-        with ray_context():
-            self.analysis_ = tune.run(
-                self._trial_with_cv,
-                search_alg=ConditionalOptunaSearch(
-                    space=self.pipeline_blueprint,
-                    metric="mean_test_score",
-                    mode="max",
-                    points_to_evaluate=default_grid,
-                    seed=self.random_state,
-                ),
-                scheduler=scheluder,
-                # metric="mean_test_score",
-                # mode="max",
-                #num_samples=10,
-                num_samples=50 + len(default_grid),
-                verbose=2,
-                reuse_actors=True,
-                fail_fast=True,
-            )
+    def _pre_search(self, X, y, groups=None):
+        super()._pre_search(X, y, groups=groups)
+        self._tune_kwargs["search_alg"] = ConditionalOptunaSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_test_score",
+            mode="max",
+            points_to_evaluate=self.default_grid,
+            seed=self.random_state,
+        )
+
+    def _search(self, X, y, groups=None):
+        self._pre_search(X, y, groups=groups)
+
+        self._run_search()
 
         return self
 

@@ -1,7 +1,8 @@
+from typing import Iterable
+from copy import copy
 from ..transformers.transformer import Transformer
 from ..component import ComponentLevel, ComponentConfig
 from ...search.stage import AutoMLStage
-
 
 class Flow(Transformer):
     _component_level = ComponentLevel.NECESSARY
@@ -38,10 +39,3 @@ class Flow(Transformer):
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
         raise NotImplementedError()
-
-    def __copy__(self):
-        # self.spam is to be ignored, it is calculated anew for the copy
-        # create a new copy of ourselves *reusing* self.bar
-        new = type(self)(tuning_grid=self.tuning_grid, **self.parameters)
-        new.components = self.components.copy()
-        return new

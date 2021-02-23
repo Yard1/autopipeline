@@ -1,4 +1,4 @@
-from copy import deepcopy
+from copy import deepcopy, copy
 from sklearn.compose import ColumnTransformer as _ColumnTransformer
 
 from .flow import Flow
@@ -131,3 +131,20 @@ class ColumnTransformer(Flow):
             for name, transformer, columns in self.final_parameters["transformers"]
         }
         return {**transformer_grids, **default_grid}
+
+    def __copy__(self):
+        # self.spam is to be ignored, it is calculated anew for the copy
+        # create a new copy of ourselves *reusing* self.bar
+        new = type(self)(tuning_grid=self.tuning_grid, **self.parameters)
+        new.components = self.components.copy()
+        new.components = [
+            (
+                copy(name),
+                copy(transformer)
+                if isinstance(transformer, (list, dict, tuple, Flow))
+                else transformer,
+                copy(columns),
+            )
+            for name, transformer, columns in new.components
+        ]
+        return new

@@ -24,6 +24,7 @@ from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ....search.distributions import CategoricalDistribution
 
+
 class BasePipeline(_Pipeline):
     def _fit(self, X, y=None, **fit_params_steps):
         # shallow copy of steps - this should really be steps_
@@ -34,16 +35,14 @@ class BasePipeline(_Pipeline):
 
         fit_transform_one_cached = memory.cache(_fit_transform_one)
 
-        for (step_idx,
-             name,
-             transformer) in self._iter(with_final=False,
-                                        filter_passthrough=False):
-            if (transformer is None or transformer == 'passthrough'):
-                with _print_elapsed_time('Pipeline',
-                                         self._log_message(step_idx)):
+        for (step_idx, name, transformer) in self._iter(
+            with_final=False, filter_passthrough=False
+        ):
+            if transformer is None or transformer == "passthrough":
+                with _print_elapsed_time("Pipeline", self._log_message(step_idx)):
                     continue
 
-            if hasattr(memory, 'location'):
+            if hasattr(memory, "location"):
                 # joblib >= 0.12
                 if memory.location is None:
                     # we do not clone when caching is disabled to
@@ -51,7 +50,7 @@ class BasePipeline(_Pipeline):
                     cloned_transformer = transformer
                 else:
                     cloned_transformer = clone(transformer)
-            elif hasattr(memory, 'cachedir'):
+            elif hasattr(memory, "cachedir"):
                 # joblib < 0.11
                 if memory.cachedir is None:
                     # we do not clone when caching is disabled to
@@ -63,10 +62,14 @@ class BasePipeline(_Pipeline):
                 cloned_transformer = clone(transformer)
             # Fit or load from cache the current transformer
             result = fit_transform_one_cached(
-                cloned_transformer, X, y, None,
-                message_clsname='Pipeline',
+                cloned_transformer,
+                X,
+                y,
+                None,
+                message_clsname="Pipeline",
                 message=self._log_message(step_idx),
-                **fit_params_steps[name])
+                **fit_params_steps[name],
+            )
             if len(result) == 3:
                 X, y, fitted_transformer = result
             else:
@@ -105,9 +108,8 @@ class BasePipeline(_Pipeline):
         """
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, y = self._fit(X, y, **fit_params_steps)
-        with _print_elapsed_time('Pipeline',
-                                 self._log_message(len(self.steps) - 1)):
-            if self._final_estimator != 'passthrough':
+        with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
+            if self._final_estimator != "passthrough":
                 fit_params_last_step = fit_params_steps[self.steps[-1][0]]
                 self._final_estimator.fit(Xt, y, **fit_params_last_step)
 
@@ -144,16 +146,16 @@ class BasePipeline(_Pipeline):
         Xt, y = self._fit(X, y, **fit_params_steps)
 
         last_step = self._final_estimator
-        with _print_elapsed_time('Pipeline',
-                                 self._log_message(len(self.steps) - 1)):
-            if last_step == 'passthrough':
+        with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
+            if last_step == "passthrough":
                 return Xt
             fit_params_last_step = fit_params_steps[self.steps[-1][0]]
-            if hasattr(last_step, 'fit_transform'):
+            if hasattr(last_step, "fit_transform"):
                 return last_step.fit_transform(Xt, y, **fit_params_last_step)
             else:
-                return last_step.fit(Xt, y,
-                                     **fit_params_last_step).transform(Xt)
+                return last_step.fit(Xt, y, **fit_params_last_step).transform(Xt)
+
+
 class Pipeline(Flow):
     _component_class = _ImblearnPipeline
 
@@ -236,6 +238,20 @@ class Pipeline(Flow):
             for name, step in self.final_parameters["steps"]
         }
         return {**step_grids, **default_grid}
+
+    def __copy__(self):
+        # self.spam is to be ignored, it is calculated anew for the copy
+        # create a new copy of ourselves *reusing* self.bar
+        new = type(self)(tuning_grid=self.tuning_grid, **self.parameters)
+        new.components = self.components.copy()
+        new.components = [
+            (
+                copy(name),
+                copy(step) if isinstance(step, (list, dict, tuple, Flow)) else step,
+            )
+            for name, step in new.components
+        ]
+        return new
 
 
 class TopPipeline(Pipeline):

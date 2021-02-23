@@ -100,9 +100,21 @@ class UniformDistribution(Distribution):
     def get_CS(self, label):
         import ConfigSpace.hyperparameters as CSH
 
-        return CSH.UniformFloatHyperparameter(
-            name=label, lower=self.lower, upper=self.upper, log=self.log
-        )
+        try:
+            return CSH.UniformFloatHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                log=self.log,
+                default_value=self.default,
+            )
+        except KeyError:
+            return CSH.UniformFloatHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                log=self.log,
+            )
 
     def get_tune(self):
         from ray import tune
@@ -169,9 +181,21 @@ class IntUniformDistribution(Distribution):
     def get_CS(self, label):
         import ConfigSpace.hyperparameters as CSH
 
-        return CSH.UniformIntegerHyperparameter(
-            name=label, lower=self.lower, upper=self.upper, log=self.log
-        )
+        try:
+            return CSH.UniformIntegerHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                log=self.log,
+                default_value=self.default,
+            )
+        except KeyError:
+            return CSH.UniformIntegerHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                log=self.log,
+            )
 
     def get_tune(self):
         from ray.tune.sample import Integer
@@ -270,9 +294,22 @@ class DiscreteUniformDistribution(Distribution):
     def get_CS(self, label):
         import ConfigSpace.hyperparameters as CSH
 
-        return CSH.UniformFloatHyperparameter(
-            name=label, lower=self.lower, upper=self.upper, q=self.q
-        )
+        try:
+            return CSH.UniformFloatHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                q=self.q,
+                default_value=self.default,
+            )
+        except KeyError:
+            return CSH.UniformFloatHyperparameter(
+                name=label,
+                lower=self.lower,
+                upper=self.upper,
+                q=self.q,
+                default=self.default,
+            )
 
     def get_tune(self):
         from ray import tune
@@ -323,9 +360,17 @@ class CategoricalDistribution(Distribution):
     def get_CS(self, label):
         import ConfigSpace.hyperparameters as CSH
 
-        return CSH.CategoricalHyperparameter(
-            name=label, choices=[x for x in self.values if isinstance(x, Hashable)]
-        )
+        try:
+            return CSH.CategoricalHyperparameter(
+                name=label,
+                choices=[x if x is not None else "!None" for x in self.values],
+                default_value=self.default if self.default is not None else "!None",
+            )
+        except KeyError:
+            return CSH.CategoricalHyperparameter(
+                name=label,
+                choices=[x if x is not None else "!None" for x in self.values],
+            )
 
     def get_tune(self):
         from ray import tune

@@ -8,7 +8,8 @@ from collections import defaultdict
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
 
 from ..tuners.tuner import Tuner
-from ..tuners.TPETuner import OptunaTPETuner
+from ..tuners.OptunaTPETuner import OptunaTPETuner
+from ..tuners.BOHBTuner import BOHBTuner
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..stage import AutoMLStage
 from ..cv import get_cv_for_problem_type
@@ -29,7 +30,7 @@ class Trainer:
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
-        tuner: Tuner = OptunaTPETuner,
+        tuner: Tuner = BOHBTuner,
         random_state=None,
     ) -> None:
         self.problem_type = problem_type
