@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from ray.tune.schedulers import HyperBandForBOHB
-from ray.tune.suggest.bohb import TuneBOHB
+from ray.tune.suggest.bohb import TuneBOHB, DEFAULT_METRIC
 from ray.tune.suggest.suggestion import (
     UNDEFINED_METRIC_MODE,
     UNDEFINED_SEARCH_SPACE,
@@ -15,13 +15,15 @@ from ray.tune.suggest.suggestion import (
 from ray.tune.utils.util import unflatten_dict
 
 import ConfigSpace as CS
-import ConfigSpace.hyperparameters as CSH
 
 from .tuner import RayTuneTuner
 from ..distributions import CategoricalDistribution
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
+
+# from hpbandster.optimizers.config_generators.bohb import BOHB
+from .BOHB import BOHBConditional as BOHB
 
 import logging
 
@@ -39,8 +41,6 @@ class ConditionalTuneBOHB(TuneBOHB):
         points_to_evaluate: Optional[List[Dict]] = None,
         seed: Optional[int] = None,
     ):
-        from hpbandster.optimizers.config_generators.bohb import BOHB
-
         assert (
             BOHB is not None
         ), """HpBandSter must be installed!
@@ -65,6 +65,22 @@ class ConditionalTuneBOHB(TuneBOHB):
 
         if self._space:
             self._setup_bohb()
+
+    def _setup_bohb(self):
+        if self._metric is None and self._mode:
+            # If only a mode was passed, use anonymous metric
+            self._metric = DEFAULT_METRIC
+
+        if self._mode == "max":
+            self._metric_op = -1.0
+        elif self._mode == "min":
+            self._metric_op = 1.0
+
+        if self._seed is not None:
+            self._space.seed(self._seed)
+
+        bohb_config = self._bohb_config or {}
+        self.bohber = BOHB(self._space, **bohb_config)
 
     @staticmethod
     def convert_search_space(spec, seed=None, use_default: bool = False):
@@ -173,49 +189,51 @@ class BOHBTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
+        num_samples: int = 100,
         early_stopping=True,
-        early_stopping_splits=3,
+        cache=False,
         **tune_kwargs,
     ) -> None:
+        assert early_stopping, "early_stopping must be True for BOHB"
         self.early_stopping = early_stopping
-        self.early_stopping_splits = early_stopping_splits
         super().__init__(
             problem_type=problem_type,
             pipeline_blueprint=pipeline_blueprint,
             cv=cv,
             random_state=random_state,
+            num_samples=num_samples,
+            cache=cache,
             **tune_kwargs,
         )
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        if self.early_stopping:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
-            if self.problem_type.is_classification():
-                min_dist *= len(self.y_.cat.categories)
-            min_dist /= self.X_.shape[0]
+        min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
+        if self.problem_type.is_classification():
+            min_dist *= len(self.y_.cat.categories)
+        min_dist /= self.X_.shape[0]
 
-            # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
-            self.early_stopping_fractions_ = 1.0 * np.power(
-                3,
-                -np.linspace(
-                    self.early_stopping_splits - 1, 0, self.early_stopping_splits
-                ),
-            )
-            self.early_stopping_fractions_[0] = max(
-                self.early_stopping_fractions_[0], min_dist
-            )
-        else:
-            self.early_stopping_fractions_ = [1]
+        # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
+        reduction_factor = 3
+        self.early_stopping_splits_ = (
+            -int(np.log(min_dist / 1.0) / np.log(reduction_factor)) + 1
+        )
+        self.early_stopping_fractions_ = 1.0 * np.power(
+            reduction_factor,
+            -np.linspace(
+                self.early_stopping_splits_ - 1, 0, self.early_stopping_splits_
+            ),
+        )
+        assert (
+            self.early_stopping_fractions_[0] < self.early_stopping_fractions_[1]
+        ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
 
         self._tune_kwargs["scheduler"] = (
             HyperBandForBOHB(
                 metric="mean_test_score",
                 mode="max",
-                reduction_factor=3,
-                max_t=self.early_stopping_splits,
+                reduction_factor=reduction_factor,
+                max_t=self.early_stopping_splits_,
             )
-            if self.early_stopping
-            else None
         )
 
     def _pre_search(self, X, y, groups=None):

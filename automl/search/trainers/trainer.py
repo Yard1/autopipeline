@@ -30,7 +30,9 @@ class Trainer:
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
-        tuner: Tuner = BOHBTuner,
+        tuner: Tuner = OptunaTPETuner,
+        early_stopping: bool = False,
+        cache: Union[str, bool] = False,
         random_state=None,
     ) -> None:
         self.problem_type = problem_type
@@ -40,6 +42,8 @@ class Trainer:
         self.level = level
         self.tuner = tuner
         self.random_state = random_state
+        self.early_stopping = early_stopping
+        self.cache = cache
 
     def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
         validate_type(cv, "cv", (BaseCrossValidator, int, None))
@@ -62,6 +66,8 @@ class Trainer:
             pipeline_blueprint=self.pipeline_blueprint_,
             random_state=self.random_state,
             cv=self.cv_,
+            early_stopping=self.early_stopping,
+            cache=self.cache,
         )
 
         self.tuner_.fit(X, y, groups=groups)

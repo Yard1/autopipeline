@@ -141,22 +141,23 @@ class OptunaTPETuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
+        num_samples: int = 500,
         early_stopping=True,
-        early_stopping_splits=3,
         early_stopping_brackets=1,
+        cache=False,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
-        self.early_stopping_splits = early_stopping_splits
         self.early_stopping_brackets = early_stopping_brackets
         super().__init__(
             problem_type=problem_type,
             pipeline_blueprint=pipeline_blueprint,
             cv=cv,
             random_state=random_state,
+            num_samples=num_samples,
+            cache=cache,
             **tune_kwargs,
         )
-        self._tune_kwargs["TUNE_GLOBAL_CHECKPOINT_S"] = 10000
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping:
@@ -165,25 +166,28 @@ class OptunaTPETuner(RayTuneTuner):
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
 
-            # from https://github.com/automl/HpBandSter/blob/master/hpbandster/optimizers/bohb.py
+            reduction_factor = 4
+            self.early_stopping_splits_ = (
+                -int(np.log(min_dist / 1.0) / np.log(reduction_factor)) + 1
+            )
             self.early_stopping_fractions_ = 1.0 * np.power(
-                3,
+                reduction_factor,
                 -np.linspace(
-                    self.early_stopping_splits - 1, 0, self.early_stopping_splits
+                    self.early_stopping_splits_ - 1, 0, self.early_stopping_splits_
                 ),
             )
-            self.early_stopping_fractions_[0] = max(
-                self.early_stopping_fractions_[0], min_dist
-            )
+            assert (
+                self.early_stopping_fractions_[0] < self.early_stopping_fractions_[1]
+            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
         else:
             self.early_stopping_fractions_ = [1]
-
+        print(self.early_stopping_fractions_)
         self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
                 metric="mean_test_score",
                 mode="max",
-                reduction_factor=3,
-                max_t=self.early_stopping_splits,
+                reduction_factor=reduction_factor,
+                max_t=self.early_stopping_splits_,
                 brackets=self.early_stopping_brackets,
             )
             if self.early_stopping

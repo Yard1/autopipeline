@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 import gc
+import platform
 
 from ray import tune
 
@@ -16,6 +17,7 @@ from ...components.flow.pipeline import TopPipeline
 from ...problems import ProblemType
 from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
+from ...utils.exceptions import validate_type
 
 
 def remove_component_suffix(key: str):
@@ -99,14 +101,18 @@ class RayTuneTuner(Tuner):
         pipeline_blueprint,
         cv,
         random_state,
+        num_samples: int = 50,
+        cache=False,
         **tune_kwargs,
     ) -> None:
+        self.cache = cache
+        self._set_cache()
         self.tune_kwargs = tune_kwargs
         self._tune_kwargs = {
             "run_or_experiment": self._trial_with_cv,
             "search_alg": None,
             "scheduler": None,
-            "num_samples": 10,
+            "num_samples": num_samples,
             "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,
@@ -117,6 +123,17 @@ class RayTuneTuner(Tuner):
             cv=cv,
             random_state=random_state,
         )
+
+    def _set_cache(self):
+        validate_type(self.cache, "cache", (str, bool))
+        if not self.cache:
+            self._cache = None
+        elif self.cache is True:
+            self._cache = (
+                "/dev/shm" if platform.system() == "Linux" else ".."
+            )
+        else:
+            self._cache = self.cache
 
     def _trial_with_cv(self, config, checkpoint_dir=None):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -129,6 +146,7 @@ class RayTuneTuner(Tuner):
         }
 
         estimator.set_params(**config_called)
+        estimator.memory = self._cache
 
         for idx, fraction in enumerate(self.early_stopping_fractions_):
             if len(self.early_stopping_fractions_) > 1:
@@ -157,14 +175,17 @@ class RayTuneTuner(Tuner):
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
                 mean_test_score=np.mean(scores["test_score"]),
+                dataset_fraction=fraction,
             )
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["num_samples"] = 50 + len(self.default_grid)
+        self._tune_kwargs["num_samples"] += len(self.default_grid)
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         gc.collect()
-        with ray_context(self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)):
+        with ray_context(
+            global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
+        ):
             self.analysis_ = tune.run(**tune_kwargs)

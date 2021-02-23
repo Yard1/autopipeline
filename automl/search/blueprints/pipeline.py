@@ -1,3 +1,6 @@
+from automl.components.transformers.feature_selector.boruta import (
+    BorutaSHAPClassification,
+)
 from typing import Optional
 
 from automl import components
@@ -17,6 +20,12 @@ from sklearn.compose import make_column_selector
 from automl.components import estimators
 
 
+def _scaler_passthrough_condition(config, stage):
+    return config.estimator is None or isinstance(config.estimator, TreeEstimator)
+
+categorical_selector = make_column_selector(dtype_include="category")
+numeric_selector = make_column_selector(dtype_exclude="category")
+
 def create_pipeline_blueprint(
     problem_type: ProblemType,
     X=None,
@@ -33,9 +42,7 @@ def create_pipeline_blueprint(
     passthrough = {
         "Passthrough": Passthrough(),
         "Passthrough_Scaler": Passthrough(
-            validity_condition=lambda config, stage: (
-                config.estimator is None or isinstance(config.estimator, TreeEstimator)
-            )
+            validity_condition=_scaler_passthrough_condition
         ),
     }
     imbalance = {"AutoSMOTE": AutoSMOTE()}
@@ -51,6 +58,10 @@ def create_pipeline_blueprint(
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
     }
+    feature_selectors = {
+        "BorutaSHAPClassification": BorutaSHAPClassification(),
+        "BorutaSHAPRegression": BorutaSHAPClassification(),
+    }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
         "LogisticRegression": LogisticRegression(),
@@ -62,47 +73,46 @@ def create_pipeline_blueprint(
         **scalers_normalizers,
         **categorical_imputers,
         **categorical_encoders,
+        **feature_selectors,
         **estimators,
     }
 
     pipeline_steps = [
         ("Imbalance", list(imbalance.values()) + [components["Passthrough"]]),
         (
-            "ColumnTransformer",
+            "ColumnImputation",
             ColumnTransformer(
                 transformers=[
                     (
-                        "Categorical",
-                        Pipeline(
-                            steps=[
-                                (
-                                    "Imputer",
-                                    list(numeric_imputers.values()),
-                                ),
-                                (
-                                    "CategoricalEncoder",
-                                    list(categorical_encoders.values()),
-                                ),
-                            ]
-                        ),
-                        categorical_columns,
+                        "CategoricalImputer",
+                        list(categorical_imputers.values()),
+                        categorical_selector,
                     ),
                     (
-                        "Numeric",
-                        Pipeline(
-                            steps=[
-                                (
-                                    "Imputer",
-                                    list(categorical_imputers.values()),
-                                ),
-                                (
-                                    "ScalerNormalizer",
-                                    list(scalers_normalizers.values())
-                                    + [components["Passthrough_Scaler"]],
-                                ),
-                            ]
-                        ),
-                        numeric_columns,
+                        "NumericImputer",
+                        list(numeric_imputers.values()),
+                        numeric_selector,
+                    ),
+                ],
+            ),
+        ),
+        (
+            "FeatureSelector",
+            list(feature_selectors.values()) + [components["Passthrough"]],
+        ),
+        (
+            "ColumnEncodingScaling",
+            ColumnTransformer(
+                transformers=[
+                    (
+                        "CategoricalEncoder",
+                        list(categorical_encoders.values()),
+                        categorical_selector,
+                    ),
+                    (
+                        "ScalerNormalizer",
+                        list(scalers_normalizers.values()),
+                        numeric_selector,
                     ),
                 ],
             ),

@@ -8,9 +8,8 @@ from sklearn.base import BaseEstimator, clone
 from ...compatibility.pandas import *
 from .imblearn import ImblearnSampler
 from ..transformer import DataType
-from ...component import ComponentLevel, ComponentConfig
+from ...component import ComponentLevel
 from ....problems import ProblemType
-from ....search.stage import AutoMLStage
 
 
 class PandasAutoSMOTE(BaseEstimator):

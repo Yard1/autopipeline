@@ -250,7 +250,9 @@ class AutoML(BaseEstimator):
             level=self.level_,
             cv=self.cv_,
             categorical_columns=categorical_columns,
-            numeric_columns=numeric_columns
+            numeric_columns=numeric_columns,
+            cache=True,
+            #cache="/home/baum/Documents/Coding/Python/automl",
         )
 
         self.trainer_.fit(X, y)
