@@ -1,19 +1,219 @@
-'''!
+"""!
  * Copyright (c) 2020-2021 Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE file in the
  * project root for license information.
-'''
+"""
 from typing import Dict, Optional, List, Tuple
 import numpy as np
 import time
 import pickle
 from ray.tune.suggest import Searcher
-from ray.tune.suggest.optuna import OptunaSearch as GlobalSearch
+from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.variant_generator import generate_variants
 from .flow2 import FLOW2 as LocalSearch
 
 import logging
+
 logger = logging.getLogger(__name__)
+
+from ray.tune.suggest import Searcher
+from .flow2 import FLOW2
+
+from ray.tune.result import DEFAULT_METRIC, TRAINING_ITERATION
+from ray.tune.sample import Categorical, Domain, Float, Integer, LogUniform, \
+    Quantized, Uniform
+from ray.tune.suggest.suggestion import UNRESOLVED_SEARCH_SPACE, \
+    UNDEFINED_METRIC_MODE, UNDEFINED_SEARCH_SPACE
+from ray.tune.suggest.variant_generator import parse_spec_vars
+from ray.tune.utils.util import flatten_dict, unflatten_dict
+
+import optuna as ot
+from optuna.samplers import BaseSampler
+
+conditional_space = {"cond_param1": ("cond_param2", [False])}
+
+def enforce_conditions_on_config(config, prefix=""):
+    config = config.copy()
+    for independent_name, v in conditional_space.items():
+        dependent_name, required_values = v
+        if config[f"{prefix}{independent_name}"] not in required_values and f"{prefix}{dependent_name}" in config:
+            config.pop(f"{prefix}{dependent_name}", None)
+    return config
+
+class OptunaConditional(OptunaSearch):
+    def suggest(self, trial_id: str) -> Optional[Dict]:
+        if not self._space:
+            raise RuntimeError(
+                UNDEFINED_SEARCH_SPACE.format(
+                    cls=self.__class__.__name__, space="space"))
+        if not self._metric or not self._mode:
+            raise RuntimeError(
+                UNDEFINED_METRIC_MODE.format(
+                    cls=self.__class__.__name__,
+                    metric=self._metric,
+                    mode=self._mode))
+
+        if trial_id not in self._ot_trials:
+            ot_trial_id = self._storage.create_new_trial(
+                self._ot_study._study_id)
+            self._ot_trials[trial_id] = ot.trial.Trial(self._ot_study,
+                                                       ot_trial_id)
+        ot_trial = self._ot_trials[trial_id]
+
+        if self._points_to_evaluate:
+            params = self._points_to_evaluate.pop(0)
+        else:
+            # getattr will fetch the trial.suggest_ function on Optuna trials
+            params = self._get_params(ot_trial)
+        return unflatten_dict(params)
+
+    def _get_name(self, args, kwargs):
+        return args[0] if len(args) > 0 else kwargs["name"]
+
+    def _get_optuna_trial_value(self, ot_trial, tpl):
+        fn, args, kwargs = tpl
+        return getattr(ot_trial, fn)(*args, **kwargs)
+
+    def _get_params(self, ot_trial):
+        params_checked = set()
+        params = {}
+        space_dict = {
+            self._get_name(args, kwargs): (fn, args, kwargs) for fn, args, kwargs in self._space
+        }
+        for key, condition in conditional_space.items():
+            value = self._get_optuna_trial_value(ot_trial, space_dict[key])
+            params[key] = value
+            params_checked.add(key)
+            params_checked.add(condition[0])
+            if value in condition[1]:
+                params[condition[0]] = self._get_optuna_trial_value(ot_trial, space_dict[condition[0]])
+
+        for key, tpl in space_dict.items():
+            if key in params_checked:
+                continue
+            value = self._get_optuna_trial_value(ot_trial, space_dict[key])
+            params[key] = value
+        return params
+
+GlobalSearch = OptunaConditional
+
+
+class SearchThread:
+    """Class of global or local search thread"""
+
+    cost_attr = "time_total_s"
+
+    def __init__(self, mode: str = "min", search_alg: Optional[Searcher] = None):
+        """When search_alg is omitted, use local search FLOW2"""
+        self._search_alg = search_alg
+        self._mode = mode
+        self._metric_op = 1 if mode == "min" else -1
+        self.cost_best = self.cost_last = self.cost_total = self.cost_best1 = getattr(
+            search_alg, "cost_incumbent", 0
+        )
+        self.cost_best2 = 0
+        self.obj_best1 = self.obj_best2 = getattr(
+            search_alg, "best_obj", np.inf
+        )  # inherently minimize
+        # eci: expected cost for improvement
+        self.eci = self.cost_best
+        self.priority = self.speed = 0
+
+    def suggest(self, trial_id: str) -> Optional[Dict]:
+        """use the suggest() of the underlying search algorithm"""
+        if isinstance(self._search_alg, FLOW2):
+            config = self._search_alg.suggest(trial_id)
+        else:
+            try:
+                config = self._search_alg.suggest(trial_id)
+            except:
+                logger.warning(
+                    f"The global search method raises error. "
+                    "Ignoring for this iteration."
+                )
+                config = None
+        return config
+
+    def update_priority(self, eci: Optional[float] = 0):
+        # optimistic projection
+        self.priority = eci * self.speed - self.obj_best1
+
+    def update_eci(self, metric_target: float, max_speed: Optional[float] = np.inf):
+        # calculate eci: expected cost for improvement over metric_target;
+        best_obj = metric_target * self._metric_op
+        if not self.speed:
+            self.speed = max_speed
+        self.eci = max(
+            self.cost_total - self.cost_best1, self.cost_best1 - self.cost_best2
+        )
+        if self.obj_best1 > best_obj and self.speed > 0:
+            self.eci = max(self.eci, 2 * (self.obj_best1 - best_obj) / self.speed)
+
+    def _update_speed(self):
+        # calculate speed; use 0 for invalid speed temporarily
+        if self.obj_best2 > self.obj_best1:
+            self.speed = (self.obj_best2 - self.obj_best1) / (
+                self.cost_total - self.cost_best2
+            )
+        else:
+            self.speed = 0
+
+    def on_trial_complete(
+        self, trial_id: str, result: Optional[Dict] = None, error: bool = False
+    ):
+        """update the statistics of the thread"""
+        if not self._search_alg:
+            return
+        if not hasattr(self._search_alg, "_ot_trials") or (
+            not error and trial_id in self._search_alg._ot_trials
+        ):
+            # optuna doesn't handle error
+            self._search_alg.on_trial_complete(trial_id, enforce_conditions_on_config(result, prefix="config/"), error)
+        if result:
+            if self.cost_attr in result:
+                self.cost_last = result[self.cost_attr]
+                self.cost_total += self.cost_last
+            # if not isinstance(self._search_alg, FLOW2):
+            #     logger.info(f"result.metric{result[self._search_alg.metric]}")
+            if self._search_alg.metric in result:
+                obj = result[self._search_alg.metric] * self._metric_op
+                if obj < self.obj_best1:
+                    self.cost_best2 = self.cost_best1
+                    self.cost_best1 = self.cost_total
+                    self.obj_best2 = obj if np.isinf(self.obj_best1) else self.obj_best1
+                    self.obj_best1 = obj
+                    self.cost_best = self.cost_last
+            self._update_speed()
+
+    def on_trial_result(self, trial_id: str, result: Dict):
+        """TODO update the statistics of the thread with partial result?"""
+        # print('[SearchThread] on trial result')
+        if not self._search_alg:
+            return
+        if not hasattr(self._search_alg, "_ot_trials") or (
+            trial_id in self._search_alg._ot_trials
+        ):
+            self._search_alg.on_trial_result(trial_id, result)
+        if self.cost_attr in result and self.cost_last < result[self.cost_attr]:
+            self.cost_last = result[self.cost_attr]
+            # self._update_speed()
+
+    @property
+    def converged(self) -> bool:
+        return self._search_alg.converged
+
+    @property
+    def resource(self) -> float:
+        return self._search_alg.resource
+
+    def reach(self, thread) -> bool:
+        """whether the incumbent can reach the incumbent of thread"""
+        return self._search_alg.reach(thread._search_alg)
+
+    @property
+    def can_suggest(self) -> bool:
+        """whether the thread can suggest new configs"""
+        return self._search_alg.can_suggest
 
 
 class BlendSearch(Searcher):
@@ -34,7 +234,6 @@ class BlendSearch(Searcher):
                  global_search_alg: Optional[Searcher] = None,
                  mem_size = None):
         '''Constructor
-
         Args:
             metric: A string of the metric name to optimize for.
                 minimization or maximization.
@@ -48,13 +247,11 @@ class BlendSearch(Searcher):
                 .. code-block:: python
                 
                     [{'epochs': 1}]
-
             cat_hp_cost: A dictionary from a subset of categorical dimensions
                 to the relative cost of each choice. 
                 e.g.,
                 
                 .. code-block:: python
-
                     {'tree_method': [1, 1, 2]}
                 
                 i.e., the relative cost of the 
@@ -131,6 +328,7 @@ class BlendSearch(Searcher):
         self._admissible_min = self._ls.normalize(self._ls.init_config)
         self._admissible_max = self._admissible_min.copy()
         self._result = {} # config_signature: tuple -> result: Dict
+        self._config_results = {}
         self._deadline = np.inf
 
     def save(self, checkpoint_path: str):
@@ -156,17 +354,18 @@ class BlendSearch(Searcher):
                           error: bool = False):
         ''' search thread updater and cleaner
         '''
+        print("######################")
+        print("on_trial_complete")
         thread_id = self._trial_proposed_by.get(trial_id)
         if thread_id in self._search_thread_pool: 
             self._search_thread_pool[thread_id].on_trial_complete(
             trial_id, result, error)
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
+        print(thread_id)
         if result:
-            config = {}
-            for key, value in result.items():
-                if key.startswith('config/'):
-                    config[key[7:]] = value
+            config = {**self._ls.best_config, **self._config_results[trial_id]}
+            print(config)
             if error: # remove from result cache
                 del self._result[self._ls.config_signature(config)]
             else: # add to result cache
@@ -192,7 +391,7 @@ class BlendSearch(Searcher):
                 )
                 thread_id = self._thread_count
                 self._thread_count += 1
-                
+        print("######################")
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
         #     f"{thread_id in self._search_thread_pool}")
@@ -309,7 +508,11 @@ class BlendSearch(Searcher):
             else: return None # running but no result yet
             self._init_used = True
         # logger.info(f"config={config}")
-        return config
+        self._config_results[trial_id] = config
+        print(f"config={config}")
+        clean_config = enforce_conditions_on_config(config)
+        print(f"clean_config={clean_config}")
+        return clean_config
 
     def _should_skip(self, choice, trial_id, config) -> bool:
         ''' if config is None or config's result is known or above mem threshold
