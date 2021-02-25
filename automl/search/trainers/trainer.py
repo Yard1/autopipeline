@@ -31,7 +31,7 @@ class Trainer:
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
-        tuner: Tuner = BlendSearchTuner,
+        tuner: Tuner = OptunaTPETuner,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,

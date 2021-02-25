@@ -102,6 +102,7 @@ class SharingSearchThread(SearchThread):
             if trial_id in self._search_alg._ot_trials:
                 print(f"on_trial_complete trial_id {trial_id}")
                 if np.around(result["dataset_fraction"], 1) >= 1.0:
+                    print("adding trial to optuna")
                     self._search_alg.on_trial_complete(
                         trial_id,
                         enforce_conditions_on_config(
@@ -112,6 +113,7 @@ class SharingSearchThread(SearchThread):
                         ),
                     )
                 else:
+                    print("reporting trial to optuna")
                     self._search_alg.on_trial_result(
                         trial_id,
                         enforce_conditions_on_config(
