@@ -97,6 +97,9 @@ class Component(ABC):
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
         return f"{self.__class__.__name__}({', '.join(params)})"
 
+    def __hash__(self) -> int:
+        return hash(self.__repr__())
+
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_tuning_grid = (
             self._default_tuning_grid_extended

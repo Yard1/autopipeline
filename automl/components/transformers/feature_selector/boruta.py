@@ -10,6 +10,7 @@ License: BSD 3 clause
 
 import numpy as np
 import shap
+import contextlib
 from boruta import BorutaPy
 
 from lightgbm import LGBMClassifier, LGBMRegressor
@@ -59,9 +60,15 @@ class BorutaSHAP(BorutaPy):
         X = X.apply(categorical_column_to_int)
         if self._is_classification and self._is_lightgbm:
             self.estimator.set_params(colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1])
-        return super()._fit(X, y)
+        r = super()._fit(X, y)
+        if not np.sum(self.support_):
+            if np.sum(self.support_ + self.support_weak_):
+                self.support_ = self.support_ + self.support_weak_
+            else:
+                self.support_ = (self.support_ + 1).astype(bool)
+        return r
 
-    def transform(self, X, weak=False):
+    def transform(self, X):
         """
         Reduces the input X to the features selected by Boruta.
 
@@ -84,9 +91,9 @@ class BorutaSHAP(BorutaPy):
             selected by Boruta.
         """
 
-        return self._transform(X, weak, return_df=True)
+        return self._transform(X, weak=False, return_df=True)
 
-    def fit_transform(self, X, y, weak=False):
+    def fit_transform(self, X, y):
         """
         Fits Boruta, then reduces the input X to the selected features.
 
@@ -113,7 +120,7 @@ class BorutaSHAP(BorutaPy):
         """
 
         self._fit(X, y)
-        return self._transform(X, weak, return_df=True)
+        return self._transform(X, weak=False, return_df=True)
 
     def _check_params(self, X, y):
         """
@@ -129,31 +136,32 @@ class BorutaSHAP(BorutaPy):
 
     # from https://github.com/Ekeany/Boruta-Shap
     def _get_shap_imp(self, X, estimator):
-        explainer = shap.TreeExplainer(
-            estimator, feature_perturbation="tree_path_dependent"
-        )
-        if self._is_classification:
-            # for some reason shap returns values wraped in a list of length 1
-            shap_values = np.array(explainer.shap_values(X))
-            if isinstance(shap_values, list):
+        with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
+            explainer = shap.TreeExplainer(
+                estimator, feature_perturbation="tree_path_dependent"
+            )
+            if self._is_classification:
+                # for some reason shap returns values wraped in a list of length 1
+                shap_values = np.array(explainer.shap_values(X))
+                if isinstance(shap_values, list):
 
-                class_inds = range(len(shap_values))
-                shap_imp = np.zeros(shap_values[0].shape[1])
-                for i, ind in enumerate(class_inds):
-                    shap_imp += np.abs(shap_values[ind]).mean(0)
-                shap_values /= len(shap_values)
+                    class_inds = range(len(shap_values))
+                    shap_imp = np.zeros(shap_values[0].shape[1])
+                    for i, ind in enumerate(class_inds):
+                        shap_imp += np.abs(shap_values[ind]).mean(0)
+                    shap_values /= len(shap_values)
 
-            elif len(shap_values.shape) == 3:
-                shap_values = np.abs(shap_values).sum(axis=0)
-                shap_values = shap_values.mean(0)
+                elif len(shap_values.shape) == 3:
+                    shap_values = np.abs(shap_values).sum(axis=0)
+                    shap_values = shap_values.mean(0)
+
+                else:
+                    shap_values = np.abs(shap_values).mean(0)
 
             else:
+                shap_values = explainer.shap_values(X)
                 shap_values = np.abs(shap_values).mean(0)
-
-        else:
-            shap_values = explainer.shap_values(X)
-            shap_values = np.abs(shap_values).mean(0)
-        return shap_values
+            return shap_values
 
     def _get_imp(self, X, y):
         try:
@@ -182,7 +190,7 @@ _lightgbm_rf_config = {
     "num_leaves": 32,
     "subsample": 0.632,
     "subsample_freq": 1,
-    "verbose": -1
+    "verbose": -1,
 }
 
 

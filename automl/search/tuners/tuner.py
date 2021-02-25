@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 
 import gc
-import platform
+import os
+import tempfile
 
 from ray import tune
 
@@ -18,6 +19,10 @@ from ...problems import ProblemType
 from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
 from ...utils.exceptions import validate_type
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def remove_component_suffix(key: str):
@@ -128,25 +133,29 @@ class RayTuneTuner(Tuner):
         validate_type(self.cache, "cache", (str, bool))
         if not self.cache:
             self._cache = None
-        elif self.cache is True:
-            self._cache = (
-                "/dev/shm" if platform.system() == "Linux" else ".."
-            )
         else:
             self._cache = self.cache
 
-    def _trial_with_cv(self, config, checkpoint_dir=None):
-        estimator = self.pipeline_blueprint(random_state=self.random_state)
+        if self._cache:
+            logger.info(f"Cache dir set as '{self._cache}'")
 
-        config_called = {
+    def _treat_config(self, config):
+        return {
             remove_component_suffix(k): call_component_if_needed(
                 v, random_state=self.random_state
             )
             for k, v in config.items()
         }
 
+    def _trial_with_cv(self, config, checkpoint_dir=None):
+        estimator = self.pipeline_blueprint(random_state=self.random_state)
+
+        config_called = self._treat_config(config)
+
         estimator.set_params(**config_called)
-        estimator.memory = self._cache
+        memory = tempfile.gettempdir() if self._cache is True else self._cache
+        memory = memory if not memory == os.getcwd() else ".."
+        estimator.set_params(memory=memory)
 
         for idx, fraction in enumerate(self.early_stopping_fractions_):
             if len(self.early_stopping_fractions_) > 1:

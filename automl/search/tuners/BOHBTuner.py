@@ -83,7 +83,7 @@ class ConditionalTuneBOHB(TuneBOHB):
         self.bohber = BOHB(self._space, **bohb_config)
 
     @staticmethod
-    def convert_search_space(spec, seed=None, use_default: bool = False):
+    def convert_search_space(spec, seed=None):
         cs = CS.ConfigurationSpace(seed=seed)
         spec = copy(spec)
         estimator_name, estimators = spec.get_estimator_distribution()

@@ -86,7 +86,7 @@ class PandasAutoSMOTE(BaseEstimator):
         sampler = self._get_sampler(X)
 
         Xt, yt = sampler.fit_resample(
-            categorical_to_int(X).reset_index(drop=True).to_numpy(),
+            try_enforce_categorical_int_dtype(X).reset_index(drop=True).to_numpy(),
             y.reset_index(drop=True),
         )
 
@@ -102,6 +102,7 @@ class PandasAutoSMOTE(BaseEstimator):
             yt = yt.astype(y.dtype)
 
         return Xt, yt
+
 
 class AutoSMOTE(ImblearnSampler):
     _component_class = PandasAutoSMOTE

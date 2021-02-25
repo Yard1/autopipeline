@@ -17,6 +17,9 @@ class Passthrough(Transformer):
         self.validity_condition = validity_condition
         super().__init__(tuning_grid=tuning_grid, **parameters)
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.validity_condition})"
+
     def __call__(
         self,
         pipeline_config: dict = None,

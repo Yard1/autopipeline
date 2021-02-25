@@ -9,6 +9,7 @@ from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
 
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
+from ..tuners.blendsearch import BlendSearchTuner
 from ..tuners.BOHBTuner import BOHBTuner
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..stage import AutoMLStage
@@ -30,7 +31,7 @@ class Trainer:
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
-        tuner: Tuner = OptunaTPETuner,
+        tuner: Tuner = BlendSearchTuner,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,

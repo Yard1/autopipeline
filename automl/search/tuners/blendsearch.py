@@ -25,10 +25,17 @@
 """
 from typing import Dict, Optional, List, Tuple
 import numpy as np
-import time
+import traceback
 import pickle
+import os
+import tempfile
+from ray.tune.sample import Categorical
+
+from sklearn.model_selection import cross_validate
+from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+
+from ray import tune
 from ray.tune.suggest import Searcher
-from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.variant_generator import generate_variants
 from flaml.searcher.search_thread import SearchThread
 from flaml.searcher.blendsearch import BlendSearch
@@ -48,163 +55,39 @@ from ray.tune.suggest.suggestion import (
 )
 from ray.tune.utils.util import unflatten_dict
 
-import optuna as ot
-from optuna.trial._state import TrialState
-from optuna.distributions import (
-    UniformDistribution,
-    IntUniformDistribution,
-    IntLogUniformDistribution,
-    LogUniformDistribution,
-    CategoricalDistribution,
-    DiscreteUniformDistribution,
-)
-
-conditional_space = {"cond_param1": ("cond_param2", [False])}
+from .OptunaTPETuner import ConditionalOptunaSearch
+from ..distributions import get_tune_distributions
+from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
+from .tuner import RayTuneTuner, remove_component_suffix
+from ..utils import call_component_if_needed
+from ...problems import ProblemType
 
 
-def enforce_conditions_on_config(config, prefix=""):
-    config = config.copy()
-    for independent_name, v in conditional_space.items():
-        dependent_name, required_values = v
-        if f"{prefix}{independent_name}" not in config or (
-            config[f"{prefix}{independent_name}"] not in required_values
-            and f"{prefix}{dependent_name}" in config
-        ):
-            config.pop(f"{prefix}{dependent_name}", None)
-    return config
-
-
-def convert_optuna_params_to_distributions(params):
-    distributions = {}
-    for k, v in params.items():
-        fn, args, kwargs = v
-        args = args[1:] if len(args) > 0 else args
-        kwargs = kwargs.copy()
-        kwargs.pop("name", None)
-        if fn == "suggest_loguniform":
-            distributions[k] = LogUniformDistribution(*args, **kwargs)
-        elif fn == "suggest_discrete_uniform":
-            distributions[k] = DiscreteUniformDistribution(*args, **kwargs)
-        elif fn == "suggest_uniform":
-            distributions[k] = UniformDistribution(*args, **kwargs)
-        elif fn == "suggest_int":
-            if kwargs.pop("log", False) or args[-1] is True:
-                if args[-1] is True:
-                    args = args[:-1]
-                distributions[k] = IntLogUniformDistribution(*args, **kwargs)
-            else:
-                distributions[k] = IntUniformDistribution(*args, **kwargs)
-        elif fn == "suggest_categorical":
-            distributions[k] = CategoricalDistribution(*args, **kwargs)
-        else:
-            raise ValueError(f"Unknown distribution suggester {fn}")
-    return distributions
-
-
-class OptunaConditional(OptunaSearch):
-    def suggest(self, trial_id: str) -> Optional[Dict]:
-        if not self._space:
-            raise RuntimeError(
-                UNDEFINED_SEARCH_SPACE.format(
-                    cls=self.__class__.__name__, space="space"
-                )
-            )
-        if not self._metric or not self._mode:
-            raise RuntimeError(
-                UNDEFINED_METRIC_MODE.format(
-                    cls=self.__class__.__name__, metric=self._metric, mode=self._mode
-                )
-            )
-
-        if trial_id not in self._ot_trials:
-            ot_trial_id = self._storage.create_new_trial(self._ot_study._study_id)
-            self._ot_trials[trial_id] = ot.trial.Trial(self._ot_study, ot_trial_id)
-        ot_trial = self._ot_trials[trial_id]
-
-        if self._points_to_evaluate:
-            params = self._points_to_evaluate.pop(0)
-        else:
-            # getattr will fetch the trial.suggest_ function on Optuna trials
-            params = self._get_params(ot_trial)
-        return unflatten_dict(params)
-
-    def add_evaluated_trial(
-        self, trial_id: str, result: Optional[Dict] = None, error: bool = False
-    ):
-        if not self._space:
-            raise RuntimeError(
-                UNDEFINED_SEARCH_SPACE.format(
-                    cls=self.__class__.__name__, space="space"
-                )
-            )
-        if not self._metric or not self._mode:
-            raise RuntimeError(
-                UNDEFINED_METRIC_MODE.format(
-                    cls=self.__class__.__name__, metric=self._metric, mode=self._mode
-                )
-            )
-
-        if trial_id in self._ot_trials:
-            return False
-
-        config = {k[7:]: v for k, v in result.items() if k.startswith("config/")}
-        space_dict = {
-            self._get_name(args, kwargs): (fn, args, kwargs)
-            for fn, args, kwargs in self._space
-        }
-        distributions = {k: v for k, v in space_dict.items() if k in config}
-        distributions = convert_optuna_params_to_distributions(distributions)
-
-        trial = ot.trial.create_trial(
-            state=TrialState.COMPLETE,
-            value=result.get(self.metric, None),
-            params=config,
-            distributions=distributions,
-        )
-
-        len_studies = len(self._ot_study.trials)
-        self._ot_study.add_trial(trial)
-        assert len_studies < len(self._ot_study.trials)
-
-        return True
-
-    def _get_name(self, args, kwargs):
-        return args[0] if len(args) > 0 else kwargs["name"]
-
-    def _get_optuna_trial_value(self, ot_trial, tpl):
-        fn, args, kwargs = tpl
-        return getattr(ot_trial, fn)(*args, **kwargs)
-
-    def _get_params(self, ot_trial):
-        params_checked = set()
-        params = {}
-        space_dict = {
-            self._get_name(args, kwargs): (fn, args, kwargs)
-            for fn, args, kwargs in self._space
-        }
-        for key, condition in conditional_space.items():
-            value = self._get_optuna_trial_value(ot_trial, space_dict[key])
-            params[key] = value
-            params_checked.add(key)
-            params_checked.add(condition[0])
-            if value in condition[1]:
-                params[condition[0]] = self._get_optuna_trial_value(
-                    ot_trial, space_dict[condition[0]]
-                )
-
-        for key, tpl in space_dict.items():
-            if key in params_checked:
-                continue
-            value = self._get_optuna_trial_value(ot_trial, space_dict[key])
-            params[key] = value
-        return params
-
-
-GlobalSearch = OptunaConditional
+GlobalSearch = ConditionalOptunaSearch
 
 
 class SharingSearchThread(SearchThread):
     """Class of global or local search thread"""
+
+    def __init__(
+        self, mode: str = "min", search_alg: Optional[Searcher] = None, cost_attr=None
+    ):
+        """When search_alg is omitted, use local search FLOW2"""
+        self._search_alg = search_alg
+        self._mode = mode
+        self._metric_op = 1 if mode == "min" else -1
+        self.cost_best = self.cost_last = self.cost_total = self.cost_best1 = getattr(
+            search_alg, "cost_incumbent", 0
+        )
+        self.cost_best2 = 0
+        self.obj_best1 = self.obj_best2 = getattr(
+            search_alg, "best_obj", np.inf
+        )  # inherently minimize
+        # eci: expected cost for improvement
+        self.eci = self.cost_best
+        self.priority = self.speed = 0
+        if cost_attr:
+            self.cost_attr = cost_attr
 
     def on_trial_complete(
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
@@ -217,14 +100,38 @@ class SharingSearchThread(SearchThread):
             self._search_alg.on_trial_complete(trial_id, result, error)
         elif not error:
             if trial_id in self._search_alg._ot_trials:
-                self._search_alg.on_trial_complete(
-                    trial_id,
-                    enforce_conditions_on_config(result, prefix="config/"),
-                    error,
-                )
-            else:
+                print(f"on_trial_complete trial_id {trial_id}")
+                if np.around(result["dataset_fraction"], 1) >= 1.0:
+                    self._search_alg.on_trial_complete(
+                        trial_id,
+                        enforce_conditions_on_config(
+                            result,
+                            self._search_alg._conditional_space,
+                            prefix="config/",
+                            keys_to_keep=self._search_alg._space,
+                        ),
+                    )
+                else:
+                    self._search_alg.on_trial_result(
+                        trial_id,
+                        enforce_conditions_on_config(
+                            result,
+                            self._search_alg._conditional_space,
+                            prefix="config/",
+                            keys_to_keep=self._search_alg._space,
+                        ),
+                    )
+            elif np.around(result["dataset_fraction"], 1) >= 1.0:
+                print("add_evaluated_trial")
+                print(result)
                 self._search_alg.add_evaluated_trial(
-                    trial_id, enforce_conditions_on_config(result, prefix="config/")
+                    trial_id,
+                    enforce_conditions_on_config(
+                        result,
+                        self._search_alg._conditional_space,
+                        prefix="config/",
+                        keys_to_keep=self._search_alg._space,
+                    ),
                 )
 
         if result:
@@ -243,6 +150,23 @@ class SharingSearchThread(SearchThread):
                     self.cost_best = self.cost_last
             self._update_speed()
 
+    def suggest(self, trial_id: str) -> Optional[Dict]:
+        """use the suggest() of the underlying search algorithm"""
+        if isinstance(self._search_alg, FLOW2):
+            config = self._search_alg.suggest(trial_id)
+        else:
+            # config = self._search_alg.suggest(trial_id)
+            try:
+                config = self._search_alg.suggest(trial_id)
+            except:
+                logger.warning(
+                    "The global search method raises error. "
+                    "Ignoring for this iteration.\n"
+                    f"{traceback.format_exc()}"
+                )
+                config = None
+        return config
+
     def on_trial_result(self, trial_id: str, result: Dict):
         """TODO update the statistics of the thread with partial result?"""
         # print('[SearchThread] on trial result')
@@ -257,7 +181,13 @@ class SharingSearchThread(SearchThread):
             )
         elif trial_id in self._search_alg._ot_trials:
             self._search_alg.on_trial_result(
-                trial_id, enforce_conditions_on_config(result, prefix="config/")
+                trial_id,
+                enforce_conditions_on_config(
+                    result,
+                    self._search_alg._conditional_space,
+                    prefix="config/",
+                    keys_to_keep=self._search_alg._space,
+                ),
             )
         if self.cost_attr in result and self.cost_last < result[self.cost_attr]:
             self.cost_last = result[self.cost_attr]
@@ -267,13 +197,145 @@ class SharingSearchThread(SearchThread):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
+    def __init__(
+        self,
+        metric: Optional[str] = None,
+        mode: Optional[str] = None,
+        space: Optional[dict] = None,
+        points_to_evaluate: Optional[List[Dict]] = None,
+        cat_hp_cost: Optional[dict] = None,
+        prune_attr: Optional[str] = None,
+        min_resource: Optional[float] = None,
+        max_resource: Optional[float] = None,
+        reduction_factor: Optional[float] = None,
+        resources_per_trial: Optional[dict] = None,
+        global_search_alg: Optional[Searcher] = None,
+        time_attr: Optional[str] = None,
+        seed: Optional[int] = None,
+        mem_size=None,
+    ):
+        """Constructor
+
+        Args:
+            metric: A string of the metric name to optimize for.
+                minimization or maximization.
+            mode: A string in ['min', 'max'] to specify the objective as
+            space: A dictionary to specify the search space.
+            points_to_evaluate: Initial parameter suggestions to be run first.
+                The first element needs to be a dictionary from a subset of
+                controlled dimensions to the initial low-cost values.
+                e.g.,
+
+                .. code-block:: python
+
+                    [{'epochs': 1}]
+
+            cat_hp_cost: A dictionary from a subset of categorical dimensions
+                to the relative cost of each choice.
+                e.g.,
+
+                .. code-block:: python
+
+                    {'tree_method': [1, 1, 2]}
+
+                i.e., the relative cost of the
+                three choices of 'tree_method' is 1, 1 and 2 respectively.
+            prune_attr: A string of the attribute used for pruning.
+                Not necessarily in space.
+                When prune_attr is in space, it is a hyperparameter, e.g.,
+                    'n_iters', and the best value is unknown.
+                When prune_attr is not in space, it is a resource dimension,
+                    e.g., 'sample_size', and the peak performance is assumed
+                    to be at the max_resource.
+            min_resource: A float of the minimal resource to use for the
+                prune_attr; only valid if prune_attr is not in space.
+            max_resource: A float of the maximal resource to use for the
+                prune_attr; only valid if prune_attr is not in space.
+            reduction_factor: A float of the reduction factor used for
+                incremental pruning.
+            resources_per_trial: A dictionary of the resources permitted per
+                trial, such as 'mem'.
+            global_search_alg: A Searcher instance as the global search
+                instance. If omitted, Optuna is used. The following algos have
+                known issues when used as global_search_alg:
+                - HyperOptSearch raises exception sometimes
+                - TuneBOHB has its own scheduler
+            mem_size: A function to estimate the memory size for a given config.
+        """
+        self._metric, self._mode = metric, mode
+        self._conditional_space = get_conditions(space, to_str=True)
+        self._time_attr = "time_total_s" or time_attr
+
+        LocalSearch.cost_attr = self._time_attr
+        self._seed = seed
+
+        if global_search_alg is not None:
+            self._gs = global_search_alg
+        elif getattr(self, "__name__", None) != "CFO":
+            self._gs = GlobalSearch(
+                space=space,
+                metric=metric,
+                mode=mode,
+                seed=seed,
+                keep_const_values=False,
+            )
+        else:
+            self._gs = None
+
+        space, _ = get_all_tunable_params(space, to_str=True)
+        space = get_tune_distributions(space)
+        self._const_values = {
+            k: v.categories[0]
+            for k, v in space.items()
+            if isinstance(v, Categorical) and len(v.categories) == 1
+        }
+        space = {k: v for k, v in space.items() if k not in self._const_values}
+
+        if points_to_evaluate:
+            points_to_evaluate = [
+                {k: v for k, v in point.items() if k in space}
+                for point in points_to_evaluate
+            ]
+            init_config = points_to_evaluate[0]
+        else:
+            init_config = {}
+        self._points_to_evaluate = points_to_evaluate
+
+        self._ls = LocalSearch(
+            init_config,
+            metric,
+            mode,
+            cat_hp_cost,
+            space,
+            prune_attr,
+            min_resource,
+            max_resource,
+            reduction_factor,
+            seed,
+        )
+        self._resources_per_trial = resources_per_trial
+        self._mem_size = mem_size
+        self._mem_threshold = (
+            resources_per_trial.get("mem") if resources_per_trial else None
+        )
+        self._init_search()
+
+    @property
+    def keys_to_keep(self):
+        return set.union(
+            set(self._ls.space),
+            set(self._ls.prune_attr) if self._ls.prune_attr else set(),
+        )
+
     def _init_search(self):
         """initialize the search"""
         super()._init_search()
         self._suggested_configs = {}
         self._search_thread_pool = {
             # id: int -> thread: SearchThread
-            0: SharingSearchThread(self._ls.mode, self._gs)
+            0: SharingSearchThread(
+                self._ls.mode, self._gs, cost_attr=self._ls.prune_attr
+            )
         }
 
     @property
@@ -292,6 +354,9 @@ class ConditionalBlendSearch(BlendSearch):
             self._result,
             self._deadline,
             self._suggested_configs,
+            self._conditional_space,
+            self._time_attr,
+            self._const_values,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -310,10 +375,25 @@ class ConditionalBlendSearch(BlendSearch):
             self._result,
             self._deadline,
             self._suggested_configs,
+            self._conditional_space,
+            self._time_attr,
+            self._const_values,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
         super.restore_from_dir(checkpoint_dir)
+
+    def on_trial_result(self, trial_id: str, result: Dict):
+        if trial_id not in self._trial_proposed_by:
+            return
+        thread_id = self._trial_proposed_by[trial_id]
+        if not thread_id in self._search_thread_pool:
+            return
+        config = {
+            f"config/{k}": v for k, v in self._suggested_configs[trial_id].items()
+        }
+        result = {**config, **result}
+        self._search_thread_pool[thread_id].on_trial_result(trial_id, result)
 
     def on_trial_complete(
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
@@ -328,6 +408,7 @@ class ConditionalBlendSearch(BlendSearch):
             # if not thread_id: logger.info(f"result {result}")
         if result:
             config = self._suggested_configs[trial_id]
+            assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
             (
                 _,
                 config_signature,
@@ -357,11 +438,15 @@ class ConditionalBlendSearch(BlendSearch):
                     )
             elif self._create_condition(result):
                 # thread creator
+                assert len(config) == len(self._ls.space) + int(
+                    bool(self._ls.prune_attr)
+                )
                 self._search_thread_pool[self._thread_count] = SharingSearchThread(
                     self._ls.mode,
                     self._ls.create(
-                        config, result[self._metric], cost=result["time_total_s"]
+                        config, result[self._metric], cost=result[self._time_attr]
                     ),
+                    cost_attr=self._ls.prune_attr,
                 )
                 thread_id = self._thread_count
                 self._thread_count += 1
@@ -373,8 +458,39 @@ class ConditionalBlendSearch(BlendSearch):
             # local search thread
             self._clean(thread_id)
 
+    def _valid(self, config: Dict) -> bool:
+        """config validator"""
+        print("_valid")
+        print(config)
+        print(self._admissible_min)
+        try:
+            for key in self._admissible_min:
+                if key in config:
+                    value = config[key]
+                    # logger.info(
+                    #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
+                    if (
+                        value < self._admissible_min[key]
+                        or value > self._admissible_max[key]
+                    ):
+                        return False
+        except TypeError:
+            normalized_config = self._ls.normalize(config)
+            for key in self._admissible_min:
+                if key in normalized_config:
+                    value = normalized_config[key]
+                    # logger.info(
+                    #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
+                    if (
+                        value < self._admissible_min[key]
+                        or value > self._admissible_max[key]
+                    ):
+                        return False
+        return True
+
     def suggest(self, trial_id: str) -> Optional[Dict]:
         """choose thread, suggest a valid config"""
+        print("suggest")
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
             # logger.debug(f"choice={choice}, backup={backup}")
@@ -382,24 +498,32 @@ class ConditionalBlendSearch(BlendSearch):
                 return None  # timeout
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
-            if len(config) != len(self._ls.space):
+            config = {k: v for k, v in config.items() if k not in self.keys_to_keep}
+            if not config or len(config) != len(self._ls.space):
                 try:
                     config = {
                         **self._search_thread_pool[backup]._search_alg.best_config,
                         **config,
                     }
-                    assert len(config) == len(self._ls.space)
+                    print(config)
+                    assert len(config) == len(self._ls.space) or len(config) == len(
+                        self._ls.space
+                    ) + int(bool(self._ls.prune_attr))
                 except:
+                    print("assertion failed")
                     for _, generated in generate_variants({"config": self._ls.space}):
                         config = {**generated["config"], **config}
                         break
+                    print(config)
             skip = self._should_skip(choice, trial_id, config)
             if skip:
+                print("skipping")
                 if choice:
                     # logger.info(f"skipping choice={choice}, config={config}")
                     return None
                 # use rs
                 self._use_rs = True
+                print("using rs")
                 for _, generated in generate_variants({"config": self._ls.space}):
                     config = generated["config"]
                     break
@@ -410,21 +534,25 @@ class ConditionalBlendSearch(BlendSearch):
             # if not choice: logger.info(config)
             if choice or backup == choice or self._valid(config):
                 # LS or valid or no backup choice
+                print("LS or valid or no backup choice")
                 self._trial_proposed_by[trial_id] = choice
             else:  # invalid config proposed by GS
+                print("invalid config proposed by GS")
                 if not self._use_rs:
                     self._search_thread_pool[choice].on_trial_complete(
                         trial_id, {}, error=True
                     )  # tell GS there is an error
                 self._use_rs = False
                 config = self._search_thread_pool[backup].suggest(trial_id)
-                if len(config) != len(self._ls.space):
+                if not config or len(config) != len(self._ls.space):
                     try:
                         config = {
                             **self._search_thread_pool[choice]._search_alg.best_config,
                             **config,
                         }
-                        assert len(config) == len(self._ls.space)
+                        assert len(config) == len(self._ls.space) or len(config) == len(
+                            self._ls.space
+                        ) + int(bool(self._ls.prune_attr))
                     except:
                         for _, generated in generate_variants(
                             {"config": self._ls.space}
@@ -438,6 +566,7 @@ class ConditionalBlendSearch(BlendSearch):
                 choice = backup
             # if choice: self._pending.add(choice) # local search thread pending
             if not choice:
+                print("choice is none")
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
                     config[self._ls.prune_attr] = self._ls.min_resource
@@ -450,6 +579,7 @@ class ConditionalBlendSearch(BlendSearch):
             if enforced_config_signature:
                 self._result[enforced_config_signature] = {}
         else:  # use init config
+            print("using init config")
             init_config = (
                 self._points_to_evaluate.pop(0)
                 if self._points_to_evaluate
@@ -475,21 +605,26 @@ class ConditionalBlendSearch(BlendSearch):
                 return None  # running but no result yet
             self._init_used = True
         # logger.info(f"config={config}")
-        assert len(config) == len(self._ls.space)
+        print(list(config.keys()))
+        print(list(self._ls.space.keys()))
+        assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         self._suggested_configs[trial_id] = config
-        clean_config = enforce_conditions_on_config(config)
+        clean_config = enforce_conditions_on_config(config, self._conditional_space)
+        clean_config = {**self._const_values, **clean_config}
+        print("CONFIG")
+        print(clean_config)
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
         config_signature = self._ls.config_signature(config)
-        if not conditional_space:
+        if not self._conditional_space:
             return (
                 (self._result.get(config_signature, None) in self._result),
                 config_signature,
                 None,
             )
         enforced_config_signature = self._ls.config_signature(
-            enforce_conditions_on_config(config)
+            enforce_conditions_on_config(config, self._conditional_space)
         )
         result = None
         result = self._result.get(config_signature, None)
@@ -516,7 +651,7 @@ class ConditionalBlendSearch(BlendSearch):
         ):
             self._result[config_signature] = {
                 self._metric: np.inf * self._ls.metric_op,
-                "time_total_s": 1,
+                self._time_attr: 1,
             }
             exists = True
         if exists:
@@ -538,3 +673,139 @@ class ConditionalBlendSearch(BlendSearch):
                     )
             return True
         return False
+
+
+class BlendSearchTuner(RayTuneTuner):
+    def __init__(
+        self,
+        problem_type: ProblemType,
+        pipeline_blueprint,
+        cv,
+        random_state,
+        num_samples: int = 20,
+        early_stopping=True,
+        cache=False,
+        **tune_kwargs,
+    ) -> None:
+        self.early_stopping = early_stopping
+        super().__init__(
+            problem_type=problem_type,
+            pipeline_blueprint=pipeline_blueprint,
+            cv=cv,
+            random_state=random_state,
+            num_samples=num_samples,
+            cache=cache,
+            **tune_kwargs,
+        )
+        self._searcher_kwargs = {}
+
+    def _set_up_early_stopping(self, X, y, groups=None):
+        if self.early_stopping:
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
+            if self.problem_type.is_classification():
+                min_dist *= len(self.y_.cat.categories)
+            min_dist /= self.X_.shape[0]
+
+            step = 4
+            self.early_stopping_fractions_ = [min_dist]
+            while self.early_stopping_fractions_[-1] < 1.0:
+                self.early_stopping_fractions_.append(
+                    self.early_stopping_fractions_[-1] * step
+                )
+            self.early_stopping_fractions_[-1] = 1.0
+            assert (
+                self.early_stopping_fractions_[0] < self.early_stopping_fractions_[1]
+            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
+            assert (
+                self.early_stopping_fractions_[-1] > self.early_stopping_fractions_[-2]
+            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
+            self._searcher_kwargs["prune_attr"] = "dataset_fraction"
+            self._searcher_kwargs["min_resource"] = self.early_stopping_fractions_[0]
+            self._searcher_kwargs["max_resource"] = self.early_stopping_fractions_[-1]
+            self._searcher_kwargs["reduction_factor"] = step
+        else:
+            self.early_stopping_fractions_ = [1]
+        print(self.early_stopping_fractions_)
+
+    def _pre_search(self, X, y, groups=None):
+        super()._pre_search(X, y, groups=groups)
+        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
+        for conf in self.default_grid:
+            for k, v in conf.items():
+                if str(v) in self._component_strings_:
+                    conf[k] = str(v)
+        self._tune_kwargs["search_alg"] = ConditionalBlendSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_test_score",
+            mode="max",
+            points_to_evaluate=self.default_grid,
+            seed=self.random_state,
+            **self._searcher_kwargs,
+        )
+
+    def _treat_config(self, config):
+        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
+        return super()._treat_config(config)
+
+    def _trial_with_cv(self, config, checkpoint_dir=None):
+        estimator = self.pipeline_blueprint(random_state=self.random_state)
+
+        prune_attr = self._searcher_kwargs.get("prune_attr")
+
+        config_called = self._treat_config(config)
+        config_called.pop(prune_attr, None)
+
+        if prune_attr:
+            prune_attr = config.get(prune_attr)
+
+        print(f"prune_attr: {prune_attr}")
+
+        estimator.set_params(**config_called)
+        memory = tempfile.gettempdir() if self._cache is True else self._cache
+        memory = memory if not memory == os.getcwd() else ".."
+        estimator.set_params(memory=memory)
+
+        if prune_attr:
+            subsample_cv = _SubsampleMetaSplitter(
+                base_cv=self.cv,
+                fraction=prune_attr,
+                subsample_test=True,
+                random_state=self.random_state,
+            )
+        else:
+            subsample_cv = self.cv
+
+        scores = cross_validate(
+            estimator,
+            self.X_,
+            self.y_,
+            cv=subsample_cv,
+            groups=self.groups_,
+            error_score="raise",
+            # fit_params=self.fit_params,
+            # groups=self.groups,
+            # return_train_score=self.return_train_score,
+            # scoring=self.scoring,
+        )
+
+        if prune_attr:
+            tune.report(
+                done=True,
+                mean_test_score=np.mean(scores["test_score"]),
+                dataset_fraction=prune_attr,
+            )
+        else:
+            tune.report(
+                done=True,
+                mean_test_score=np.mean(scores["test_score"]),
+            )
+
+    def _search(self, X, y, groups=None):
+        self._pre_search(X, y, groups=groups)
+
+        self._run_search()
+
+        return self
+
+    def fit(self, X, y, groups=None):
+        return self._search(X, y, groups=groups)

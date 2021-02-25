@@ -1,11 +1,11 @@
 from scipy.sparse import issparse
 import pandas as pd
-from pandas.api.types import is_categorical_dtype
 from ...utils import validate_type
+from ..transformers.transformer import DataType
 
 
-def col_categorical_to_int(column):
-    if is_categorical_dtype(column.dtype):
+def col_try_enforce_categorical_int_dtype(column):
+    if DataType.is_categorical(column.dtype):
         try:
             return column.astype(int)
         except ValueError:
@@ -13,8 +13,8 @@ def col_categorical_to_int(column):
     return column
 
 
-def categorical_to_int(df):
-    return df.apply(col_categorical_to_int, axis=1)
+def try_enforce_categorical_int_dtype(df):
+    return df.apply(col_try_enforce_categorical_int_dtype, axis=1)
 
 
 class PandasSeriesTransformerMixin:
@@ -35,7 +35,7 @@ class PandasSeriesTransformerMixin:
         if isinstance(X, pd.DataFrame) and X.shape[1] == 1:
             X = X.squeeze(axis=1)
         validate_type(X, "X", pd.Series)
-        Xt = super().transform(col_categorical_to_int(X).to_numpy())
+        Xt = super().transform(col_try_enforce_categorical_int_dtype(X).to_numpy())
         if not isinstance(Xt, pd.Series):
             if issparse(Xt):
                 Xt_s = pd.Series.sparse.from_coo(Xt)
@@ -72,9 +72,11 @@ class PandasDataFrameTransformerMixin:
             self.columns_ = None
         validate_type(X, "X", pd.DataFrame)
         try:
-            return super().fit(categorical_to_int(X).to_numpy(), y=y, **fit_params)
+            return super().fit(
+                try_enforce_categorical_int_dtype(X).to_numpy(), y=y, **fit_params
+            )
         except TypeError:
-            return super().fit(categorical_to_int(X).to_numpy())
+            return super().fit(try_enforce_categorical_int_dtype(X).to_numpy())
 
     def transform(self, X):
         if isinstance(X, pd.Series):
@@ -85,7 +87,7 @@ class PandasDataFrameTransformerMixin:
                 f"Column mismatch. Expected {self.columns_}, got {X.columns}"
             )
         X = X[self.columns_]
-        Xt = super().transform(categorical_to_int(X).to_numpy())
+        Xt = super().transform(try_enforce_categorical_int_dtype(X).to_numpy())
 
         if not isinstance(Xt, pd.DataFrame):
             if issparse(Xt):

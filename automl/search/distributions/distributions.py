@@ -26,6 +26,9 @@ class Distribution:
     def get_optuna(self):
         raise NotImplementedError("This is an abstract class.")
 
+    def get_optuna_dist(self):
+        raise NotImplementedError("This is an abstract class.")
+
     def get_hyperopt(self, label):
         raise NotImplementedError("This is an abstract class.")
 
@@ -88,6 +91,14 @@ class UniformDistribution(Distribution):
             return optuna_param.suggest_loguniform(label, self.lower, self.upper)
         else:
             return optuna_param.suggest_uniform(label, self.lower, self.upper)
+
+    def get_optuna_dist(self):
+        from optuna.distributions import LogUniformDistribution, UniformDistribution
+
+        if self.log:
+            return LogUniformDistribution(self.lower, self.upper)
+        else:
+            return UniformDistribution(self.lower, self.upper)
 
     def get_hyperopt(self, label):
         from hyperopt import hp
@@ -166,6 +177,17 @@ class IntUniformDistribution(Distribution):
             return optuna_param.suggest_int(label, self.lower, self.upper, log=True)
         else:
             return optuna_param.suggest_int(label, self.lower, self.upper, log=False)
+
+    def get_optuna_dist(self):
+        from optuna.distributions import (
+            IntLogUniformDistribution,
+            IntUniformDistribution,
+        )
+
+        if self.log:
+            return IntLogUniformDistribution(self.lower, self.upper)
+        else:
+            return IntUniformDistribution(self.lower, self.upper)
 
     def get_hyperopt(self, label):
         from hyperopt import hp
@@ -286,6 +308,11 @@ class DiscreteUniformDistribution(Distribution):
             label, self.lower, self.upper, self.q
         )
 
+    def get_optuna_dist(self):
+        from optuna.distributions import DiscreteUniformDistribution
+
+        return DiscreteUniformDistribution(self.lower, self.upper, step=self.q)
+
     def get_hyperopt(self, label):
         from hyperopt import hp
 
@@ -352,6 +379,11 @@ class CategoricalDistribution(Distribution):
     def get_optuna(self, label):
         return optuna_param.suggest_categorical(label, self.values)
 
+    def get_optuna_dist(self):
+        from optuna.distributions import CategoricalDistribution
+
+        return CategoricalDistribution(self.values)
+
     def get_hyperopt(self, label):
         from hyperopt import hp
 
@@ -385,8 +417,12 @@ def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_skopt() for k, v in distributions.items()}
 
 
-def get_optuna_distributions(distributions: Dict[str, Distribution]) -> dict:
+def get_optuna_trial_suggestions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_optuna(k) for k, v in distributions.items()}
+
+
+def get_optuna_distributions(distributions: Dict[str, Distribution]) -> dict:
+    return {k: v.get_optuna_dist() for k, v in distributions.items()}
 
 
 def get_hyperopt_distributions(distributions: Dict[str, Distribution]) -> dict:

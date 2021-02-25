@@ -1,6 +1,8 @@
 from time import time
 from typing import Optional, Union, Dict, List, Tuple
+from collections import defaultdict
 
+import pickle
 from copy import copy
 
 import numpy as np
@@ -16,25 +18,20 @@ from ray.tune.utils.util import unflatten_dict
 
 import optuna as ot
 from optuna.samplers import BaseSampler
+import optuna.distributions
+from optuna.trial import TrialState
 
 from .tuner import RayTuneTuner
-from ..distributions import CategoricalDistribution
+from .utils import get_conditions, get_all_tunable_params
+from ..distributions import CategoricalDistribution, get_optuna_trial_suggestions
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
+from ...utils.string import removeprefix
 
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def get_optuna_trial_suggestion(ot_trial, value, label, use_default: bool = False):
-    if use_default:
-        return value.default
-    if isinstance(value, CategoricalDistribution) and len(value.values) <= 1:
-        return value.values[0]
-    fn, args, kwargs = value.get_optuna(label)
-    return getattr(ot_trial, fn)(*args, **kwargs)
 
 
 class ConditionalOptunaSearch(OptunaSearch):
@@ -46,13 +43,28 @@ class ConditionalOptunaSearch(OptunaSearch):
         points_to_evaluate: Optional[List[Dict]] = None,
         sampler: Optional[BaseSampler] = None,
         seed: Optional[int] = None,
+        keep_const_values: bool = True,
     ):
         assert ot is not None, "Optuna must be installed! Run `pip install optuna`."
         super(OptunaSearch, self).__init__(
             metric=metric, mode=mode, max_concurrent=None, use_early_stopped_trials=None
         )
 
-        self._space = space
+        self._conditional_space = get_conditions(space, to_str=True)
+        space, _ = get_all_tunable_params(space, to_str=True)
+        self._const_values = {
+            k: v.values[0]
+            for k, v in space.items() if isinstance(v, CategoricalDistribution) and len(v.values) == 1
+        }
+        space = {
+            k: v for k, v in space.items() if k not in self._const_values
+        }
+        self._space = get_optuna_trial_suggestions(space)
+
+        if not keep_const_values:
+            self._const_values = {}
+
+        self._conditional_space = {k: v for k, v in self._conditional_space.items() if k in self._space}
 
         self._points_to_evaluate = points_to_evaluate
         n_startup_trials = 10
@@ -75,37 +87,174 @@ class ConditionalOptunaSearch(OptunaSearch):
         if self._space:
             self._setup_study(mode)
 
-    def _fetch_params(self, ot_trial, spec, use_default: bool = False):
-        spec = copy(spec)
-        config = {}
-        estimator_name, estimators_distributon = spec.get_estimator_distribution()
-        estimator = get_optuna_trial_suggestion(
-            ot_trial, estimators_distributon, estimator_name, use_default=use_default
+    def save(self, checkpoint_path: str):
+        save_object = (
+            self._storage,
+            self._pruner,
+            self._sampler,
+            self._ot_trials,
+            self._ot_study,
+            self._points_to_evaluate,
+            self._conditional_space,
+            self._space,
+            self._const_values
         )
-        spec.remove_invalid_components(
-            pipeline_config=ComponentConfig(estimator=estimator),
-            current_stage=AutoMLStage.TUNE,
-        )
-        config[estimator_name] = estimator
-        preprocessors_grid = spec.get_preprocessor_distribution()
-        for k, v in preprocessors_grid.items():
-            config[k] = get_optuna_trial_suggestion(
-                ot_trial, v, k, use_default=use_default
+        with open(checkpoint_path, "wb") as outputFile:
+            pickle.dump(save_object, outputFile)
+
+    def restore(self, checkpoint_path: str):
+        with open(checkpoint_path, "rb") as inputFile:
+            save_object = pickle.load(inputFile)
+        (
+            self._storage,
+            self._pruner,
+            self._sampler,
+            self._ot_trials,
+            self._ot_study,
+            self._points_to_evaluate,
+            self._conditional_space,
+            self._space,
+            self._const_values
+        ) = save_object
+
+    @staticmethod
+    def get_trial_suggestion_name(args, kwargs):
+        return args[0] if len(args) > 0 else kwargs["name"]
+
+    @staticmethod
+    def get_categorical_values(args, kwargs, offset=1):
+        return args[offset] if len(args) > offset else kwargs["choices"]
+
+    def _get_optuna_trial_value(self, ot_trial, tpl):
+        fn, args, kwargs = tpl
+        if (
+            ConditionalOptunaSearch.get_trial_suggestion_name(args, kwargs)
+            == "suggest_categorical"
+        ):
+            values = ConditionalOptunaSearch.get_categorical_values(args, kwargs)
+            if len(values) <= 1:
+                return values[0]
+        return getattr(ot_trial, fn)(*args, **kwargs)
+
+    def _get_params(self, ot_trial):
+        params_checked = set()
+        params = {}
+
+        for key, condition in self._conditional_space.items():
+            if key not in params:
+                value = self._get_optuna_trial_value(ot_trial, self._space[key])
+                params[key] = value
+                params_checked.add(key)
+            else:
+                value = params[key]
+            for dependent_name, required_values in condition.items():
+                if dependent_name not in self._space:
+                    continue
+                params_checked.add(dependent_name)
+                if value in required_values:
+                    params[dependent_name] = self._get_optuna_trial_value(
+                        ot_trial, self._space[dependent_name]
+                    )
+
+        for key, tpl in self._space.items():
+            if key in params_checked:
+                continue
+            value = self._get_optuna_trial_value(ot_trial, self._space[key])
+            params[key] = value
+
+        return params
+
+    @staticmethod
+    def convert_optuna_params_to_distributions(params):
+        distributions = {}
+        for k, v in params.items():
+            fn, args, kwargs = v
+            args = args[1:] if len(args) > 0 else args
+            kwargs = kwargs.copy()
+            kwargs.pop("name", None)
+            if fn == "suggest_loguniform":
+                distributions[k] = optuna.distributions.LogUniformDistribution(
+                    *args, **kwargs
+                )
+            elif fn == "suggest_discrete_uniform":
+                distributions[k] = optuna.distributions.DiscreteUniformDistribution(
+                    *args, **kwargs
+                )
+            elif fn == "suggest_uniform":
+                distributions[k] = optuna.distributions.UniformDistribution(
+                    *args, **kwargs
+                )
+            elif fn == "suggest_int":
+                if kwargs.pop("log", False) or args[-1] is True:
+                    if args[-1] is True:
+                        args = args[:-1]
+                    distributions[k] = optuna.distributions.IntLogUniformDistribution(
+                        *args, **kwargs
+                    )
+                else:
+                    distributions[k] = optuna.distributions.IntUniformDistribution(
+                        *args, **kwargs
+                    )
+            elif fn == "suggest_categorical":
+                values = ConditionalOptunaSearch.get_categorical_values(args, kwargs, offset=0)
+                if len(values) <= 1:
+                    continue
+                distributions[k] = optuna.distributions.CategoricalDistribution(
+                    *args, **kwargs
+                )
+            else:
+                raise ValueError(f"Unknown distribution suggester {fn}")
+        return distributions
+
+    def add_evaluated_trial(
+        self, trial_id: str, result: Optional[Dict] = None, error: bool = False,
+    ):
+        if not self._space:
+            raise RuntimeError(
+                UNDEFINED_SEARCH_SPACE.format(
+                    cls=self.__class__.__name__, space="space"
+                )
+            )
+        if not self._metric or not self._mode:
+            raise RuntimeError(
+                UNDEFINED_METRIC_MODE.format(
+                    cls=self.__class__.__name__, metric=self._metric, mode=self._mode
+                )
             )
 
-        hyperparams = {}
+        if trial_id in self._ot_trials:
+            return False
 
-        for k, v in config.items():
-            for k2, v2 in v.get_tuning_grid().items():
-                name = v.get_hyperparameter_key_suffix(k, k2)
-                choice = get_optuna_trial_suggestion(
-                    ot_trial, v2, name, use_default=use_default
-                )
-                hyperparams[name] = choice
-            config[k] = v
+        print("evaluated trial result")
+        print(result)
 
-        final_config = {**config, **hyperparams}
-        return final_config
+        if not result:
+            return False
+
+        config = {
+            removeprefix(k, "config/"): v
+            for k, v in result.items()
+            if k.startswith("config/")
+        }
+        distributions = {k: v for k, v in self._space.items() if k in config}
+        distributions = ConditionalOptunaSearch.convert_optuna_params_to_distributions(
+            distributions
+        )
+        config = {k: v for k, v in config.items() if k in distributions}
+
+        trial = ot.trial.create_trial(
+            state=TrialState.COMPLETE,
+            value=result.get(self.metric, None),
+            params=config,
+            distributions=distributions,
+        )
+        self._ot_trials[trial_id] = trial
+
+        len_studies = len(self._ot_study.trials)
+        self._ot_study.add_trial(trial)
+        assert len_studies < len(self._ot_study.trials)
+
+        return True
 
     def suggest(self, trial_id: str) -> Optional[Dict]:
         if not self._space:
@@ -130,7 +279,8 @@ class ConditionalOptunaSearch(OptunaSearch):
             params = self._points_to_evaluate.pop(0)
         else:
             # getattr will fetch the trial.suggest_ function on Optuna trials
-            params = self._fetch_params(ot_trial, self._space)
+            params = self._get_params(ot_trial)
+        params = {**self._const_values, **params}
         return unflatten_dict(params)
 
 
@@ -141,7 +291,7 @@ class OptunaTPETuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
-        num_samples: int = 500,
+        num_samples: int = 100,
         early_stopping=True,
         early_stopping_brackets=1,
         cache=False,
@@ -196,6 +346,11 @@ class OptunaTPETuner(RayTuneTuner):
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
+        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
+        for conf in self.default_grid:
+            for k, v in conf.items():
+                if str(v) in self._component_strings_:
+                    conf[k] = str(v)
         self._tune_kwargs["search_alg"] = ConditionalOptunaSearch(
             space=self.pipeline_blueprint,
             metric="mean_test_score",
@@ -203,6 +358,10 @@ class OptunaTPETuner(RayTuneTuner):
             points_to_evaluate=self.default_grid,
             seed=self.random_state,
         )
+
+    def _treat_config(self, config):
+        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
+        return super()._treat_config(config)
 
     def _search(self, X, y, groups=None):
         self._pre_search(X, y, groups=groups)
