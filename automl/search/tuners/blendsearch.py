@@ -99,11 +99,35 @@ class SharingSearchThread(SearchThread):
             # optuna doesn't handle error
             self._search_alg.on_trial_complete(trial_id, result, error)
         elif not error:
-            if trial_id in self._search_alg._ot_trials:
-                print(f"on_trial_complete trial_id {trial_id}")
-                if np.around(result["dataset_fraction"], 1) >= 1.0:
-                    print("adding trial to optuna")
-                    self._search_alg.on_trial_complete(
+            try:
+                if trial_id in self._search_alg._ot_trials:
+                    print(f"on_trial_complete trial_id {trial_id}")
+                    if "dataset_fraction" not in result or np.around(result["dataset_fraction"], 1) >= 1.0:
+                        print("adding trial to optuna")
+                        self._search_alg.on_trial_complete(
+                            trial_id,
+                            enforce_conditions_on_config(
+                                result,
+                                self._search_alg._conditional_space,
+                                prefix="config/",
+                                keys_to_keep=self._search_alg._space,
+                            ),
+                        )
+                    else:
+                        print("reporting trial to optuna")
+                        self._search_alg.on_trial_result(
+                            trial_id,
+                            enforce_conditions_on_config(
+                                result,
+                                self._search_alg._conditional_space,
+                                prefix="config/",
+                                keys_to_keep=self._search_alg._space,
+                            ),
+                        )
+                elif "dataset_fraction" not in result or np.around(result["dataset_fraction"], 1) >= 1.0:
+                    print("add_evaluated_trial")
+                    print(result)
+                    self._search_alg.add_evaluated_trial(
                         trial_id,
                         enforce_conditions_on_config(
                             result,
@@ -112,29 +136,8 @@ class SharingSearchThread(SearchThread):
                             keys_to_keep=self._search_alg._space,
                         ),
                     )
-                else:
-                    print("reporting trial to optuna")
-                    self._search_alg.on_trial_result(
-                        trial_id,
-                        enforce_conditions_on_config(
-                            result,
-                            self._search_alg._conditional_space,
-                            prefix="config/",
-                            keys_to_keep=self._search_alg._space,
-                        ),
-                    )
-            elif np.around(result["dataset_fraction"], 1) >= 1.0:
-                print("add_evaluated_trial")
-                print(result)
-                self._search_alg.add_evaluated_trial(
-                    trial_id,
-                    enforce_conditions_on_config(
-                        result,
-                        self._search_alg._conditional_space,
-                        prefix="config/",
-                        keys_to_keep=self._search_alg._space,
-                    ),
-                )
+            except:
+                print(f"couldn't add trial to optuna.\n{traceback.format_exc()}")
 
         if result:
             if self.cost_attr in result:
@@ -434,6 +437,8 @@ class ConditionalBlendSearch(BlendSearch):
                         self._admissible_max[key] = value
                     elif value < self._admissible_min[key]:
                         self._admissible_min[key] = value
+                print("normalized_config in on_trial_complete")
+                print(normalized_config)
                 if self._global_search_thread:
                     self._global_search_thread.on_trial_complete(
                         trial_id, result, error
@@ -463,8 +468,10 @@ class ConditionalBlendSearch(BlendSearch):
     def _valid(self, config: Dict) -> bool:
         """config validator"""
         print("_valid")
-        print(config)
         print(self._admissible_min)
+        print(self._admissible_min)
+        print("_valid config")
+        print(config)
         try:
             for key in self._admissible_min:
                 if key in config:
@@ -478,6 +485,8 @@ class ConditionalBlendSearch(BlendSearch):
                         return False
         except TypeError:
             normalized_config = self._ls.normalize(config)
+            print("_valid normalized_config")
+            print(normalized_config)
             for key in self._admissible_min:
                 if key in normalized_config:
                     value = normalized_config[key]
@@ -495,6 +504,7 @@ class ConditionalBlendSearch(BlendSearch):
         print("suggest")
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
+            print(f"suggest choice {choice} backup {backup}")
             # logger.debug(f"choice={choice}, backup={backup}")
             if choice < 0:
                 return None  # timeout
@@ -618,7 +628,11 @@ class ConditionalBlendSearch(BlendSearch):
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
+        print("_has_config_been_already_tried")
+        print(config)
         config_signature = self._ls.config_signature(config)
+        print(config_signature)
+        print(list(self._result.keys()))
         if not self._conditional_space:
             return (
                 (self._result.get(config_signature, None) in self._result),
@@ -631,13 +645,17 @@ class ConditionalBlendSearch(BlendSearch):
         result = None
         result = self._result.get(config_signature, None)
         if not result:
+            print(f"result has not been tried checking enforced config {enforced_config_signature}")
             result = self._result.get(enforced_config_signature, None)
+            if result:
+                print("enforced config found")
         return result, config_signature, enforced_config_signature
 
     def _should_skip(self, choice, trial_id, config) -> bool:
         """if config is None or config's result is known or above mem threshold
         return True; o.w. return False
         """
+        print("_should_skip")
         if config is None:
             return True
         (
@@ -646,8 +664,9 @@ class ConditionalBlendSearch(BlendSearch):
             enforced_config_signature,
         ) = self._has_config_been_already_tried(config)
         # check mem constraint
+        print(exists)
         if (
-            not exists
+            (not exists)
             and self._mem_threshold
             and self._mem_size(config) > self._mem_threshold
         ):
@@ -657,6 +676,7 @@ class ConditionalBlendSearch(BlendSearch):
             }
             exists = True
         if exists:
+            print("in exists in _should_skip")
             if not self._use_rs:
                 result = self._result.get(config_signature)
                 if not result and enforced_config_signature:
@@ -684,7 +704,7 @@ class BlendSearchTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
-        num_samples: int = 20,
+        num_samples: int = 100,
         early_stopping=True,
         cache=False,
         **tune_kwargs,
@@ -707,6 +727,7 @@ class BlendSearchTuner(RayTuneTuner):
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
+            min_dist = 0.25
 
             step = 4
             self.early_stopping_fractions_ = [min_dist]
