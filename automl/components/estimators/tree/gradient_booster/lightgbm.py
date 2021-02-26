@@ -53,7 +53,6 @@ class LGBMClassifier(GradientBoosterEstimator):
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
         "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
-
     }
     _default_tuning_grid_extended = {
         "subsample": UniformDistribution(0.6, 1.0),
@@ -61,6 +60,7 @@ class LGBMClassifier(GradientBoosterEstimator):
         "reg_alpha": UniformDistribution(1e-10, 1.0, log=True),
         "reg_lambda": UniformDistribution(1e-10, 1.0, log=True),
         "min_child_weight": UniformDistribution(0.001, 20.0, log=True),
+        "class_weight": CategoricalDistribution([None, "balanced"]),
     }
 
     _problem_types = {
@@ -100,7 +100,6 @@ class LGBMRegressor(GradientBoosterEstimator):
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
         "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
-
     }
     _default_tuning_grid_extended = {
         "subsample": UniformDistribution(0.6, 1.0),
@@ -116,5 +115,6 @@ class LGBMRegressor(GradientBoosterEstimator):
 
     _component_level = ComponentLevel.COMMON
     _has_own_cat_encoding = True
+
 
 # TODO: add dart, goss

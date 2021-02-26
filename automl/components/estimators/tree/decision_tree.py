@@ -45,6 +45,7 @@ class DecisionTreeClassifier(TreeEstimator):
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
         "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
+        "class_weight": CategoricalDistribution([None, "balanced", "balanced_subsample"]),
     }
 
     _problem_types = {
@@ -85,7 +86,7 @@ class DecisionTreeRegressor(TreeEstimator):
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
         "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
-    }
+  }
 
     _problem_types = {
         ProblemType.REGRESSION,

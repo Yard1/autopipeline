@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import Optional, Union
 from enum import IntEnum
+from collections import UserDict
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
 
@@ -26,15 +27,15 @@ class ComponentLevel(IntEnum):
         raise ValueError(f"Cannot translate '{label}' to a ComponentLevel object!")
 
 
-class ComponentConfig:
-    def __init__(self, **params) -> None:
-        self.params = params
+class ComponentConfig(UserDict):
+    def __init__(self, **kwargs) -> None:
+        self.data = kwargs
 
     def __getattr__(self, name: str):
-        return self.params.get(name, None)
+        return self.data.get(name, None)
 
     def __repr__(self) -> str:
-        return str(self.params)
+        return str(self.data)
 
 
 class Component(ABC):
@@ -108,12 +109,26 @@ class Component(ABC):
         return hash(self.__repr__())
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
-        return {**self._default_tuning_grid, **(self._default_tuning_grid_extended if use_extended else {}), **self.tuning_grid}
+        return {
+            **self._default_tuning_grid,
+            **(self._default_tuning_grid_extended if use_extended else {}),
+            **self.tuning_grid,
+        }
 
-    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False):
-        called_tuning_grid = {k: v(config, stage) for k, v in self._default_tuning_grid.items() if callable(v)}
+    def call_tuning_grid_funcs(
+        self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False
+    ):
+        called_tuning_grid = {
+            k: v(config, stage)
+            for k, v in self._default_tuning_grid.items()
+            if callable(v)
+        }
         if use_extended:
-            called_extended_tuning_grid = {k: v(config, stage) for k, v in self._default_tuning_grid_extended.items() if callable(v)}
+            called_extended_tuning_grid = {
+                k: v(config, stage)
+                for k, v in self._default_tuning_grid_extended.items()
+                if callable(v)
+            }
             called_tuning_grid = {**called_tuning_grid, **called_extended_tuning_grid}
         self.tuning_grid = {**called_tuning_grid, **self.tuning_grid}
 

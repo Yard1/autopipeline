@@ -67,9 +67,12 @@ def create_pipeline_blueprint(
     }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
+        "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
         "LGBMClassifier": LGBMClassifier(),
         "LGBMRegressor": LGBMRegressor(),
+        "RandomForestClassifier": RandomForestClassifier(),
+        "RandomForestRegressor": RandomForestRegressor(),
     }
     components = {
         **passthrough,
@@ -116,7 +119,8 @@ def create_pipeline_blueprint(
                     ),
                     (
                         "ScalerNormalizer",
-                        list(scalers_normalizers.values()) + [components["Passthrough_Scaler"]],
+                        list(scalers_normalizers.values())
+                        + [components["Passthrough_Scaler"]],
                         numeric_selector,
                     ),
                 ],

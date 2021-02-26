@@ -140,6 +140,9 @@ class SharingSearchThread(SearchThread):
             # optuna doesn't handle error
             self._search_alg.on_trial_complete(trial_id, result, error)
         elif not error:
+            print(
+                f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
+            )
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if (
@@ -246,6 +249,8 @@ class SharingSearchThread(SearchThread):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
+    _force_gs_after = 100
+
     def __init__(
         self,
         metric: Optional[str] = None,
@@ -327,10 +332,12 @@ class ConditionalBlendSearch(BlendSearch):
                 mode=mode,
                 seed=seed,
                 keep_const_values=False,
+                n_startup_trials=1,
             )
         else:
             self._gs = None
 
+        init_config = self._get_all_default_values(space)
         space, _ = get_all_tunable_params(space, to_str=True)
         space = get_tune_distributions(space)
         self._const_values = {
@@ -345,7 +352,6 @@ class ConditionalBlendSearch(BlendSearch):
                 {k: v for k, v in point.items() if k in space}
                 for point in points_to_evaluate
             ]
-        init_config = {}
         self._points_to_evaluate = points_to_evaluate
 
         self._ls = LocalSearch(
@@ -366,6 +372,18 @@ class ConditionalBlendSearch(BlendSearch):
             resources_per_trial.get("mem") if resources_per_trial else None
         )
         self._init_search()
+
+    def _get_all_default_values(self, pipeline_blueprint) -> dict:
+        default_grid = {
+            k: v for k, v in pipeline_blueprint.get_all_distributions().items()
+        }
+        default_values = {}
+        for k, v in default_grid.items():
+            for v2 in v.values:
+                for k3, v3 in v2.get_tuning_grid().items():
+                    name = v2.get_hyperparameter_key_suffix(k, k3)
+                    default_values[name] = v3.default
+        return default_values
 
     @property
     def keys_to_keep(self):
@@ -388,6 +406,7 @@ class ConditionalBlendSearch(BlendSearch):
                 max_prune_attr=self._ls.max_resource,
             )
         }
+        self._last_global_search = 0
 
     @property
     def _global_search_thread(self):
@@ -408,6 +427,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._conditional_space,
             self._time_attr,
             self._const_values,
+            self._last_global_search,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -429,6 +449,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._conditional_space,
             self._time_attr,
             self._const_values,
+            self._last_global_search,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
@@ -484,10 +505,6 @@ class ConditionalBlendSearch(BlendSearch):
                             self._admissible_max[key] = value
                         elif value < self._admissible_min[key]:
                             self._admissible_min[key] = value
-                if self._global_search_thread:
-                    self._global_search_thread.on_trial_complete(
-                        trial_id, result, error
-                    )
             elif self._create_condition(result):
                 # thread creator
                 assert len(config) == len(self._ls.space) + int(
@@ -502,6 +519,11 @@ class ConditionalBlendSearch(BlendSearch):
                 )
                 thread_id = self._thread_count
                 self._thread_count += 1
+
+        if thread_id != 0 and self._global_search_thread:
+            self._global_search_thread.on_trial_complete(
+                trial_id, result, error
+            )
 
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
@@ -541,9 +563,16 @@ class ConditionalBlendSearch(BlendSearch):
         """choose thread, suggest a valid config"""
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
-            print(f"choice={choice}, backup={backup}")
             if choice < 0:
                 return None  # timeout
+            elif choice:
+                if self._last_global_search >= self._force_gs_after and backup:
+                    choice = 0
+                else:
+                    self._last_global_search += 1
+            if not choice:
+                self._last_global_search = 0
+            print(f"choice={choice}, backup={backup}, self._last_global_search={self._last_global_search}")
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
             config = {k: v for k, v in config.items() if k in self.keys_to_keep}

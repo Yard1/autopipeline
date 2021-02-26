@@ -17,11 +17,11 @@ optuna_param = _OptunaParam()
 
 
 from ray.tune.sample import Integer
-from ray.tune.sample import LogUniform
+from ray.tune.sample import LogUniform as _LogUniform
 
 
 class LogUniformInteger(Integer):
-    class _LogUniform(LogUniform):
+    class LogUniform(_LogUniform):
         def sample(self, domain: "Integer", spec=None, size: int = 1):
             assert domain.lower > 0, "LogUniform needs a lower bound greater than 0"
             assert (
@@ -50,7 +50,7 @@ class LogUniformInteger(Integer):
                 "instead."
             )
         new = copy(self)
-        new.set_sampler(self._LogUniform(base))
+        new.set_sampler(self.LogUniform(base))
         return new
 
 
@@ -361,8 +361,23 @@ class CategoricalDistribution(Distribution):
     - `None` is not supported  as a value for ConfigSpace.
     """
 
+    None_str = "!None"
+
     def __init__(self, values):
-        self.values = list(values)
+        self.values = [x if x is not None else self.None_str for x in values]
+
+    @property
+    def default(self):
+        if not hasattr(self, "_default"):
+            raise KeyError("default value has not been set.")
+        return self._default
+
+    @default.setter
+    def default(self, val):
+        if val is None:
+            val = self.None_str
+        self._validate_default(val)
+        self._default = val
 
     def _validate_default(self, default):
         if not default in self.values:
@@ -395,14 +410,13 @@ class CategoricalDistribution(Distribution):
         try:
             return CSH.CategoricalHyperparameter(
                 name=label,
-                choices=[x if x is not None else "!None" for x in self.values],
-                default_value=self.default if self.default is not None else "!None",
+                choices=self.values,
+                default_value=self.default
+                if self.default is not None
+                else self.None_str,
             )
         except KeyError:
-            return CSH.CategoricalHyperparameter(
-                name=label,
-                choices=[x if x is not None else "!None" for x in self.values],
-            )
+            return CSH.CategoricalHyperparameter(name=label, choices=self.values)
 
     def get_tune(self):
         from ray import tune
