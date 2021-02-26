@@ -16,6 +16,44 @@ class _OptunaParam:
 optuna_param = _OptunaParam()
 
 
+from ray.tune.sample import Integer
+from ray.tune.sample import LogUniform
+
+
+class LogUniformInteger(Integer):
+    class _LogUniform(LogUniform):
+        def sample(self, domain: "Integer", spec=None, size: int = 1):
+            assert domain.lower > 0, "LogUniform needs a lower bound greater than 0"
+            assert (
+                0 < domain.upper < float("inf")
+            ), "LogUniform needs a upper bound greater than 0"
+            logmin = np.log(domain.lower) / np.log(self.base)
+            logmax = np.log(domain.upper) / np.log(self.base)
+
+            items = self.base ** (np.random.uniform(logmin, logmax, size=size))
+            items = np.round(items).astype(int)
+            return items if len(items) > 1 else domain.cast(items[0])
+
+    def loguniform(self, base: float = 10):
+        if not self.lower > 0:
+            raise ValueError(
+                "LogUniform requires a lower bound greater than 0."
+                f"Got: {self.lower}. Did you pass a variable that has "
+                "been log-transformed? If so, pass the non-transformed value "
+                "instead."
+            )
+        if not 0 < self.upper < float("inf"):
+            raise ValueError(
+                "LogUniform requires a upper bound greater than 0. "
+                f"Got: {self.lower}. Did you pass a variable that has "
+                "been log-transformed? If so, pass the non-transformed value "
+                "instead."
+            )
+        new = copy(self)
+        new.set_sampler(self._LogUniform(base))
+        return new
+
+
 class Distribution:
     def __init__(self):
         raise NotImplementedError("This is an abstract class.")
@@ -220,44 +258,6 @@ class IntUniformDistribution(Distribution):
             )
 
     def get_tune(self):
-        from ray.tune.sample import Integer
-        from ray.tune.sample import LogUniform
-
-        class LogUniformInteger(Integer):
-            class _LogUniform(LogUniform):
-                def sample(self, domain: "Integer", spec=None, size: int = 1):
-                    assert (
-                        domain.lower > 0
-                    ), "LogUniform needs a lower bound greater than 0"
-                    assert (
-                        0 < domain.upper < float("inf")
-                    ), "LogUniform needs a upper bound greater than 0"
-                    logmin = np.log(domain.lower) / np.log(self.base)
-                    logmax = np.log(domain.upper) / np.log(self.base)
-
-                    items = self.base ** (np.random.uniform(logmin, logmax, size=size))
-                    items = np.round(items).astype(int)
-                    return items if len(items) > 1 else domain.cast(items[0])
-
-            def loguniform(self, base: float = 10):
-                if not self.lower > 0:
-                    raise ValueError(
-                        "LogUniform requires a lower bound greater than 0."
-                        f"Got: {self.lower}. Did you pass a variable that has "
-                        "been log-transformed? If so, pass the non-transformed value "
-                        "instead."
-                    )
-                if not 0 < self.upper < float("inf"):
-                    raise ValueError(
-                        "LogUniform requires a upper bound greater than 0. "
-                        f"Got: {self.lower}. Did you pass a variable that has "
-                        "been log-transformed? If so, pass the non-transformed value "
-                        "instead."
-                    )
-                new = copy(self)
-                new.set_sampler(self._LogUniform(base))
-                return new
-
         if self.log:
             return LogUniformInteger(self.lower, self.upper).loguniform(10)
         else:
@@ -427,6 +427,7 @@ class FunctionDistribution(Distribution):
         except KeyError:
             pass
         return dist
+
 
 def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_skopt() for k, v in distributions.items()}

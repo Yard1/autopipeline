@@ -5,7 +5,7 @@ from ....search.distributions import IntUniformDistribution
 # https://github.com/automl/auto-sklearn/blob/master/autosklearn/pipeline/components/classification/decision_tree.py
 def estimate_max_depth(config, stage) -> IntUniformDistribution:
     X = config.X
-    if not X:
+    if X is None:
         return IntUniformDistribution(1, 15)
     num_features = X.shape[1]
     min_max_depth_factor = 0

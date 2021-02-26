@@ -20,9 +20,9 @@ from .....problems import ProblemType
 
 def get_lgbm_n_estimators(config, space):
     X = config.X
-    if X:
-        return IntUniformDistribution(4, min(32768, int(X.shape[0])), log=True)
-    return IntUniformDistribution(4, 100, log=True)
+    if X is None:
+        return IntUniformDistribution(4, 100, log=True)
+    return IntUniformDistribution(4, min(32768, int(X.shape[0])), log=True)
 
 
 class LGBMClassifier(GradientBoosterEstimator):
@@ -42,8 +42,8 @@ class LGBMClassifier(GradientBoosterEstimator):
         "subsample": 1.0,
         "subsample_freq": 0,
         "colsample_bytree": 1.0,
-        "reg_alpha": 0.0,
-        "reg_lambda": 0.0,
+        "reg_alpha": 1e-10,
+        "reg_lambda": 1e-10,
         "random_state": None,
         "n_jobs": 1,
         "silent": True,
@@ -51,7 +51,7 @@ class LGBMClassifier(GradientBoosterEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "max_leaves": FunctionDistribution(get_lgbm_n_estimators),
+        "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
 
     }
@@ -89,8 +89,8 @@ class LGBMRegressor(GradientBoosterEstimator):
         "subsample": 1.0,
         "subsample_freq": 0,
         "colsample_bytree": 1.0,
-        "reg_alpha": 0.0,
-        "reg_lambda": 0.0,
+        "reg_alpha": 1e-10,
+        "reg_lambda": 1e-10,
         "random_state": None,
         "n_jobs": 1,
         "silent": True,
@@ -98,7 +98,7 @@ class LGBMRegressor(GradientBoosterEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "max_leaves": FunctionDistribution(get_lgbm_n_estimators),
+        "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
 
     }

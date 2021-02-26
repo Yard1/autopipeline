@@ -142,4 +142,6 @@ class OrdinalEncoder(Encoder):
         if config is None:
             return True
         super_check = super().is_component_valid(config, stage)
-        return super_check and getattr(config.estimator, "_has_own_cat_encoding", False)
+        return super_check and (
+            config.estimator is None or getattr(config.estimator, "_has_own_cat_encoding", False)
+        )

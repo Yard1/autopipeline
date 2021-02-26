@@ -136,7 +136,7 @@ class ColumnTransformer(Flow):
     def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False):
         super().call_tuning_grid_funcs(config, stage, use_extended=use_extended)
         for name, transformer, columns in self.components:
-            recursively_call_tuning_grid_funcs(transformer, use_extended=use_extended)
+            recursively_call_tuning_grid_funcs(transformer, config=config, stage=stage, use_extended=use_extended)
 
     def __copy__(self):
         # self.spam is to be ignored, it is calculated anew for the copy

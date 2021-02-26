@@ -67,7 +67,10 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._conditional_space = {k: v for k, v in self._conditional_space.items() if k in self._space}
 
         self._points_to_evaluate = points_to_evaluate
-        n_startup_trials = 10
+        if self._points_to_evaluate:
+            n_startup_trials = max(10-len(self._points_to_evaluate), 4)
+        else:
+            n_startup_trials = 6
 
         self._study_name = "optuna"  # Fixed study name for in-memory storage
         self._sampler = sampler or ot.samplers.TPESampler(
@@ -269,6 +272,8 @@ class ConditionalOptunaSearch(OptunaSearch):
                     cls=self.__class__.__name__, metric=self._metric, mode=self._mode
                 )
             )
+
+        print(f"Optuna has {len(self._ot_study.trials)} trials in memory")
 
         if trial_id not in self._ot_trials:
             ot_trial_id = self._storage.create_new_trial(self._ot_study._study_id)

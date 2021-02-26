@@ -41,13 +41,12 @@ from flaml.searcher.search_thread import SearchThread
 from flaml.searcher.blendsearch import BlendSearch
 from flaml.searcher.flow2 import FLOW2
 
-LocalSearch = FLOW2
-
 import logging
 
 logger = logging.getLogger(__name__)
 
 from ray.tune.suggest import Searcher
+from ray.tune import sample
 
 from ray.tune.suggest.suggestion import (
     UNDEFINED_METRIC_MODE,
@@ -64,6 +63,39 @@ from ...problems import ProblemType
 
 
 GlobalSearch = ConditionalOptunaSearch
+
+
+class PatchedFLOW2(FLOW2):
+    @property
+    def step_lower_bound(self) -> float:
+        step_lb = self._step_lb
+        for key in self._tunable_keys:
+            domain = self.space[key]
+            sampler = domain.get_sampler()
+            if isinstance(sampler, sample.Quantized):
+                sampler_inner = sampler.get_sampler()
+                if str(sampler_inner) == "LogUniform":
+                    if key in self.best_config:
+                        step_lb = min(
+                            step_lb,
+                            np.log(1.0 + sampler.q / self.best_config[key])
+                            / np.log(domain.upper / domain.lower),
+                        )
+            elif isinstance(domain, sample.Integer) and str(sampler) == "LogUniform":
+                if key in self.best_config:
+                    step_lb = min(
+                        step_lb,
+                        np.log(1.0 + 1.0 / self.best_config[key])
+                        / np.log(domain.upper / domain.lower),
+                    )
+        if np.isinf(step_lb):
+            step_lb = self.STEP_LOWER_BOUND
+        else:
+            step_lb *= np.sqrt(self.dim)
+        return step_lb
+
+
+LocalSearch = PatchedFLOW2
 
 
 class SharingSearchThread(SearchThread):
@@ -111,8 +143,8 @@ class SharingSearchThread(SearchThread):
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if (
-                        self.prune_attr
-                        and np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                        not self.prune_attr
+                        or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
                     ):
                         self._search_alg.on_trial_complete(
                             trial_id,
@@ -134,8 +166,8 @@ class SharingSearchThread(SearchThread):
                             ),
                         )
                 elif (
-                    self.prune_attr
-                    and np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                    not self.prune_attr
+                    or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
                 ):
                     self._search_alg.add_evaluated_trial(
                         trial_id,
@@ -509,7 +541,7 @@ class ConditionalBlendSearch(BlendSearch):
         """choose thread, suggest a valid config"""
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
-            # logger.debug(f"choice={choice}, backup={backup}")
+            print(f"choice={choice}, backup={backup}")
             if choice < 0:
                 return None  # timeout
             self._use_rs = False

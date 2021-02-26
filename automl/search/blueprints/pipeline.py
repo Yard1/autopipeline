@@ -59,6 +59,7 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
+        "OrdinalEncoder": OrdinalEncoder(),
     }
     feature_selectors = {
         "BorutaSHAPClassification": BorutaSHAPClassification(),
@@ -67,6 +68,8 @@ def create_pipeline_blueprint(
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
         "LogisticRegression": LogisticRegression(),
+        "LGBMClassifier": LGBMClassifier(),
+        "LGBMRegressor": LGBMRegressor(),
     }
     components = {
         **passthrough,
@@ -113,7 +116,7 @@ def create_pipeline_blueprint(
                     ),
                     (
                         "ScalerNormalizer",
-                        list(scalers_normalizers.values()),
+                        list(scalers_normalizers.values()) + [components["Passthrough_Scaler"]],
                         numeric_selector,
                     ),
                 ],
@@ -160,15 +163,13 @@ def create_pipeline_blueprint(
         steps=pipeline_steps,
         # preset_configurations=[d, d2]
     )
-    config = (
-        ComponentConfig(
-            level=level,
-            problem_type=problem_type,
-            categorical_columns=categorical_columns,
-            numeric_columns=numeric_columns,
-            X=X,
-            y=y,
-        ),
+    config = ComponentConfig(
+        level=level,
+        problem_type=problem_type,
+        categorical_columns=categorical_columns,
+        numeric_columns=numeric_columns,
+        X=X,
+        y=y,
     )
     pipeline.remove_invalid_components(
         pipeline_config=config,
