@@ -70,7 +70,12 @@ class SharingSearchThread(SearchThread):
     """Class of global or local search thread"""
 
     def __init__(
-        self, mode: str = "min", search_alg: Optional[Searcher] = None, cost_attr=None
+        self,
+        mode: str = "min",
+        search_alg: Optional[Searcher] = None,
+        cost_attr=None,
+        prune_attr=None,
+        max_prune_attr=None,
     ):
         """When search_alg is omitted, use local search FLOW2"""
         self._search_alg = search_alg
@@ -88,6 +93,10 @@ class SharingSearchThread(SearchThread):
         self.priority = self.speed = 0
         if cost_attr:
             self.cost_attr = cost_attr
+        self.prune_attr = prune_attr
+        if prune_attr:
+            assert max_prune_attr
+        self.max_prune_attr = max_prune_attr
 
     def on_trial_complete(
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
@@ -101,9 +110,10 @@ class SharingSearchThread(SearchThread):
         elif not error:
             try:
                 if trial_id in self._search_alg._ot_trials:
-                    print(f"on_trial_complete trial_id {trial_id}")
-                    if "dataset_fraction" not in result or np.around(result["dataset_fraction"], 1) >= 1.0:
-                        print("adding trial to optuna")
+                    if (
+                        self.prune_attr
+                        and np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                    ):
                         self._search_alg.on_trial_complete(
                             trial_id,
                             enforce_conditions_on_config(
@@ -114,7 +124,6 @@ class SharingSearchThread(SearchThread):
                             ),
                         )
                     else:
-                        print("reporting trial to optuna")
                         self._search_alg.on_trial_result(
                             trial_id,
                             enforce_conditions_on_config(
@@ -124,9 +133,10 @@ class SharingSearchThread(SearchThread):
                                 keys_to_keep=self._search_alg._space,
                             ),
                         )
-                elif "dataset_fraction" not in result or np.around(result["dataset_fraction"], 1) >= 1.0:
-                    print("add_evaluated_trial")
-                    print(result)
+                elif (
+                    self.prune_attr
+                    and np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                ):
                     self._search_alg.add_evaluated_trial(
                         trial_id,
                         enforce_conditions_on_config(
@@ -137,7 +147,9 @@ class SharingSearchThread(SearchThread):
                         ),
                     )
             except:
-                print(f"couldn't add trial to optuna.\n{traceback.format_exc()}")
+                logger.warning(
+                    f"couldn't add trial to optuna.\n{traceback.format_exc()}"
+                )
 
         if result:
             if self.cost_attr in result:
@@ -301,9 +313,7 @@ class ConditionalBlendSearch(BlendSearch):
                 {k: v for k, v in point.items() if k in space}
                 for point in points_to_evaluate
             ]
-            init_config = points_to_evaluate[0]
-        else:
-            init_config = {}
+        init_config = {}
         self._points_to_evaluate = points_to_evaluate
 
         self._ls = LocalSearch(
@@ -339,7 +349,11 @@ class ConditionalBlendSearch(BlendSearch):
         self._search_thread_pool = {
             # id: int -> thread: SearchThread
             0: SharingSearchThread(
-                self._ls.mode, self._gs, cost_attr=self._ls.prune_attr
+                self._ls.mode,
+                self._gs,
+                cost_attr=self._ls.prune_attr,
+                prune_attr=self._ls.prune_attr,
+                max_prune_attr=self._ls.max_resource,
             )
         }
 
@@ -430,15 +444,14 @@ class ConditionalBlendSearch(BlendSearch):
                 self._metric_target = result[self._metric]
             if thread_id:  # from local search
                 # update admissible region
-                normalized_config = self._ls.normalize(config)
-                for key in self._admissible_min:
-                    value = normalized_config[key]
-                    if value > self._admissible_max[key]:
-                        self._admissible_max[key] = value
-                    elif value < self._admissible_min[key]:
-                        self._admissible_min[key] = value
-                print("normalized_config in on_trial_complete")
-                print(normalized_config)
+                if self._admissible_min:
+                    normalized_config = self._ls.normalize(config)
+                    for key in self._admissible_min:
+                        value = normalized_config[key]
+                        if value > self._admissible_max[key]:
+                            self._admissible_max[key] = value
+                        elif value < self._admissible_min[key]:
+                            self._admissible_min[key] = value
                 if self._global_search_thread:
                     self._global_search_thread.on_trial_complete(
                         trial_id, result, error
@@ -467,11 +480,6 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _valid(self, config: Dict) -> bool:
         """config validator"""
-        print("_valid")
-        print(self._admissible_min)
-        print(self._admissible_min)
-        print("_valid config")
-        print(config)
         try:
             for key in self._admissible_min:
                 if key in config:
@@ -485,8 +493,6 @@ class ConditionalBlendSearch(BlendSearch):
                         return False
         except TypeError:
             normalized_config = self._ls.normalize(config)
-            print("_valid normalized_config")
-            print(normalized_config)
             for key in self._admissible_min:
                 if key in normalized_config:
                     value = normalized_config[key]
@@ -501,41 +507,38 @@ class ConditionalBlendSearch(BlendSearch):
 
     def suggest(self, trial_id: str) -> Optional[Dict]:
         """choose thread, suggest a valid config"""
-        print("suggest")
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
-            print(f"suggest choice {choice} backup {backup}")
             # logger.debug(f"choice={choice}, backup={backup}")
             if choice < 0:
                 return None  # timeout
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
-            config = {k: v for k, v in config.items() if k not in self.keys_to_keep}
-            if not config or len(config) != len(self._ls.space):
+            config = {k: v for k, v in config.items() if k in self.keys_to_keep}
+            if not config or (
+                len(config) != len(self._ls.space)
+                and len(config) != len(self._ls.space) + int(bool(self._ls.prune_attr))
+            ):
                 try:
+                    assert backup is not choice
                     config = {
                         **self._search_thread_pool[backup]._search_alg.best_config,
                         **config,
                     }
-                    print(config)
                     assert len(config) == len(self._ls.space) or len(config) == len(
                         self._ls.space
                     ) + int(bool(self._ls.prune_attr))
                 except:
-                    print("assertion failed")
                     for _, generated in generate_variants({"config": self._ls.space}):
                         config = {**generated["config"], **config}
                         break
-                    print(config)
             skip = self._should_skip(choice, trial_id, config)
             if skip:
-                print("skipping")
                 if choice:
                     # logger.info(f"skipping choice={choice}, config={config}")
                     return None
                 # use rs
                 self._use_rs = True
-                print("using rs")
                 for _, generated in generate_variants({"config": self._ls.space}):
                     config = generated["config"]
                     break
@@ -546,10 +549,8 @@ class ConditionalBlendSearch(BlendSearch):
             # if not choice: logger.info(config)
             if choice or backup == choice or self._valid(config):
                 # LS or valid or no backup choice
-                print("LS or valid or no backup choice")
                 self._trial_proposed_by[trial_id] = choice
             else:  # invalid config proposed by GS
-                print("invalid config proposed by GS")
                 if not self._use_rs:
                     self._search_thread_pool[choice].on_trial_complete(
                         trial_id, {}, error=True
@@ -558,6 +559,7 @@ class ConditionalBlendSearch(BlendSearch):
                 config = self._search_thread_pool[backup].suggest(trial_id)
                 if not config or len(config) != len(self._ls.space):
                     try:
+                        assert backup is not choice
                         config = {
                             **self._search_thread_pool[choice]._search_alg.best_config,
                             **config,
@@ -578,7 +580,6 @@ class ConditionalBlendSearch(BlendSearch):
                 choice = backup
             # if choice: self._pending.add(choice) # local search thread pending
             if not choice:
-                print("choice is none")
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
                     config[self._ls.prune_attr] = self._ls.min_resource
@@ -591,7 +592,6 @@ class ConditionalBlendSearch(BlendSearch):
             if enforced_config_signature:
                 self._result[enforced_config_signature] = {}
         else:  # use init config
-            print("using init config")
             init_config = (
                 self._points_to_evaluate.pop(0)
                 if self._points_to_evaluate
@@ -617,22 +617,14 @@ class ConditionalBlendSearch(BlendSearch):
                 return None  # running but no result yet
             self._init_used = True
         # logger.info(f"config={config}")
-        print(list(config.keys()))
-        print(list(self._ls.space.keys()))
         assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         self._suggested_configs[trial_id] = config
         clean_config = enforce_conditions_on_config(config, self._conditional_space)
         clean_config = {**self._const_values, **clean_config}
-        print("CONFIG")
-        print(clean_config)
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
-        print("_has_config_been_already_tried")
-        print(config)
         config_signature = self._ls.config_signature(config)
-        print(config_signature)
-        print(list(self._result.keys()))
         if not self._conditional_space:
             return (
                 (self._result.get(config_signature, None) in self._result),
@@ -645,17 +637,13 @@ class ConditionalBlendSearch(BlendSearch):
         result = None
         result = self._result.get(config_signature, None)
         if not result:
-            print(f"result has not been tried checking enforced config {enforced_config_signature}")
             result = self._result.get(enforced_config_signature, None)
-            if result:
-                print("enforced config found")
         return result, config_signature, enforced_config_signature
 
     def _should_skip(self, choice, trial_id, config) -> bool:
         """if config is None or config's result is known or above mem threshold
         return True; o.w. return False
         """
-        print("_should_skip")
         if config is None:
             return True
         (
@@ -664,7 +652,6 @@ class ConditionalBlendSearch(BlendSearch):
             enforced_config_signature,
         ) = self._has_config_been_already_tried(config)
         # check mem constraint
-        print(exists)
         if (
             (not exists)
             and self._mem_threshold
@@ -676,7 +663,6 @@ class ConditionalBlendSearch(BlendSearch):
             }
             exists = True
         if exists:
-            print("in exists in _should_skip")
             if not self._use_rs:
                 result = self._result.get(config_signature)
                 if not result and enforced_config_signature:
