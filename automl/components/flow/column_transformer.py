@@ -7,6 +7,7 @@ from .utils import (
     get_single_component_from_iterable,
     is_component_valid_iterable,
     get_step_choice_grid,
+    recursively_call_tuning_grid_funcs,
 )
 from ..component import ComponentConfig
 from ...search.stage import AutoMLStage
@@ -127,10 +128,15 @@ class ColumnTransformer(Flow):
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_grid = super().get_tuning_grid(use_extended=use_extended)
         transformer_grids = {
-            name: get_step_choice_grid(transformer)
-            for name, transformer, columns in self.final_parameters["transformers"]
+            name: get_step_choice_grid(transformer, use_extended=use_extended)
+            for name, transformer, columns in self.components
         }
         return {**transformer_grids, **default_grid}
+
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False):
+        super().call_tuning_grid_funcs(config, stage, use_extended=use_extended)
+        for name, transformer, columns in self.components:
+            recursively_call_tuning_grid_funcs(transformer, use_extended=use_extended)
 
     def __copy__(self):
         # self.spam is to be ignored, it is calculated anew for the copy

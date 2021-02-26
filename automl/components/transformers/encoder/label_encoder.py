@@ -1,17 +1,18 @@
-from automl.problems.problem_type import ProblemType
-import numpy as np
 import pandas as pd
 
-from sklearn.preprocessing import LabelEncoder as _LabelEncoder
+from sklearn.preprocessing import (
+    LabelEncoder as _LabelEncoder,
+)
 
 from .encoder import Encoder
 from ..transformer import DataType
 from ...component import ComponentLevel
-from ...compatibility.pandas import PandasSeriesTransformerMixin
+from ....problems import ProblemType
+from ...compatibility.pandas import (
+    PandasSeriesTransformerMixin,
+)
 
-from sklearn.utils import column_or_1d
 from sklearn.utils.validation import check_is_fitted
-from sklearn.preprocessing._label import _num_samples
 
 
 class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
@@ -109,9 +110,6 @@ class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
         else:
             return super().fit(y)
         return y
-
-    def _more_tags(self):
-        return {"X_types": ["1dlabels"]}
 
 
 class LabelEncoder(Encoder):

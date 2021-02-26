@@ -66,6 +66,13 @@ class Component(ABC):
                 )
             self._default_tuning_grid[k].default = self._default_parameters[k]
 
+        for k in self._default_tuning_grid_extended.keys():
+            if k not in self._default_parameters:
+                raise KeyError(
+                    f"_default_parameters is missing key {k} present in _default_tuning_grid"
+                )
+            self._default_tuning_grid_extended[k].default = self._default_parameters[k]
+
     def __call__(
         self,
         pipeline_config: dict = None,
@@ -101,12 +108,14 @@ class Component(ABC):
         return hash(self.__repr__())
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
-        default_tuning_grid = (
-            self._default_tuning_grid_extended
-            if use_extended
-            else self._default_tuning_grid
-        )
-        return {**default_tuning_grid, **self.tuning_grid}
+        return {**self._default_tuning_grid, **(self._default_tuning_grid_extended if use_extended else {}) **self.tuning_grid}
+
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False):
+        called_tuning_grid = {k: v(config, stage) for k, v in self._default_tuning_grid if callable(v)}
+        if use_extended:
+            called_extended_tuning_grid = {k: v(config, stage) for k, v in self._default_tuning_grid_extended if callable(v)}
+            called_tuning_grid = {**called_tuning_grid, **called_extended_tuning_grid}
+        self.tuning_grid = {**called_tuning_grid, **self.tuning_grid}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

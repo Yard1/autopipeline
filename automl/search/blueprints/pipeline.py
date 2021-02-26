@@ -23,8 +23,10 @@ from automl.components import estimators
 def _scaler_passthrough_condition(config, stage):
     return config.estimator is None or isinstance(config.estimator, TreeEstimator)
 
+
 categorical_selector = make_column_selector(dtype_include="category")
 numeric_selector = make_column_selector(dtype_exclude="category")
+
 
 def create_pipeline_blueprint(
     problem_type: ProblemType,
@@ -158,8 +160,8 @@ def create_pipeline_blueprint(
         steps=pipeline_steps,
         # preset_configurations=[d, d2]
     )
-    pipeline.remove_invalid_components(
-        pipeline_config=ComponentConfig(
+    config = (
+        ComponentConfig(
             level=level,
             problem_type=problem_type,
             categorical_columns=categorical_columns,
@@ -167,7 +169,10 @@ def create_pipeline_blueprint(
             X=X,
             y=y,
         ),
+    )
+    pipeline.remove_invalid_components(
+        pipeline_config=config,
         current_stage=AutoMLStage.PREPROCESSING,
     )
-
+    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
     return pipeline

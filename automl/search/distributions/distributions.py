@@ -413,6 +413,21 @@ class CategoricalDistribution(Distribution):
         return f"CategoricalDistribution(values={self.values})"
 
 
+class FunctionDistribution(Distribution):
+    def __init__(self, function):
+        self.function = function
+
+    def _validate_default(self, default):
+        return True
+
+    def __call__(self, config, stage):
+        dist = self.function(config, stage)
+        try:
+            dist.default = self.default
+        except KeyError:
+            pass
+        return dist
+
 def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_skopt() for k, v in distributions.items()}
 

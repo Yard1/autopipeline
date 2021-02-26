@@ -4,10 +4,7 @@ from copy import copy
 from sklearn.base import clone
 from imblearn.pipeline import Pipeline as _ImblearnPipeline
 from sklearn.pipeline import Pipeline as _Pipeline, _fit_transform_one
-from sklearn.utils import (
-    Bunch,
-    _print_elapsed_time,
-)
+from sklearn.utils import _print_elapsed_time
 from sklearn.utils.validation import check_memory
 
 from ..flow import Flow
@@ -16,6 +13,7 @@ from ..utils import (
     get_single_component_from_iterable,
     is_component_valid_iterable,
     get_step_choice_grid,
+    recursively_call_tuning_grid_funcs,
 )
 from ..utils import convert_tuning_grid
 from ...transformers import *
@@ -239,10 +237,14 @@ class Pipeline(Flow):
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_grid = super().get_tuning_grid(use_extended=use_extended)
         step_grids = {
-            name: get_step_choice_grid(step)
-            for name, step in self.final_parameters["steps"]
+            name: get_step_choice_grid(step, use_extended=use_extended) for name, step in self.components
         }
         return {**step_grids, **default_grid}
+
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False):
+        super().call_tuning_grid_funcs(config, stage, use_extended=use_extended)
+        for name, step in self.components:
+            recursively_call_tuning_grid_funcs(step, use_extended=use_extended)
 
     def __copy__(self):
         # self.spam is to be ignored, it is calculated anew for the copy

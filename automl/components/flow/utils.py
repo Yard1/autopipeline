@@ -5,12 +5,21 @@ from ...search.stage import AutoMLStage
 from ...search.distributions import CategoricalDistribution
 
 
-def get_step_choice_grid(step, return_distribution: bool = False):
+def get_step_choice_grid(step, return_distribution: bool = False, use_extended:bool = False):
     if isinstance(step, Iterable):
         grid = step if not return_distribution else CategoricalDistribution(step)
     else:
-        grid = step.get_tuning_grid()
+        grid = step.get_tuning_grid(use_extended=use_extended)
     return grid
+
+
+def recursively_call_tuning_grid_funcs(step, config, stage, use_extended: bool = False):
+    if isinstance(step, Iterable):
+        for component in step:
+            if isinstance(component, Component):
+                component.call_tuning_grid_funcs(config=config, stage=stage, use_extended=use_extended)
+    else:
+        step.call_tuning_grid_funcs(config=config, stage=stage, use_extended=use_extended)
 
 
 def append_components_name_if_possible(name: str, flow: Flow) -> str:

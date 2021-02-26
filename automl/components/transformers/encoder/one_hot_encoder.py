@@ -5,8 +5,9 @@ from sklearn.preprocessing import OneHotEncoder as _OneHotEncoder
 
 from .encoder import Encoder
 from ..transformer import DataType
-from ...component import ComponentLevel
+from ...component import ComponentLevel, ComponentConfig
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
+from ....search.stage import AutoMLStage
 
 
 class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
@@ -35,3 +36,9 @@ class OneHotEncoder(Encoder):
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        if config is None:
+            return True
+        super_check = super().is_component_valid(config, stage)
+        return super_check and not getattr(config.estimator, "_has_own_cat_encoding", False)
