@@ -11,7 +11,7 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
 
-from .utils import ray_context, split_list_into_chunks
+from .utils import ray_context, split_list_into_chunks, get_all_tunable_params
 from ..utils import call_component_if_needed
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
@@ -140,6 +140,7 @@ class RayTuneTuner(Tuner):
             logger.info(f"Cache dir set as '{self._cache}'")
 
     def _treat_config(self, config):
+        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
         return {
             remove_component_suffix(k): call_component_if_needed(
                 v, random_state=self.random_state
@@ -180,7 +181,7 @@ class RayTuneTuner(Tuner):
                 # return_train_score=self.return_train_score,
                 # scoring=self.scoring,
             )
-
+            gc.collect()
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
                 mean_test_score=np.mean(scores["test_score"]),
@@ -190,6 +191,11 @@ class RayTuneTuner(Tuner):
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
         self._tune_kwargs["num_samples"] += len(self.default_grid)
+        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
+        for conf in self.default_grid:
+            for k, v in conf.items():
+                if str(v) in self._component_strings_:
+                    conf[k] = str(v)
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}

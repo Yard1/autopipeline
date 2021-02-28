@@ -40,7 +40,7 @@ class DecisionTreeClassifier(TreeEstimator):
         "max_depth": FunctionDistribution(estimate_max_depth),
         "min_samples_split": IntUniformDistribution(2, 20),
         "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([1.0, "sqrt", "log2"]),
+        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
     }
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
@@ -68,7 +68,7 @@ class DecisionTreeRegressor(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 0.0,
-        "max_features": 1.0,  # TODO: make dynamic
+        "max_features": None,  # TODO: make dynamic
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 0.0,
@@ -81,7 +81,7 @@ class DecisionTreeRegressor(TreeEstimator):
         "max_depth": FunctionDistribution(estimate_max_depth),
         "min_samples_split": IntUniformDistribution(2, 20),
         "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([1.0, "sqrt", "log2"]),
+        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
     }
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),

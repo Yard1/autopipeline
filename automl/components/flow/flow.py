@@ -39,3 +39,6 @@ class Flow(Transformer):
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
         raise NotImplementedError()
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        return super().is_component_valid(config, stage) and self.components

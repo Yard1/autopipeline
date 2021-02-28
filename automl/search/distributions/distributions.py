@@ -16,44 +16,6 @@ class _OptunaParam:
 optuna_param = _OptunaParam()
 
 
-from ray.tune.sample import Integer
-from ray.tune.sample import LogUniform as _LogUniform
-
-
-class LogUniformInteger(Integer):
-    class LogUniform(_LogUniform):
-        def sample(self, domain: "Integer", spec=None, size: int = 1):
-            assert domain.lower > 0, "LogUniform needs a lower bound greater than 0"
-            assert (
-                0 < domain.upper < float("inf")
-            ), "LogUniform needs a upper bound greater than 0"
-            logmin = np.log(domain.lower) / np.log(self.base)
-            logmax = np.log(domain.upper) / np.log(self.base)
-
-            items = self.base ** (np.random.uniform(logmin, logmax, size=size))
-            items = np.round(items).astype(int)
-            return items if len(items) > 1 else domain.cast(items[0])
-
-    def loguniform(self, base: float = 10):
-        if not self.lower > 0:
-            raise ValueError(
-                "LogUniform requires a lower bound greater than 0."
-                f"Got: {self.lower}. Did you pass a variable that has "
-                "been log-transformed? If so, pass the non-transformed value "
-                "instead."
-            )
-        if not 0 < self.upper < float("inf"):
-            raise ValueError(
-                "LogUniform requires a upper bound greater than 0. "
-                f"Got: {self.lower}. Did you pass a variable that has "
-                "been log-transformed? If so, pass the non-transformed value "
-                "instead."
-            )
-        new = copy(self)
-        new.set_sampler(self.LogUniform(base))
-        return new
-
-
 class Distribution:
     def __init__(self):
         raise NotImplementedError("This is an abstract class.")
@@ -258,10 +220,12 @@ class IntUniformDistribution(Distribution):
             )
 
     def get_tune(self):
+        from ray import tune
+
         if self.log:
-            return LogUniformInteger(self.lower, self.upper).loguniform(10)
+            return tune.lograndint(self.lower, self.upper)
         else:
-            return Integer(self.lower, self.upper).uniform()
+            return tune.randint(self.lower, self.upper)
 
     def __repr__(self):
         return f"IntUniformDistribution(lower={self.lower}, upper={self.upper}, log={self.log})"
@@ -365,6 +329,14 @@ class CategoricalDistribution(Distribution):
 
     def __init__(self, values):
         self.values = [x if x is not None else self.None_str for x in values]
+        try:
+            self.values = list(set(self.values))
+        except:
+            new_values = []
+            for x in self.values:
+                if x not in new_values:
+                    new_values.append(x)
+            self.values = new_values
 
     @property
     def default(self):

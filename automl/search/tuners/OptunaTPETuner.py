@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ray.tune.schedulers import ASHAScheduler
+from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.optuna import OptunaSearch
 from ray.tune.suggest.suggestion import (
     UNDEFINED_METRIC_MODE,
@@ -55,23 +56,24 @@ class ConditionalOptunaSearch(OptunaSearch):
         space, _ = get_all_tunable_params(space, to_str=True)
         self._const_values = {
             k: v.values[0]
-            for k, v in space.items() if isinstance(v, CategoricalDistribution) and len(v.values) == 1
+            for k, v in space.items()
+            if isinstance(v, CategoricalDistribution) and len(v.values) == 1
         }
-        space = {
-            k: v for k, v in space.items() if k not in self._const_values
-        }
+        space = {k: v for k, v in space.items() if k not in self._const_values}
         self._space = get_optuna_trial_suggestions(space)
 
         if not keep_const_values:
             self._const_values = {}
 
-        self._conditional_space = {k: v for k, v in self._conditional_space.items() if k in self._space}
+        self._conditional_space = {
+            k: v for k, v in self._conditional_space.items() if k in self._space
+        }
 
         self._points_to_evaluate = points_to_evaluate
         assert n_startup_trials is None or isinstance(n_startup_trials, int)
         if n_startup_trials is None:
             if self._points_to_evaluate:
-                n_startup_trials = max(10-len(self._points_to_evaluate), 4)
+                n_startup_trials = max(10 - len(self._points_to_evaluate), 4)
             else:
                 n_startup_trials = 4
 
@@ -103,7 +105,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._points_to_evaluate,
             self._conditional_space,
             self._space,
-            self._const_values
+            self._const_values,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -120,7 +122,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._points_to_evaluate,
             self._conditional_space,
             self._space,
-            self._const_values
+            self._const_values,
         ) = save_object
 
     @staticmethod
@@ -153,20 +155,18 @@ class ConditionalOptunaSearch(OptunaSearch):
                 params_checked.add(key)
             else:
                 value = params[key]
-            for dependent_name, required_values in condition.items():
+            for dependent_name, required_values in condition[value].items():
                 if dependent_name not in self._space:
                     continue
                 params_checked.add(dependent_name)
-                if value in required_values:
+                if required_values is True or len(required_values) > 1:
                     params[dependent_name] = self._get_optuna_trial_value(
                         ot_trial, self._space[dependent_name]
                     )
-
-        for key, tpl in self._space.items():
-            if key in params_checked:
-                continue
-            value = self._get_optuna_trial_value(ot_trial, self._space[key])
-            params[key] = value
+                elif len(required_values) == 0:
+                    continue
+                else:
+                    params[dependent_name] = required_values[0]
 
         return params
 
@@ -202,7 +202,9 @@ class ConditionalOptunaSearch(OptunaSearch):
                         *args, **kwargs
                     )
             elif fn == "suggest_categorical":
-                values = ConditionalOptunaSearch.get_categorical_values(args, kwargs, offset=0)
+                values = ConditionalOptunaSearch.get_categorical_values(
+                    args, kwargs, offset=0
+                )
                 if len(values) <= 1:
                     continue
                 distributions[k] = optuna.distributions.CategoricalDistribution(
@@ -213,7 +215,10 @@ class ConditionalOptunaSearch(OptunaSearch):
         return distributions
 
     def add_evaluated_trial(
-        self, trial_id: str, result: Optional[Dict] = None, error: bool = False,
+        self,
+        trial_id: str,
+        result: Optional[Dict] = None,
+        error: bool = False,
     ):
         if not self._space:
             raise RuntimeError(
@@ -229,10 +234,8 @@ class ConditionalOptunaSearch(OptunaSearch):
             )
 
         if trial_id in self._ot_trials:
+            print(f"{trial_id} already in ot_trials")
             return False
-
-        print("evaluated trial result")
-        print(result)
 
         if not result:
             return False
@@ -247,7 +250,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             distributions
         )
         config = {k: v for k, v in config.items() if k in distributions}
-
+        assert config
         trial = ot.trial.create_trial(
             state=TrialState.COMPLETE,
             value=result.get(self.metric, None),
@@ -352,22 +355,17 @@ class OptunaTPETuner(RayTuneTuner):
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
-        for conf in self.default_grid:
-            for k, v in conf.items():
-                if str(v) in self._component_strings_:
-                    conf[k] = str(v)
-        self._tune_kwargs["search_alg"] = ConditionalOptunaSearch(
-            space=self.pipeline_blueprint,
-            metric="mean_test_score",
-            mode="max",
-            points_to_evaluate=self.default_grid,
-            seed=self.random_state,
+        self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
+            ConditionalOptunaSearch(
+                space=self.pipeline_blueprint,
+                metric="mean_test_score",
+                mode="max",
+                points_to_evaluate=self.default_grid,
+                seed=self.random_state,
+            ),
+            max_concurrent=8,
         )
-
-    def _treat_config(self, config):
-        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
-        return super()._treat_config(config)
+        print(f"cache: {self._cache}")
 
     def _search(self, X, y, groups=None):
         self._pre_search(X, y, groups=groups)

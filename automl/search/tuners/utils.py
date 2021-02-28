@@ -57,16 +57,9 @@ def get_conditions(spec: Dict, to_str=False) -> dict:
     conditions_spec = defaultdict(dict)
     estimator_name, estimators = spec.get_estimator_distribution()
 
-    for estimator in estimators.values:
-        for k2, v2 in estimator.get_tuning_grid().items():
-            name = estimator.get_hyperparameter_key_suffix(estimator_name, k2)
-            if name not in conditions_spec[estimator_name]:
-                conditions_spec[estimator_name][name] = []
-            conditions_spec[estimator_name][name].append(
-                str(estimator) if to_str else estimator
-            )
-
     preprocessors_grid = spec.get_preprocessor_distribution()
+
+    conditions_spec[estimator_name] = defaultdict(dict)
 
     for estimator in estimators.values:
         spec_copy = copy(spec)
@@ -75,51 +68,71 @@ def get_conditions(spec: Dict, to_str=False) -> dict:
             current_stage=AutoMLStage.TUNE,
         )
         grid = spec_copy.get_preprocessor_distribution()
-        removed_components = {
-            k: [v2 for v2 in v.values if v2 not in grid[k].values]
+        remaining_components = {
+            k: [v2 for v2 in v.values if v2 in grid[k].values]
             if k in grid
             else v.values
             for k, v in preprocessors_grid.items()
         }
-        print(f"{estimator}: {removed_components}")
-        for k, v in preprocessors_grid.items():
-            for v2 in v.values:
-                if v2 not in removed_components[k]:
-                    if k not in conditions_spec[estimator_name]:
-                        conditions_spec[estimator_name][k] = []
-                    conditions_spec[estimator_name][k].append(
-                        str(estimator) if to_str else estimator
-                    )
+        # print(f"{estimator}: {removed_components}")
+        estimator_key = str(estimator) if to_str else estimator
+        conditions_spec[estimator_name][estimator_key] = (
+            {k: [str(x) for x in v] for k, v in remaining_components.items()}
+            if to_str
+            else remaining_components
+        )
+        for k2, v2 in estimator.get_tuning_grid().items():
+            name = estimator.get_hyperparameter_key_suffix(estimator_name, k2)
+            conditions_spec[estimator_name][estimator_key][name] = True
 
     for k, v in preprocessors_grid.items():
+        conditions_spec[k] = defaultdict(dict)
         for choice in v.values:
             for k2, v2 in choice.get_tuning_grid().items():
                 name = choice.get_hyperparameter_key_suffix(k, k2)
-                if name not in conditions_spec[k]:
-                    conditions_spec[k][name] = []
-                conditions_spec[k][name].append(str(choice) if to_str else choice)
+                choice_key = str(choice) if to_str else choice
+                conditions_spec[k][choice_key][name] = True
 
     return conditions_spec
 
 
 def enforce_conditions_on_config(
-    config, conditional_space, prefix="", keys_to_keep=None
+    config, conditional_space, prefix="", keys_to_keep=None, raise_exceptions=True
 ):
     config = config.copy()
-    for independent_name, v in conditional_space.items():
-        for dependent_name, required_values in v.items():
-            if f"{prefix}{independent_name}" not in config or (
-                config[f"{prefix}{independent_name}"] not in required_values
-                and f"{prefix}{dependent_name}" in config
-            ):
-                config.pop(f"{prefix}{dependent_name}", None)
+    allowed_keys = {"Estimator"}
+    for param_key, independent_choice in conditional_space.items():
+        if f"{prefix}{param_key}" not in config or param_key not in allowed_keys:
+            continue
+        space = independent_choice[config[f"{prefix}{param_key}"]]
+        allowed_keys.update(space.keys())
+        if raise_exceptions:
+            for conditional_param_key, allowed_values in space.items():
+                prefixed_key = f"{prefix}{conditional_param_key}"
+                assert prefixed_key in config, f"{prefixed_key} not in {config}"
+                if allowed_values is not True:
+                    assert (
+                        config[prefixed_key] in allowed_values
+                    ), f"{config[prefixed_key]} not in {allowed_values}"
+
     if keys_to_keep:
-        config = {k: v for k, v in config.items() if not k.startswith(prefix) or removeprefix(k, prefix) in keys_to_keep}
+        allowed_keys = {
+            k for k in allowed_keys if k in keys_to_keep
+        }
+    allowed_keys = {f"{prefix}{k}" for k in allowed_keys}
+    if prefix:
+        allowed_keys.update({k for k in config if not k.startswith(prefix)})
+    config = {k: v for k, v in config.items() if k in allowed_keys}
     return config
 
 
-def get_all_tunable_params(pipeline: Pipeline, to_str=False) -> Tuple[dict, dict]:
-    space = {k: v for k, v in pipeline.get_all_distributions().items()}
+def get_all_tunable_params(
+    pipeline: Pipeline, to_str=False, use_extended=False
+) -> Tuple[dict, dict]:
+    space = {
+        k: v
+        for k, v in pipeline.get_all_distributions(use_extended=use_extended).items()
+    }
     string_space = {}
     for k, v in space.items():
         choices = v.values
@@ -128,11 +141,11 @@ def get_all_tunable_params(pipeline: Pipeline, to_str=False) -> Tuple[dict, dict
     hyperparams = {}
     for k, v in space.items():
         for v2 in v.values:
-            for k3, v3 in v2.get_tuning_grid().items():
+            for k3, v3 in v2.get_tuning_grid(use_extended=use_extended).items():
                 name = v2.get_hyperparameter_key_suffix(k, k3)
                 hyperparams[name] = v3
         if to_str:
-            v.values = [str(x) for x in v.values]
+            v.values = list({str(x) for x in v.values})
     space = {**space, **hyperparams}
 
     return space, string_space

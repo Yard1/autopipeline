@@ -1,5 +1,7 @@
+import numpy as np
+
 from automl.components.transformers.feature_selector.boruta import (
-    BorutaSHAPClassification,
+    BorutaSHAPClassification, BorutaSHAPRegression,
 )
 from typing import Optional
 
@@ -8,16 +10,14 @@ from automl import components
 from ...components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
+from ...components.flow import ColumnTransformer, Pipeline, TopPipeline
 from ...components.transformers import *
 from ...components.estimators import *
-from ...components.flow import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
 from ...components.estimators.tree.tree_estimator import TreeEstimator
 from ...utils import validate_type
 
-from sklearn.compose import make_column_selector
-
-from automl.components import estimators
+from .column_selector import make_column_selector
 
 
 def _scaler_passthrough_condition(config, stage):
@@ -40,6 +40,11 @@ def create_pipeline_blueprint(
     validate_type(level, "level", ComponentLevel)
 
     # steps in [] are tunable
+    # there are three possible states for a step depending on an estimator:
+    # - none of the components are valid
+    # - one component is valid
+    # - all components are valid
+    # make sure that is the case!
 
     passthrough = {
         "Passthrough": Passthrough(),
@@ -52,7 +57,7 @@ def create_pipeline_blueprint(
         "SimpleNumericImputer": SimpleNumericImputer(),
     }
     scalers_normalizers = {
-        "StandardScaler": StandardScaler(),
+        "CombinedScalerTransformer": CombinedScalerTransformer(),
     }
     categorical_imputers = {
         "SimpleCategoricalImputer": SimpleCategoricalImputer(),
@@ -63,7 +68,7 @@ def create_pipeline_blueprint(
     }
     feature_selectors = {
         "BorutaSHAPClassification": BorutaSHAPClassification(),
-        "BorutaSHAPRegression": BorutaSHAPClassification(),
+        "BorutaSHAPRegression": BorutaSHAPRegression(),
     }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
@@ -146,7 +151,7 @@ def create_pipeline_blueprint(
             {},
         ),
         "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["StandardScaler"],
+            components["CombinedScalerTransformer"],
             {},
         ),
         "Estimator": (components["LogisticRegression"], {"C": 4.0}),
@@ -157,7 +162,7 @@ def create_pipeline_blueprint(
             {},
         ),
         "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["StandardScaler"],
+            components["CombinedScalerTransformer"],
             {},
         ),
         "Estimator": (components["LogisticRegression"], {"C": 1.0}),

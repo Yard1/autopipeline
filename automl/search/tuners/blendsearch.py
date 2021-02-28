@@ -28,6 +28,7 @@ import numpy as np
 import traceback
 import pickle
 import os
+import gc
 import tempfile
 from ray.tune.sample import Categorical
 
@@ -35,7 +36,7 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 
 from ray import tune
-from ray.tune.suggest import Searcher
+from ray.tune.suggest import Searcher, ConcurrencyLimiter
 from ray.tune.suggest.variant_generator import generate_variants
 from flaml.searcher.search_thread import SearchThread
 from flaml.searcher.blendsearch import BlendSearch
@@ -55,7 +56,7 @@ from ray.tune.suggest.suggestion import (
 from ray.tune.utils.util import unflatten_dict
 
 from .OptunaTPETuner import ConditionalOptunaSearch
-from ..distributions import get_tune_distributions
+from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner, remove_component_suffix
 from ..utils import call_component_if_needed
@@ -172,7 +173,7 @@ class SharingSearchThread(SearchThread):
                     not self.prune_attr
                     or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
                 ):
-                    self._search_alg.add_evaluated_trial(
+                    return_val = self._search_alg.add_evaluated_trial(
                         trial_id,
                         enforce_conditions_on_config(
                             result,
@@ -181,9 +182,10 @@ class SharingSearchThread(SearchThread):
                             keys_to_keep=self._search_alg._space,
                         ),
                     )
+                    assert return_val
             except:
-                logger.warning(
-                    f"couldn't add trial to optuna.\n{traceback.format_exc()}"
+                print(
+                    f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
                 )
 
         if result:
@@ -346,14 +348,12 @@ class ConditionalBlendSearch(BlendSearch):
             if isinstance(v, Categorical) and len(v.categories) == 1
         }
         space = {k: v for k, v in space.items() if k not in self._const_values}
-
         if points_to_evaluate:
             points_to_evaluate = [
                 {k: v for k, v in point.items() if k in space}
                 for point in points_to_evaluate
             ]
         self._points_to_evaluate = points_to_evaluate
-
         self._ls = LocalSearch(
             init_config,
             metric,
@@ -373,7 +373,11 @@ class ConditionalBlendSearch(BlendSearch):
         )
         self._init_search()
 
-    def _get_all_default_values(self, pipeline_blueprint) -> dict:
+    @property
+    def _conditional_space_estimators(self):
+        return {"Estimator": self._conditional_space["Estimator"]}
+
+    def _get_all_default_values(self, pipeline_blueprint, get_categorical=True) -> dict:
         default_grid = {
             k: v for k, v in pipeline_blueprint.get_all_distributions().items()
         }
@@ -381,6 +385,8 @@ class ConditionalBlendSearch(BlendSearch):
         for k, v in default_grid.items():
             for v2 in v.values:
                 for k3, v3 in v2.get_tuning_grid().items():
+                    if not get_categorical and isinstance(v3, CategoricalDistribution):
+                        continue
                     name = v2.get_hyperparameter_key_suffix(k, k3)
                     default_values[name] = v3.default
         return default_values
@@ -521,9 +527,7 @@ class ConditionalBlendSearch(BlendSearch):
                 self._thread_count += 1
 
         if thread_id != 0 and self._global_search_thread:
-            self._global_search_thread.on_trial_complete(
-                trial_id, result, error
-            )
+            self._global_search_thread.on_trial_complete(trial_id, result, error)
 
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
@@ -572,7 +576,9 @@ class ConditionalBlendSearch(BlendSearch):
                     self._last_global_search += 1
             if not choice:
                 self._last_global_search = 0
-            print(f"choice={choice}, backup={backup}, self._last_global_search={self._last_global_search}")
+            print(
+                f"{trial_id}: choice={choice}, backup={backup}, self._last_global_search={self._last_global_search}"
+            )
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
             config = {k: v for k, v in config.items() if k in self.keys_to_keep}
@@ -680,7 +686,19 @@ class ConditionalBlendSearch(BlendSearch):
         # logger.info(f"config={config}")
         assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         self._suggested_configs[trial_id] = config
-        clean_config = enforce_conditions_on_config(config, self._conditional_space)
+        clean_config = {}
+        try:
+            clean_config = enforce_conditions_on_config(
+                config, self._conditional_space_estimators
+            )
+            clean_config_len = len(clean_config)
+            clean_config = enforce_conditions_on_config(config, self._conditional_space)
+            assert len(clean_config) == clean_config_len
+        except:
+            print("Bad configuration suggested, trying again")
+            traceback.print_exc()
+            print(f"{clean_config}")
+            return self.suggest(trial_id=trial_id)
         clean_config = {**self._const_values, **clean_config}
         return clean_config
 
@@ -693,7 +711,7 @@ class ConditionalBlendSearch(BlendSearch):
                 None,
             )
         enforced_config_signature = self._ls.config_signature(
-            enforce_conditions_on_config(config, self._conditional_space)
+            enforce_conditions_on_config(config, self._conditional_space, raise_exceptions=False)
         )
         result = None
         result = self._result.get(config_signature, None)
@@ -751,7 +769,7 @@ class BlendSearchTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
-        num_samples: int = 100,
+        num_samples: int = 500,
         early_stopping=True,
         cache=False,
         **tune_kwargs,
@@ -799,11 +817,8 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
-        for conf in self.default_grid:
-            for k, v in conf.items():
-                if str(v) in self._component_strings_:
-                    conf[k] = str(v)
+        if self._cache:
+            self._searcher_kwargs["time_attr"] = "estimator_fit_time"
         self._tune_kwargs["search_alg"] = ConditionalBlendSearch(
             space=self.pipeline_blueprint,
             metric="mean_test_score",
@@ -812,10 +827,6 @@ class BlendSearchTuner(RayTuneTuner):
             seed=self.random_state,
             **self._searcher_kwargs,
         )
-
-    def _treat_config(self, config):
-        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
-        return super()._treat_config(config)
 
     def _trial_with_cv(self, config, checkpoint_dir=None):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -852,22 +863,29 @@ class BlendSearchTuner(RayTuneTuner):
             cv=subsample_cv,
             groups=self.groups_,
             error_score="raise",
+            return_estimator=True,
             # fit_params=self.fit_params,
             # groups=self.groups,
             # return_train_score=self.return_train_score,
             # scoring=self.scoring,
         )
 
+        estimator_fit_time = np.sum(
+            [x.final_estimator_fit_time_ for x in scores["estimator"]]
+        )
+        gc.collect()
         if prune_attr:
             tune.report(
                 done=True,
                 mean_test_score=np.mean(scores["test_score"]),
                 dataset_fraction=prune_attr,
+                estimator_fit_time=estimator_fit_time,
             )
         else:
             tune.report(
                 done=True,
                 mean_test_score=np.mean(scores["test_score"]),
+                estimator_fit_time=estimator_fit_time,
             )
 
     def _search(self, X, y, groups=None):

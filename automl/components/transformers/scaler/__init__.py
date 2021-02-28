@@ -1,1 +1,3 @@
 from .standard_scaler import StandardScaler
+from .quantile_transformer import QuantileTransformer
+from .combined_scaler import CombinedScalerTransformer
