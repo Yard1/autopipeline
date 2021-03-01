@@ -24,6 +24,12 @@ def _is_id_column(col):
     )
 
 
+def nullify_0_variance(col):
+    if np.all(col == col[0]):
+        return None
+    return col
+
+
 def clean_df(df):
     if isinstance(df, pd.DataFrame):
         df.columns = [str(col) for col in df.columns]
@@ -47,9 +53,13 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if allowed_dtypes is not None and not allowed_dtypes:
             raise ValueError("allowed_dtypes cannot be empty")
         if not is_float_dtype(float_dtype):
-            raise TypeError(f"Expected float_dtype to be a float dtype, got {type(float_dtype)}")
+            raise TypeError(
+                f"Expected float_dtype to be a float dtype, got {type(float_dtype)}"
+            )
         if int_dtype is not None and not is_integer_dtype(int_dtype):
-            raise TypeError(f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}")
+            raise TypeError(
+                f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}"
+            )
 
         self.allowed_dtypes = allowed_dtypes
         self.find_id_column = find_id_column
@@ -160,6 +170,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         X = X.infer_objects()
 
         X = clean_df(X)
+        X = X.apply(nullify_0_variance)
+
         X.dropna(axis=0, how="all", inplace=True)
         X.dropna(axis=1, how="all", inplace=True)
 
