@@ -24,6 +24,12 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
     def get_dtypes(self, Xt, X, y=None):
         return pd.CategoricalDtype([0, 1])
 
+    def _validate_keywords(self):
+        if self.handle_unknown not in ('error', 'ignore'):
+            msg = ("handle_unknown should be either 'error' or 'ignore', "
+                   "got {0}.".format(self.handle_unknown))
+            raise ValueError(msg)
+
 
 class OneHotEncoder(Encoder):
     _component_class = PandasOneHotEncoder
@@ -32,7 +38,7 @@ class OneHotEncoder(Encoder):
         "drop": "if_binary",
         "sparse": False,
         "dtype": np.int,
-        "handle_unknown": "error",
+        "handle_unknown": "ignore",
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY

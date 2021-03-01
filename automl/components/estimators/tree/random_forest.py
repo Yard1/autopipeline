@@ -207,8 +207,8 @@ class RandomForestExtraTreesRegressor(
 def get_rf_n_estimators(config, space):
     X = config.X
     if X is None:
-        return IntUniformDistribution(4, 100, log=True)
-    return IntUniformDistribution(4, min(2048, int(X.shape[0])), log=True)
+        return IntUniformDistribution(10, 100, log=True)
+    return IntUniformDistribution(10, min(2048, int(X.shape[0])), log=True)
 
 
 class RandomForestClassifier(TreeEstimator):
@@ -221,11 +221,11 @@ class RandomForestClassifier(TreeEstimator):
         "max_depth": 10,
         "min_samples_split": 2,
         "min_samples_leaf": 1,
-        "min_weight_fraction_leaf": 0.0,
+        "min_weight_fraction_leaf": 1e-10,
         "max_features": "sqrt",
         "random_state": None,
         "max_leaf_nodes": None,
-        "min_impurity_decrease": 0.0,
+        "min_impurity_decrease": 1e-10,
         "bootstrap": True,
         "oob_score": False,
         "n_jobs": None,
@@ -246,8 +246,8 @@ class RandomForestClassifier(TreeEstimator):
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
+        "min_impurity_decrease": UniformDistribution(1e-10, 0.1, log=True),
+        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.1, log=True),
         "class_weight": CategoricalDistribution(
             [None, "balanced", "balanced_subsample"]
         ),
@@ -271,11 +271,11 @@ class RandomForestRegressor(TreeEstimator):
         "max_depth": 10,
         "min_samples_split": 2,
         "min_samples_leaf": 1,
-        "min_weight_fraction_leaf": 0.0,
+        "min_weight_fraction_leaf": 1e-10,
         "max_features": None,
         "random_state": None,
         "max_leaf_nodes": None,
-        "min_impurity_decrease": 0.0,
+        "min_impurity_decrease": 1e-10,
         "bootstrap": True,
         "oob_score": False,
         "n_jobs": None,
@@ -295,8 +295,8 @@ class RandomForestRegressor(TreeEstimator):
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
+        "min_impurity_decrease": UniformDistribution(1e-10, 0.1, log=True),
+        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.1, log=True),
     }
 
     _problem_types = {

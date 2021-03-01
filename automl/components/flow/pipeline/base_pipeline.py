@@ -236,12 +236,12 @@ class Pipeline(Flow):
         return {**step_grids, **default_grid}
 
     def call_tuning_grid_funcs(
-        self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False
+        self, config: ComponentConfig, stage: AutoMLStage
     ):
-        super().call_tuning_grid_funcs(config, stage, use_extended=use_extended)
+        super().call_tuning_grid_funcs(config, stage)
         for name, step in self.components:
             recursively_call_tuning_grid_funcs(
-                step, config=config, stage=stage, use_extended=use_extended
+                step, config=config, stage=stage
             )
 
     def __copy__(self):

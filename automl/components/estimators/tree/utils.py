@@ -13,5 +13,5 @@ def estimate_max_depth(config, stage) -> IntUniformDistribution:
     max_max_depth_factor = 2
     max_max_depth_factor = max(1, int(np.round(max_max_depth_factor * num_features, 0)))
     if min_max_depth_factor == max_max_depth_factor:
-        min_max_depth_factor += 1
+        max_max_depth_factor += 1
     return IntUniformDistribution(int(min_max_depth_factor), int(max_max_depth_factor))

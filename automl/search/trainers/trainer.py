@@ -86,12 +86,14 @@ class Trainer:
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
             self.tuner_.fit(X, y, groups=groups)
-            return self
+            # return self
             self.secondary_tuner = HEBOTuner
             self.secondary_tuners_ = []
 
             results = self.tuner_.analysis_.results
             results_df = self.tuner_.analysis_.results_df
+            if "dataset_fraction_" in results_df.columns:
+                results_df = results_df[results_df["dataset_fraction_"] >= 1.0]
             percentile = np.percentile(
                 results_df["mean_test_score"], self.best_percentile
             )
@@ -100,7 +102,14 @@ class Trainer:
                 if group["mean_test_score"].max() >= percentile:
                     group_trial_ids = set(group.index)
                     known_points = [
-                        (v["config"], v["mean_test_score"])
+                        (
+                            {
+                                config_key: config_value
+                                for config_key, config_value in v["config"].items()
+                                if config_value != "passthrough"
+                            },
+                            v["mean_test_score"],
+                        )
                         for k, v in results.items()
                         if k in group_trial_ids
                     ]
@@ -110,7 +119,7 @@ class Trainer:
                             pipeline_blueprint=self.pipeline_blueprint_,
                             random_state=self.random_state,
                             cv=self.cv_,
-                            early_stopping=self.early_stopping,
+                            early_stopping=False,
                             cache=self.cache,
                             known_points=known_points,
                         )

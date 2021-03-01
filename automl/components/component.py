@@ -109,6 +109,12 @@ class Component(ABC):
         return hash(self.__repr__())
 
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
+        if hasattr(self, "called_tuning_grid"):
+            return {
+                **self.called_tuning_grid,
+                **(self.called_extended_tuning_grid if use_extended else {}),
+                **self.tuning_grid,
+            }
         return {
             **self._default_tuning_grid,
             **(self._default_tuning_grid_extended if use_extended else {}),
@@ -116,21 +122,16 @@ class Component(ABC):
         }
 
     def call_tuning_grid_funcs(
-        self, config: ComponentConfig, stage: AutoMLStage, use_extended: bool = False
+        self, config: ComponentConfig, stage: AutoMLStage
     ):
-        called_tuning_grid = {
-            k: v(config, stage)
+        self.called_tuning_grid = {
+            k: v(config, stage) if callable(v) else v
             for k, v in self._default_tuning_grid.items()
-            if callable(v)
         }
-        if use_extended:
-            called_extended_tuning_grid = {
-                k: v(config, stage)
-                for k, v in self._default_tuning_grid_extended.items()
-                if callable(v)
-            }
-            called_tuning_grid = {**called_tuning_grid, **called_extended_tuning_grid}
-        self.tuning_grid = {**called_tuning_grid, **self.tuning_grid}
+        self.called_extended_tuning_grid = {
+            k: v(config, stage) if callable(v) else v
+            for k, v in self._default_tuning_grid_extended.items()
+        }
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

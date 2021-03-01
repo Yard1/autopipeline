@@ -124,12 +124,15 @@ class HEBOTuner(RayTuneTuner):
         default_values = {
             k: v.default for k, v in space.items() if k not in self.known_points[0][0]
         }
+        print(space)
         space = get_tune_distributions(space)
         points_to_evaluate, evaluated_rewards = zip(*self.known_points)
         points_to_evaluate = [
             {**default_values, **{k: v for k, v in x.items() if k in space}}
             for x in points_to_evaluate
         ]
+        print(points_to_evaluate)
+        print(list(evaluated_rewards))
         self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
             HEBOSearch(
                 space=space,

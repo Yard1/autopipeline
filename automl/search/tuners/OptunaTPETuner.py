@@ -138,8 +138,8 @@ class ConditionalOptunaSearch(OptunaSearch):
                 return values[0]
         return getattr(ot_trial, fn)(*args, **kwargs)
 
-    def _get_params(self, ot_trial):
-        params = {}
+    def _get_params(self, ot_trial, params=None):
+        params = params or {}
 
         for key, condition in self._conditional_space.items():
             if key not in params:
@@ -148,10 +148,10 @@ class ConditionalOptunaSearch(OptunaSearch):
             else:
                 value = params[key]
             for dependent_name, required_values in condition[value].items():
-                if (
-                    dependent_name in self._space
-                    and required_values is True
-                    or len(required_values) > 1
+                if dependent_name in params:
+                    continue
+                if dependent_name in self._space and (
+                    required_values is True or len(required_values) > 1
                 ):
                     params[dependent_name] = self._get_optuna_trial_value(
                         ot_trial, self._space[dependent_name]
@@ -278,10 +278,11 @@ class ConditionalOptunaSearch(OptunaSearch):
         ot_trial = self._ot_trials[trial_id]
 
         if self._points_to_evaluate:
-            params = self._points_to_evaluate.pop(0)
+            params = self._get_params(ot_trial, self._points_to_evaluate.pop(0))
         else:
             # getattr will fetch the trial.suggest_ function on Optuna trials
             params = self._get_params(ot_trial)
+        print(params)
         return unflatten_dict(params)
 
 
@@ -311,11 +312,12 @@ class OptunaTPETuner(RayTuneTuner):
         )
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        if self.early_stopping:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
+        if self.early_stopping and self.X_.shape[0] > 20000:
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
+            min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
             reduction_factor = 4
             self.early_stopping_splits_ = (
@@ -327,9 +329,13 @@ class OptunaTPETuner(RayTuneTuner):
                     self.early_stopping_splits_ - 1, 0, self.early_stopping_splits_
                 ),
             )
-            assert (
-                self.early_stopping_fractions_[0] < self.early_stopping_fractions_[1]
-            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
+            if len(self.early_stopping_fractions_) > 1:
+                assert (
+                    self.early_stopping_fractions_[0]
+                    < self.early_stopping_fractions_[1]
+                ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
+            else:
+                self.early_stopping_fractions_[0] = 1
         else:
             self.early_stopping_fractions_ = [1]
         print(self.early_stopping_fractions_)
@@ -341,21 +347,18 @@ class OptunaTPETuner(RayTuneTuner):
                 max_t=self.early_stopping_splits_,
                 brackets=self.early_stopping_brackets,
             )
-            if self.early_stopping
+            if len(self.early_stopping_fractions_) > 1
             else None
         )
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
-            ConditionalOptunaSearch(
-                space=self.pipeline_blueprint,
-                metric="mean_test_score",
-                mode="max",
-                points_to_evaluate=self.default_grid,
-                seed=self.random_state,
-            ),
-            max_concurrent=8,
+        self._tune_kwargs["search_alg"] = ConditionalOptunaSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_test_score",
+            mode="max",
+            points_to_evaluate=self.default_grid,
+            seed=self.random_state,
         )
         print(f"cache: {self._cache}")
 

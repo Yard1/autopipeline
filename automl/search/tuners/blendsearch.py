@@ -397,10 +397,10 @@ class ConditionalBlendSearch(BlendSearch):
 
     @property
     def keys_to_keep(self):
-        return set.union(
-            set(self._ls.space),
-            set(self._ls.prune_attr) if self._ls.prune_attr else set(),
-        )
+        keys = set(self._ls.space)
+        if self._ls.prune_attr:
+            keys.add(self._ls.prune_attr)
+        return keys
 
     def _init_search(self):
         """initialize the search"""
@@ -588,7 +588,7 @@ class ConditionalBlendSearch(BlendSearch):
             )
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
-            config = {k: v for k, v in config.items() if k in self.keys_to_keep or k == self._ls.prune_attr}
+            config = {k: v for k, v in config.items() if k in self.keys_to_keep}
             if not config or (
                 len(config) != len(self._ls.space)
                 and len(config) != len(self._ls.space) + int(bool(self._ls.prune_attr))
@@ -805,11 +805,12 @@ class BlendSearchTuner(RayTuneTuner):
         self._searcher_kwargs = {}
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        if self.early_stopping:
+        if self.early_stopping and self.X_.shape[0] > 20000:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
+            min_dist = max(min_dist, 10000/self.X_.shape[0])
 
             step = 4
 
@@ -872,7 +873,7 @@ class BlendSearchTuner(RayTuneTuner):
             groups=self.groups_,
             error_score="raise",
             return_estimator=True,
-            verbose=1,
+            verbose=0,
             # fit_params=self.fit_params,
             # groups=self.groups,
             # return_train_score=self.return_train_score,

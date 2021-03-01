@@ -106,7 +106,7 @@ def enforce_conditions_on_config(
         allowed_keys.update(space.keys())
         for conditional_param_key, allowed_values in space.items():
             prefixed_key = f"{prefix}{conditional_param_key}"
-            if prefixed_key not in config:
+            if allowed_values is not True:
                 if len(allowed_values) == 1:
                     config[prefixed_key] = allowed_values[0]
                 elif len(allowed_values) == 0:

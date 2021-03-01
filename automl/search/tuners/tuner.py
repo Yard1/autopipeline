@@ -199,7 +199,7 @@ class RayTuneTuner(Tuner):
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
                 mean_test_score=np.mean(scores["test_score"]),
-                dataset_fraction=fraction,
+                dataset_fraction_=fraction,
             )
 
     def _pre_search(self, X, y, groups=None):

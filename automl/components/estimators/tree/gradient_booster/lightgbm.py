@@ -21,8 +21,8 @@ from .....problems import ProblemType
 def get_lgbm_n_estimators(config, space):
     X = config.X
     if X is None:
-        return IntUniformDistribution(4, 100, log=True)
-    return IntUniformDistribution(4, min(32768, int(X.shape[0])), log=True)
+        return IntUniformDistribution(10, 100, log=True)
+    return IntUniformDistribution(10, min(32768, int(X.shape[0])), log=True)
 
 
 class LGBMClassifier(GradientBoosterEstimator):

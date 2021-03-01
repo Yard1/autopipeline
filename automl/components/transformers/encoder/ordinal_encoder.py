@@ -82,7 +82,7 @@ class PandasOrdinalEncoder(PandasDataFrameTransformerMixin, _OrdinalEncoder):
 
         for col in X.select_dtypes("category"):
             diff = set(X[col].cat.categories) - set(self.categories_[col])
-            if diff:
+            if diff and self.handle_unknown == "error":
                 raise ValueError(
                     f"'{col}' contains previously unseen labels: {list(diff)}"
                 )
@@ -116,7 +116,7 @@ class PandasOrdinalEncoder(PandasDataFrameTransformerMixin, _OrdinalEncoder):
 
         for col in X.select_dtypes("category"):
             diff = set(X[col].cat.categories) - set(self.categories_[col].values())
-            if diff:
+            if diff and self.handle_unknown == "error":
                 raise ValueError(
                     f"'{col}' contains previously unseen labels: {list(diff)}"
                 )
@@ -131,7 +131,7 @@ class OrdinalEncoder(Encoder):
     _component_class = PandasOrdinalEncoder
     _default_parameters = {
         "categories": "auto",
-        "handle_unknown": "error",
+        "handle_unknown": "use_encoded_value",
         "dtype": np.int,
         "unknown_value": None,
     }

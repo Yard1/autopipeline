@@ -1,9 +1,5 @@
 import numpy as np
 
-from automl.components.transformers.feature_selector.boruta import (
-    BorutaSHAPClassification,
-    BorutaSHAPRegression,
-)
 from typing import Optional
 
 from automl import components
@@ -70,6 +66,8 @@ def create_pipeline_blueprint(
     feature_selectors = {
         "BorutaSHAPClassification": BorutaSHAPClassification(),
         "BorutaSHAPRegression": BorutaSHAPRegression(),
+        "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
+        "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression()
     }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
@@ -93,7 +91,7 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
-        ("Imbalance", list(imbalance.values()) + [components["Passthrough"]]),
+        ("Imbalance",  [components["Passthrough"]] + list(imbalance.values())),
         (
             "ColumnImputation",
             ColumnTransformer(
@@ -113,7 +111,7 @@ def create_pipeline_blueprint(
         ),
         (
             "FeatureSelector",
-            list(feature_selectors.values()) + [components["Passthrough"]],
+            [components["Passthrough"]] + list(feature_selectors.values()),
         ),
         (
             "ColumnOrdinal",
