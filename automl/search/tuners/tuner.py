@@ -45,11 +45,14 @@ class Tuner:
 
     def _get_single_default_hyperparams(self, components):
         hyperparams = {}
+        valid_keys = set()
         for k, v in components.items():
-            for k2, v2 in v.get_tuning_grid().items():
-                name = v.get_hyperparameter_key_suffix(k, k2)
-                hyperparams[name] = v2.default
-        return {**components, **hyperparams}
+            if self._is_component_valid(v, components["Estimator"]):
+                valid_keys.add(k)
+                for k2, v2 in v.get_tuning_grid().items():
+                    name = v.get_hyperparameter_key_suffix(k, k2)
+                    hyperparams[name] = v2.default
+        return {**{k:v for k,v in components.items() if k in valid_keys}, **hyperparams}
 
     def _are_components_valid(self, components: dict) -> bool:
         for k, v in components.items():
@@ -61,6 +64,17 @@ class Tuner:
                     stage=AutoMLStage.TUNE,
                 ):
                     return False
+        return True
+
+    def _is_component_valid(self, component, estimator):
+        if component is estimator:
+            return True
+        if isinstance(component, Component):
+            if not component.is_component_valid(
+                config=ComponentConfig(estimator=estimator),
+                stage=AutoMLStage.TUNE,
+            ):
+                return False
         return True
 
     def _get_default_components(self, pipeline_blueprint) -> dict:
@@ -159,7 +173,7 @@ class RayTuneTuner(Tuner):
         estimator.set_params(memory=memory)
 
         for idx, fraction in enumerate(self.early_stopping_fractions_):
-            if len(self.early_stopping_fractions_) > 1:
+            if len(self.early_stopping_fractions_) > 1 and fraction < 1.0:
                 subsample_cv = _SubsampleMetaSplitter(
                     base_cv=self.cv,
                     fraction=fraction,

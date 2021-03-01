@@ -69,9 +69,7 @@ def get_conditions(spec: Dict, to_str=False) -> dict:
         )
         grid = spec_copy.get_preprocessor_distribution()
         remaining_components = {
-            k: [v2 for v2 in v.values if v2 in grid[k].values]
-            if k in grid
-            else v.values
+            k: [v2 for v2 in v.values if v2 in grid[k].values] if k in grid else []
             for k, v in preprocessors_grid.items()
         }
         # print(f"{estimator}: {removed_components}")
@@ -106,19 +104,27 @@ def enforce_conditions_on_config(
             continue
         space = independent_choice[config[f"{prefix}{param_key}"]]
         allowed_keys.update(space.keys())
-        if raise_exceptions:
-            for conditional_param_key, allowed_values in space.items():
-                prefixed_key = f"{prefix}{conditional_param_key}"
-                assert prefixed_key in config, f"{prefixed_key} not in {config}"
-                if allowed_values is not True:
+        for conditional_param_key, allowed_values in space.items():
+            prefixed_key = f"{prefix}{conditional_param_key}"
+            if prefixed_key not in config:
+                if len(allowed_values) == 1:
+                    config[prefixed_key] = allowed_values[0]
+                elif len(allowed_values) == 0:
+                    config[prefixed_key] = "passthrough"
+            if raise_exceptions:
+                if allowed_values is True:
+                    assert prefixed_key in config, f"{prefixed_key} not in {config}"
+                elif len(allowed_values) > 0:
                     assert (
                         config[prefixed_key] in allowed_values
                     ), f"{config[prefixed_key]} not in {allowed_values}"
+                elif len(allowed_keys) == 0:
+                    assert (
+                        config[prefixed_key] == "passthrough"
+                    ), f"{config[prefixed_key]} is not 'passthrough'"
 
     if keys_to_keep:
-        allowed_keys = {
-            k for k in allowed_keys if k in keys_to_keep
-        }
+        allowed_keys = {k for k in allowed_keys if k in keys_to_keep}
     allowed_keys = {f"{prefix}{k}" for k in allowed_keys}
     if prefix:
         allowed_keys.update({k for k in config if not k.startswith(prefix)})

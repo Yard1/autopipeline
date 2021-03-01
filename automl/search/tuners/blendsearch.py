@@ -147,9 +147,11 @@ class SharingSearchThread(SearchThread):
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if (
-                        not self.prune_attr
-                        or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                        not f"{self.prune_attr}_" in result
+                        or np.around(result[f"{self.prune_attr}_"], 1)
+                        >= self.max_prune_attr
                     ):
+                        print("adding trial result to optuna")
                         self._search_alg.on_trial_complete(
                             trial_id,
                             enforce_conditions_on_config(
@@ -170,9 +172,11 @@ class SharingSearchThread(SearchThread):
                             ),
                         )
                 elif (
-                    not self.prune_attr
-                    or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+                    not f"{self.prune_attr}_" in result
+                    or np.around(result[f"{self.prune_attr}_"], 1)
+                    >= self.max_prune_attr
                 ):
+                    print("adding ls result to optuna")
                     return_val = self._search_alg.add_evaluated_trial(
                         trial_id,
                         enforce_conditions_on_config(
@@ -333,7 +337,6 @@ class ConditionalBlendSearch(BlendSearch):
                 metric=metric,
                 mode=mode,
                 seed=seed,
-                keep_const_values=False,
                 n_startup_trials=1,
             )
         else:
@@ -342,12 +345,12 @@ class ConditionalBlendSearch(BlendSearch):
         init_config = self._get_all_default_values(space)
         space, _ = get_all_tunable_params(space, to_str=True)
         space = get_tune_distributions(space)
-        self._const_values = {
-            k: v.categories[0]
+        const_values = {
+            k
             for k, v in space.items()
             if isinstance(v, Categorical) and len(v.categories) == 1
         }
-        space = {k: v for k, v in space.items() if k not in self._const_values}
+        space = {k: v for k, v in space.items() if k not in const_values}
         if points_to_evaluate:
             points_to_evaluate = [
                 {k: v for k, v in point.items() if k in space}
@@ -366,6 +369,7 @@ class ConditionalBlendSearch(BlendSearch):
             reduction_factor,
             seed,
         )
+        self._ls.cost_attr = self._time_attr
         self._resources_per_trial = resources_per_trial
         self._mem_size = mem_size
         self._mem_threshold = (
@@ -407,7 +411,7 @@ class ConditionalBlendSearch(BlendSearch):
             0: SharingSearchThread(
                 self._ls.mode,
                 self._gs,
-                cost_attr=self._ls.prune_attr,
+                cost_attr=self._time_attr,
                 prune_attr=self._ls.prune_attr,
                 max_prune_attr=self._ls.max_resource,
             )
@@ -432,7 +436,6 @@ class ConditionalBlendSearch(BlendSearch):
             self._suggested_configs,
             self._conditional_space,
             self._time_attr,
-            self._const_values,
             self._last_global_search,
         )
         with open(checkpoint_path, "wb") as outputFile:
@@ -454,7 +457,6 @@ class ConditionalBlendSearch(BlendSearch):
             self._suggested_configs,
             self._conditional_space,
             self._time_attr,
-            self._const_values,
             self._last_global_search,
         ) = save_object
 
@@ -521,8 +523,13 @@ class ConditionalBlendSearch(BlendSearch):
                     self._ls.create(
                         config, result[self._metric], cost=result[self._time_attr]
                     ),
-                    cost_attr=self._ls.prune_attr,
+                    cost_attr=self._time_attr,
+                    prune_attr=self._ls.prune_attr,
+                    max_prune_attr=self._ls.max_resource,
                 )
+                self._search_thread_pool[
+                    self._thread_count
+                ]._search_alg.cost_attr = self._time_attr
                 thread_id = self._thread_count
                 self._thread_count += 1
 
@@ -581,7 +588,7 @@ class ConditionalBlendSearch(BlendSearch):
             )
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
-            config = {k: v for k, v in config.items() if k in self.keys_to_keep}
+            config = {k: v for k, v in config.items() if k in self.keys_to_keep or k == self._ls.prune_attr}
             if not config or (
                 len(config) != len(self._ls.space)
                 and len(config) != len(self._ls.space) + int(bool(self._ls.prune_attr))
@@ -607,7 +614,7 @@ class ConditionalBlendSearch(BlendSearch):
                 # use rs
                 self._use_rs = True
                 for _, generated in generate_variants({"config": self._ls.space}):
-                    config = generated["config"]
+                    config = {**config, **generated["config"]}
                     break
                 # logger.debug(f"random config {config}")
                 skip = self._should_skip(choice, trial_id, config)
@@ -640,6 +647,9 @@ class ConditionalBlendSearch(BlendSearch):
                         ):
                             config = {**generated["config"], **config}
                             break
+                assert len(config) == len(self._ls.space) + int(
+                    bool(self._ls.prune_attr)
+                )
                 skip = self._should_skip(backup, trial_id, config)
                 if skip:
                     return None
@@ -667,6 +677,7 @@ class ConditionalBlendSearch(BlendSearch):
             config = self._ls.complete_config(
                 init_config, self._admissible_min, self._admissible_max
             )
+            assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
             # logger.info(f"reset config to {config}")
             (
                 result,
@@ -686,6 +697,10 @@ class ConditionalBlendSearch(BlendSearch):
         # logger.info(f"config={config}")
         assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         self._suggested_configs[trial_id] = config
+        if self._ls.prune_attr:
+            prune_attr = config[self._ls.prune_attr]
+            print(f"suggest prune_attr: {prune_attr}")
+            assert prune_attr
         clean_config = {}
         try:
             clean_config = enforce_conditions_on_config(
@@ -699,7 +714,8 @@ class ConditionalBlendSearch(BlendSearch):
             traceback.print_exc()
             print(f"{clean_config}")
             return self.suggest(trial_id=trial_id)
-        clean_config = {**self._const_values, **clean_config}
+        if self._ls.prune_attr:
+            clean_config[self._ls.prune_attr] = prune_attr
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
@@ -711,7 +727,9 @@ class ConditionalBlendSearch(BlendSearch):
                 None,
             )
         enforced_config_signature = self._ls.config_signature(
-            enforce_conditions_on_config(config, self._conditional_space, raise_exceptions=False)
+            enforce_conditions_on_config(
+                config, self._conditional_space, raise_exceptions=False
+            )
         )
         result = None
         result = self._result.get(config_signature, None)
@@ -769,7 +787,7 @@ class BlendSearchTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
-        num_samples: int = 500,
+        num_samples: int = 100,
         early_stopping=True,
         cache=False,
         **tune_kwargs,
@@ -788,32 +806,20 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 2
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = 0.25
 
             step = 4
-            self.early_stopping_fractions_ = [min_dist]
-            while self.early_stopping_fractions_[-1] < 1.0:
-                self.early_stopping_fractions_.append(
-                    self.early_stopping_fractions_[-1] * step
-                )
-            self.early_stopping_fractions_[-1] = 1.0
-            assert (
-                self.early_stopping_fractions_[0] < self.early_stopping_fractions_[1]
-            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
-            assert (
-                self.early_stopping_fractions_[-1] > self.early_stopping_fractions_[-2]
-            ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
+
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
-            self._searcher_kwargs["min_resource"] = self.early_stopping_fractions_[0]
-            self._searcher_kwargs["max_resource"] = self.early_stopping_fractions_[-1]
+            self._searcher_kwargs["min_resource"] = min_dist
+            self._searcher_kwargs["max_resource"] = 1.0
             self._searcher_kwargs["reduction_factor"] = step
+            print(self._searcher_kwargs["prune_attr"])
         else:
             self.early_stopping_fractions_ = [1]
-        print(self.early_stopping_fractions_)
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
@@ -841,12 +847,14 @@ class BlendSearchTuner(RayTuneTuner):
 
         print(f"prune_attr: {prune_attr}")
 
+        print(config_called)
+
         estimator.set_params(**config_called)
         memory = tempfile.gettempdir() if self._cache is True else self._cache
         memory = memory if not memory == os.getcwd() else ".."
         estimator.set_params(memory=memory)
 
-        if prune_attr:
+        if prune_attr and prune_attr < 1.0:
             subsample_cv = _SubsampleMetaSplitter(
                 base_cv=self.cv,
                 fraction=prune_attr,
@@ -864,6 +872,7 @@ class BlendSearchTuner(RayTuneTuner):
             groups=self.groups_,
             error_score="raise",
             return_estimator=True,
+            verbose=1,
             # fit_params=self.fit_params,
             # groups=self.groups,
             # return_train_score=self.return_train_score,
@@ -878,7 +887,7 @@ class BlendSearchTuner(RayTuneTuner):
             tune.report(
                 done=True,
                 mean_test_score=np.mean(scores["test_score"]),
-                dataset_fraction=prune_attr,
+                dataset_fraction_=prune_attr,
                 estimator_fit_time=estimator_fit_time,
             )
         else:

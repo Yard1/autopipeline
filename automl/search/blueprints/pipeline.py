@@ -1,7 +1,8 @@
 import numpy as np
 
 from automl.components.transformers.feature_selector.boruta import (
-    BorutaSHAPClassification, BorutaSHAPRegression,
+    BorutaSHAPClassification,
+    BorutaSHAPRegression,
 )
 from typing import Optional
 
@@ -64,8 +65,8 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
-        "OrdinalEncoder": OrdinalEncoder(),
     }
+    oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
         "BorutaSHAPClassification": BorutaSHAPClassification(),
         "BorutaSHAPRegression": BorutaSHAPRegression(),
@@ -86,6 +87,7 @@ def create_pipeline_blueprint(
         **scalers_normalizers,
         **categorical_imputers,
         **categorical_encoders,
+        **oridinal_encoder,
         **feature_selectors,
         **estimators,
     }
@@ -114,6 +116,18 @@ def create_pipeline_blueprint(
             list(feature_selectors.values()) + [components["Passthrough"]],
         ),
         (
+            "ColumnOrdinal",
+            ColumnTransformer(
+                transformers=[
+                    (
+                        "OrdinalEncoder",
+                        [components["OrdinalEncoder"]],
+                        categorical_selector,
+                    ),
+                ],
+            ),
+        ),
+        (
             "ColumnEncodingScaling",
             ColumnTransformer(
                 transformers=[
@@ -124,8 +138,7 @@ def create_pipeline_blueprint(
                     ),
                     (
                         "ScalerNormalizer",
-                        list(scalers_normalizers.values())
-                        + [components["Passthrough_Scaler"]],
+                        list(scalers_normalizers.values()),
                         numeric_selector,
                     ),
                 ],

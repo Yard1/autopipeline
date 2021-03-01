@@ -81,6 +81,7 @@ class Trainer:
         )
 
         gc.collect()
+        print("starting tuning")
         with ray_context(
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):

@@ -44,7 +44,6 @@ class ConditionalOptunaSearch(OptunaSearch):
         points_to_evaluate: Optional[List[Dict]] = None,
         sampler: Optional[BaseSampler] = None,
         seed: Optional[int] = None,
-        keep_const_values: bool = True,
         n_startup_trials: Optional[int] = None,
     ):
         assert ot is not None, "Optuna must be installed! Run `pip install optuna`."
@@ -54,16 +53,13 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         self._conditional_space = get_conditions(space, to_str=True)
         space, _ = get_all_tunable_params(space, to_str=True)
-        self._const_values = {
-            k: v.values[0]
+        const_values = {
+            k
             for k, v in space.items()
             if isinstance(v, CategoricalDistribution) and len(v.values) == 1
         }
-        space = {k: v for k, v in space.items() if k not in self._const_values}
+        space = {k: v for k, v in space.items() if k not in const_values}
         self._space = get_optuna_trial_suggestions(space)
-
-        if not keep_const_values:
-            self._const_values = {}
 
         self._conditional_space = {
             k: v for k, v in self._conditional_space.items() if k in self._space
@@ -105,7 +101,6 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._points_to_evaluate,
             self._conditional_space,
             self._space,
-            self._const_values,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -122,7 +117,6 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._points_to_evaluate,
             self._conditional_space,
             self._space,
-            self._const_values,
         ) = save_object
 
     @staticmethod
@@ -145,28 +139,27 @@ class ConditionalOptunaSearch(OptunaSearch):
         return getattr(ot_trial, fn)(*args, **kwargs)
 
     def _get_params(self, ot_trial):
-        params_checked = set()
         params = {}
 
         for key, condition in self._conditional_space.items():
             if key not in params:
                 value = self._get_optuna_trial_value(ot_trial, self._space[key])
                 params[key] = value
-                params_checked.add(key)
             else:
                 value = params[key]
             for dependent_name, required_values in condition[value].items():
-                if dependent_name not in self._space:
-                    continue
-                params_checked.add(dependent_name)
-                if required_values is True or len(required_values) > 1:
+                if (
+                    dependent_name in self._space
+                    and required_values is True
+                    or len(required_values) > 1
+                ):
                     params[dependent_name] = self._get_optuna_trial_value(
                         ot_trial, self._space[dependent_name]
                     )
-                elif len(required_values) == 0:
-                    continue
-                else:
+                elif len(required_values) == 1:
                     params[dependent_name] = required_values[0]
+                else:
+                    params[dependent_name] = "passthrough"
 
         return params
 
@@ -289,7 +282,6 @@ class ConditionalOptunaSearch(OptunaSearch):
         else:
             # getattr will fetch the trial.suggest_ function on Optuna trials
             params = self._get_params(ot_trial)
-        params = {**self._const_values, **params}
         return unflatten_dict(params)
 
 
