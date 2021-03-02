@@ -2,11 +2,9 @@ import numpy as np
 from .scaler import Scaler
 from ..transformer import DataType
 from ...component import ComponentLevel
-from ...flow._column_transformer import PandasColumnTransformer
+from ...flow._column_transformer import PandasColumnTransformer, make_column_selector
 from .quantile_transformer import QuantileTransformer
 from .standard_scaler import StandardScaler
-
-from ....search.blueprints.column_selector import make_column_selector
 
 
 def _scaler_skewness_condition(column, skewness_threshold=0.99):

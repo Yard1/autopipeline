@@ -7,14 +7,17 @@ from automl import components
 from ...components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
-from ...components.flow import ColumnTransformer, Pipeline, TopPipeline
+from ...components.flow import (
+    ColumnTransformer,
+    make_column_selector,
+    Pipeline,
+    TopPipeline,
+)
 from ...components.transformers import *
 from ...components.estimators import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
 from ...components.estimators.tree.tree_estimator import TreeEstimator
 from ...utils import validate_type
-
-from .column_selector import make_column_selector
 
 
 def _scaler_passthrough_condition(config, stage):
@@ -67,7 +70,12 @@ def create_pipeline_blueprint(
         "BorutaSHAPClassification": BorutaSHAPClassification(),
         "BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
-        "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression()
+        "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
+    }
+    svm_kernels = {
+        "NystroemRBF": NystroemRBF(),
+        "NystroemPoly": NystroemPoly(),
+        "NystroemSigmoid": NystroemSigmoid(),
     }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
@@ -77,6 +85,8 @@ def create_pipeline_blueprint(
         "LGBMRegressor": LGBMRegressor(),
         "RandomForestClassifier": RandomForestClassifier(),
         "RandomForestRegressor": RandomForestRegressor(),
+        "LinearSVC": LinearSVC(),
+        "LinearSVR": LinearSVR(),
     }
     components = {
         **passthrough,
@@ -87,11 +97,12 @@ def create_pipeline_blueprint(
         **categorical_encoders,
         **oridinal_encoder,
         **feature_selectors,
+        **svm_kernels,
         **estimators,
     }
 
     pipeline_steps = [
-        ("Imbalance",  [components["Passthrough"]] + list(imbalance.values())),
+        ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
         (
             "ColumnImputation",
             ColumnTransformer(
@@ -141,6 +152,10 @@ def create_pipeline_blueprint(
                     ),
                 ],
             ),
+        ),
+        (
+            "SVMKernelApproximation",
+            [components["Passthrough"]] + list(svm_kernels.values()),
         ),
         (
             "Estimator",

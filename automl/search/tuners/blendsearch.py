@@ -707,12 +707,14 @@ class ConditionalBlendSearch(BlendSearch):
                 config, self._conditional_space_estimators
             )
             clean_config_len = len(clean_config)
-            clean_config = enforce_conditions_on_config(config, self._conditional_space)
-            assert len(clean_config) == clean_config_len
+            new_clean_config = enforce_conditions_on_config(config, self._conditional_space)
+            assert len(new_clean_config) >= clean_config_len, f"{clean_config}, {new_clean_config}"
+            clean_config = new_clean_config
         except:
             print("Bad configuration suggested, trying again")
             traceback.print_exc()
-            print(f"{clean_config}")
+            print(self._conditional_space)
+            print("")
             return self.suggest(trial_id=trial_id)
         if self._ls.prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr

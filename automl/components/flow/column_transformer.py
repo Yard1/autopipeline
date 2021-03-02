@@ -1,6 +1,6 @@
 from copy import deepcopy, copy
 
-from ._column_transformer import PandasColumnTransformer
+from ._column_transformer import PandasColumnTransformer, make_column_selector
 from .flow import Flow
 from .utils import (
     recursively_remove_invalid_components,
