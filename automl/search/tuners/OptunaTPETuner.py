@@ -68,10 +68,12 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._points_to_evaluate = points_to_evaluate
         assert n_startup_trials is None or isinstance(n_startup_trials, int)
         if n_startup_trials is None:
-            if self._points_to_evaluate:
-                n_startup_trials = max(10 - len(self._points_to_evaluate), 4)
-            else:
-                n_startup_trials = 4
+            n_startup_trials = 10
+        #     if self._points_to_evaluate:
+        #         n_startup_trials = max(10 - len(self._points_to_evaluate), 10)
+        #     else:
+        #         n_startup_trials = 10
+        
 
         self._study_name = "optuna"  # Fixed study name for in-memory storage
         self._sampler = sampler or ot.samplers.TPESampler(

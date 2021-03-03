@@ -24,12 +24,6 @@ def _is_id_column(col):
     )
 
 
-def nullify_0_variance(col):
-    if np.all(col == col[0]):
-        return None
-    return col
-
-
 def clean_df(df):
     if isinstance(df, pd.DataFrame):
         df.columns = [str(col) for col in df.columns]
@@ -117,7 +111,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))
             except:
-                return col.astype("object").astype(pd.CategoricalDtype(col_unqiue))
+                return col.astype("category")
 
         return col
 
@@ -127,6 +121,13 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                 col, infer_datetime_format=True, utc=False, errors="raise"
             )
         return col.astype(self.final_dtypes_[col.name])
+
+    def _drop_0_variance(self, X):
+        cols_to_drop = []
+        for column in X.columns:
+            if np.all(X[column] == X[column].iloc[0]):
+                cols_to_drop.append(column)
+        return X.drop(cols_to_drop, axis=1)
 
     def fit(self, X, y=None):
         self.fit_transform(X, y=y)
@@ -170,7 +171,6 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         X = X.infer_objects()
 
         X = clean_df(X)
-        X = X.apply(nullify_0_variance)
 
         X.dropna(axis=0, how="all", inplace=True)
         X.dropna(axis=1, how="all", inplace=True)
@@ -180,6 +180,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             X = self._set_index_to_id_column(X)
 
         X = X.apply(self._infer_dtypes)
+        X = self._drop_0_variance(X)
 
         self.final_columns_ = X.columns
         self.final_dtypes_ = X.dtypes

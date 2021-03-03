@@ -342,7 +342,7 @@ class ConditionalBlendSearch(BlendSearch):
         else:
             self._gs = None
 
-        init_config = self._get_all_default_values(space)
+        init_config = self._get_all_default_values(space, get_categorical=False)
         space, _ = get_all_tunable_params(space, to_str=True)
         space = get_tune_distributions(space)
         const_values = {

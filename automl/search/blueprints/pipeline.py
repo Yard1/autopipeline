@@ -102,7 +102,6 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
-        ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
         (
             "ColumnImputation",
             ColumnTransformer(
@@ -120,6 +119,7 @@ def create_pipeline_blueprint(
                 ],
             ),
         ),
+        ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
         (
             "FeatureSelector",
             [components["Passthrough"]] + list(feature_selectors.values()),

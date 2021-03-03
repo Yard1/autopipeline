@@ -86,7 +86,7 @@ class Trainer:
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
             self.tuner_.fit(X, y, groups=groups)
-            # return self
+            return self
             self.secondary_tuner = HEBOTuner
             self.secondary_tuners_ = []
 
