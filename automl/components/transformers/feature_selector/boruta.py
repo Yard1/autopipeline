@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_random_state
 
 from .feature_selector import FeatureSelector
-from ..utils import categorical_column_to_int
+from ..utils import categorical_column_to_int_categories
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -85,8 +85,6 @@ class BorutaSHAP(BorutaPy):
 
         self.estimator_ = clone(self.estimator)
         self._is_classification_ = is_classifier(self.estimator_)
-
-        X = X.apply(categorical_column_to_int)
 
         if self._is_classification_ and self._is_lightgbm:
             self.estimator_.set_params(

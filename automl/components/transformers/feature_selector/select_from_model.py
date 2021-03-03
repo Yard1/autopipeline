@@ -22,7 +22,7 @@ from sklearn.utils.validation import check_random_state
 from sklearn.feature_selection._from_model import _calculate_threshold
 
 from .feature_selector import FeatureSelector
-from ..utils import categorical_column_to_int
+from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ...component import ComponentLevel, ComponentConfig
 from ...estimators.tree.tree_estimator import TreeEstimator
@@ -80,7 +80,7 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
             or "lightgbm" in str(type(self.estimator))
         ):
             self.estimator.set_params(colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1])
-        X = X.apply(categorical_column_to_int)
+        X = X.apply(categorical_column_to_int_categories)
         super().fit(X=X, y=y, **fit_params)
         self.shap_imp_ = self._get_shap_imp(X, self.estimator_)
         return self

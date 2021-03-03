@@ -22,7 +22,7 @@ class NystroemRBF(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 150,
+        "n_components": 200,
         "random_state": None,
         "n_jobs": None,
     }
@@ -44,7 +44,7 @@ class NystroemPoly(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 150,
+        "n_components": 200,
         "random_state": None,
         "n_jobs": None,
     }
@@ -70,7 +70,7 @@ class NystroemSigmoid(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 150,
+        "n_components": 200,
         "random_state": None,
         "n_jobs": None,
     }

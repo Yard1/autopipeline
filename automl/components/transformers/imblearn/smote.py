@@ -86,7 +86,7 @@ class PandasAutoSMOTE(BaseEstimator):
         sampler = self._get_sampler(X)
 
         Xt, yt = sampler.fit_resample(
-            try_enforce_categorical_int_dtype(X).reset_index(drop=True).to_numpy(),
+            categorical_columns_to_int_categories(X).reset_index(drop=True),
             y.reset_index(drop=True),
         )
 
@@ -95,7 +95,7 @@ class PandasAutoSMOTE(BaseEstimator):
                 Xt, index=self.get_index(Xt, X), columns=self.get_columns(Xt, X)
             )
             Xt = Xt.infer_objects()
-            Xt = Xt.astype(self.get_dtypes(Xt, X))
+        Xt = Xt.astype(self.get_dtypes(Xt, X))
 
         if not isinstance(yt, pd.Series):
             yt.name = y.name

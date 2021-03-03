@@ -30,6 +30,16 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
                    "got {0}.".format(self.handle_unknown))
             raise ValueError(msg)
 
+    def fit(self, X, y=None):
+        # we assume we only have categorical columns here
+        X = X.apply(lambda col: col.cat.codes)
+        return super().fit(X, y=y)
+
+    def transform(self, X):
+        # we assume we only have categorical columns here
+        X = X.apply(lambda col: col.cat.codes)
+        return super().transform(X)
+
 
 class OneHotEncoder(Encoder):
     _component_class = PandasOneHotEncoder
