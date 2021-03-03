@@ -33,10 +33,10 @@ class LinearSVCCombinedPenaltyLossDynamicDual(_LinearSVC):
         self.penalty_loss = penalty_loss
 
     def fit(self, X, y, sample_weight=None):
-        if self.penalty_loss == "l2-squared_hinge":
-            self.dual = False
-        else:
+        if self.penalty_loss == "l2-hinge":
             self.dual = True
+        else:
+            self.dual = False
         super().fit(X, y, sample_weight=sample_weight)
 
     @property
@@ -67,7 +67,7 @@ class LinearSVC(SVM):
         "class_weight": None,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 10000,
+        "max_iter": 20000,
     }
 
     _default_tuning_grid = {
@@ -126,7 +126,7 @@ class LinearSVR(SVM):
         "intercept_scaling": 1,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 10000,
+        "max_iter": 20000,
     }
 
     _default_tuning_grid = {

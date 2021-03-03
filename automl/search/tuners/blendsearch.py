@@ -588,25 +588,8 @@ class ConditionalBlendSearch(BlendSearch):
             )
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
-            config = {k: v for k, v in config.items() if k in self.keys_to_keep}
-            if not config or (
-                len(config) != len(self._ls.space)
-                and len(config) != len(self._ls.space) + int(bool(self._ls.prune_attr))
-            ):
-                try:
-                    assert backup is not choice
-                    config = {
-                        **self._search_thread_pool[backup]._search_alg.best_config,
-                        **config,
-                    }
-                    assert len(config) == len(self._ls.space) or len(config) == len(
-                        self._ls.space
-                    ) + int(bool(self._ls.prune_attr))
-                except:
-                    for _, generated in generate_variants({"config": self._ls.space}):
-                        config = {**generated["config"], **config}
-                        break
             skip = self._should_skip(choice, trial_id, config)
+            config = {**self._search_thread_pool[backup]._search_alg.best_config}
             if skip:
                 if choice:
                     # logger.info(f"skipping choice={choice}, config={config}")
@@ -631,25 +614,6 @@ class ConditionalBlendSearch(BlendSearch):
                     )  # tell GS there is an error
                 self._use_rs = False
                 config = self._search_thread_pool[backup].suggest(trial_id)
-                if not config or len(config) != len(self._ls.space):
-                    try:
-                        assert backup is not choice
-                        config = {
-                            **self._search_thread_pool[choice]._search_alg.best_config,
-                            **config,
-                        }
-                        assert len(config) == len(self._ls.space) or len(config) == len(
-                            self._ls.space
-                        ) + int(bool(self._ls.prune_attr))
-                    except:
-                        for _, generated in generate_variants(
-                            {"config": self._ls.space}
-                        ):
-                            config = {**generated["config"], **config}
-                            break
-                assert len(config) == len(self._ls.space) + int(
-                    bool(self._ls.prune_attr)
-                )
                 skip = self._should_skip(backup, trial_id, config)
                 if skip:
                     return None
@@ -695,7 +659,12 @@ class ConditionalBlendSearch(BlendSearch):
                 return None  # running but no result yet
             self._init_used = True
         # logger.info(f"config={config}")
-        assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
+        try:
+            assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr)), {k: v for k, v in self._ls.space.items() if k not in config}
+        except:
+            print("Bad configuration suggested, trying again")
+            traceback.print_exc()
+            return None
         self._suggested_configs[trial_id] = config
         if self._ls.prune_attr:
             prune_attr = config[self._ls.prune_attr]
@@ -715,7 +684,7 @@ class ConditionalBlendSearch(BlendSearch):
             traceback.print_exc()
             print(self._conditional_space)
             print("")
-            return self.suggest(trial_id=trial_id)
+            return None
         if self._ls.prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr
         return clean_config
@@ -752,7 +721,7 @@ class ConditionalBlendSearch(BlendSearch):
         ) = self._has_config_been_already_tried(config)
         # check mem constraint
         if (
-            (not exists)
+            exists is None
             and self._mem_threshold
             and self._mem_size(config) > self._mem_threshold
         ):
@@ -761,7 +730,7 @@ class ConditionalBlendSearch(BlendSearch):
                 self._time_attr: 1,
             }
             exists = True
-        if exists:
+        if exists is not None:
             if not self._use_rs:
                 result = self._result.get(config_signature)
                 if not result and enforced_config_signature:
