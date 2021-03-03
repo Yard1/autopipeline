@@ -61,12 +61,144 @@ from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable
 from .tuner import RayTuneTuner, remove_component_suffix
 from ..utils import call_component_if_needed
 from ...problems import ProblemType
-
+from ...components import Component
 
 GlobalSearch = ConditionalOptunaSearch
 
 
 class PatchedFLOW2(FLOW2):
+    def __init__(
+        self,
+        init_config: dict,
+        metric: Optional[str] = None,
+        mode: Optional[str] = None,
+        cat_hp_cost: Optional[dict] = None,
+        space: Optional[dict] = None,
+        prune_attr: Optional[str] = None,
+        min_resource: Optional[float] = None,
+        max_resource: Optional[float] = None,
+        resource_multiple_factor: Optional[float] = 4,
+        seed: Optional[int] = 20,
+        limit_space_to_init_config: bool = False,
+        conditional_space=None,
+    ):
+        """Constructor
+
+        Args:
+            init_config: a dictionary from a subset of controlled dimensions
+                to the initial low-cost values. e.g. {'epochs':1}
+            metric: A string of the metric name to optimize for.
+                minimization or maximization.
+            mode: A string in ['min', 'max'] to specify the objective as
+            cat_hp_cost: A dictionary from a subset of categorical dimensions
+                to the relative cost of each choice.
+                e.g.,
+
+                .. code-block:: python
+
+                    {'tree_method': [1, 1, 2]}
+
+                i.e., the relative cost of the
+                three choices of 'tree_method' is 1, 1 and 2 respectively.
+            space: A dictionary to specify the search space.
+            prune_attr: A string of the attribute used for pruning.
+                Not necessarily in space.
+                When prune_attr is in space, it is a hyperparameter, e.g.,
+                    'n_iters', and the best value is unknown.
+                When prune_attr is not in space, it is a resource dimension,
+                    e.g., 'sample_size', and the peak performance is assumed
+                    to be at the max_resource.
+            min_resource: A float of the minimal resource to use for the
+                prune_attr; only valid if prune_attr is not in space.
+            max_resource: A float of the maximal resource to use for the
+                prune_attr; only valid if prune_attr is not in space.
+            resource_multiple_factor: A float of the multiplicative factor
+                used for increasing resource.
+            seed: An integer of the random seed.
+        """
+        if mode:
+            assert mode in ["min", "max"], "`mode` must be 'min' or 'max'."
+        else:
+            mode = "min"
+
+        super(FLOW2, self).__init__(metric=metric, mode=mode)
+        # internally minimizes, so "max" => -1
+        if mode == "max":
+            self.metric_op = -1.0
+        elif mode == "min":
+            self.metric_op = 1.0
+        self.space = space or {}
+        self.conditional_space = conditional_space or {}
+        self.signature_space = space
+        self._random = np.random.RandomState(seed)
+        self._seed = seed
+        if not init_config:
+            logger.warning(
+                "No init config given to FLOW2. Using random initial config."
+                "For cost-frugal search, "
+                "consider providing init values for cost-related hps via "
+                "'init_config'."
+            )
+        elif self.conditional_space:
+            init_config = enforce_conditions_on_config(init_config, conditional_space)
+            print(f"FLOW2 init_config {init_config}")
+        self.init_config = self.best_config = init_config
+        if limit_space_to_init_config:
+            assert init_config
+            self.space = {
+                k: v if Component._automl_id_sign in k else init_config[k]
+                for k, v in self.space.items()
+                if k in init_config
+            }
+            self.space["Estimator"] = init_config["Estimator"]
+        self.cat_hp_cost = cat_hp_cost
+        self.prune_attr = prune_attr
+        self.min_resource = min_resource
+        self.resource_multiple_factor = resource_multiple_factor or 4
+        self.max_resource = max_resource
+        self._resource = None
+        self._step_lb = np.Inf
+        if space:
+            self._init_search()
+
+    def config_signature(self, config) -> tuple:
+        """return the signature tuple of a config"""
+        value_list = []
+        for key in self.signature_space.keys():
+            if key in config:
+                value = config[key]
+                if key == self.prune_attr:
+                    value_list.append(value)
+                # else key must be in self.space
+                # get rid of list type or constant,
+                # e.g., "eval_metric": ["logloss", "error"]
+                elif callable(getattr(self.space[key], "sample", None)):
+                    if isinstance(self.space[key], sample.Integer):
+                        value_list.append(int(round(value)))
+                    else:
+                        value_list.append(value)
+            else:
+                value_list.append(None)
+        return tuple(value_list)
+
+    def reach(self, other: Searcher) -> bool:
+        """whether the incumbent can reach the incumbent of other"""
+        config1, config2 = self.best_config, other.best_config
+        incumbent1, incumbent2 = self.incumbent, other.incumbent
+        if self._resource and config1[self.prune_attr] > config2[self.prune_attr]:
+            # resource will not decrease
+            return False
+        if set(self.space) != set(other.space):
+            return False
+        for key in self._unordered_cat_hp:
+            # unordered cat choice is hard to reach by chance
+            if config1[key] != config2[key]:
+                return False
+        delta = np.array(
+            [incumbent1[key] - incumbent2[key] for key in self._tunable_keys]
+        )
+        return np.linalg.norm(delta) <= self.step
+
     @property
     def step_lower_bound(self) -> float:
         step_lb = self._step_lb
@@ -94,6 +226,92 @@ class PatchedFLOW2(FLOW2):
         else:
             step_lb *= np.sqrt(self.dim)
         return step_lb
+
+    def create(
+        self,
+        init_config: Dict,
+        obj: float,
+        cost: float,
+        conditional_space=None,
+        limit_space_to_init_config: bool = False,
+    ) -> Searcher:
+        flow2 = self.__class__(
+            init_config,
+            self.metric,
+            self.mode,
+            self._cat_hp_cost,
+            self.space,
+            self.prune_attr,
+            self.min_resource,
+            self.max_resource,
+            self.resource_multiple_factor,
+            self._seed + 1,
+            conditional_space=conditional_space,
+            limit_space_to_init_config=limit_space_to_init_config,
+        )
+        flow2.best_obj = obj * self.metric_op  # minimize internally
+        flow2.cost_incumbent = cost
+        return flow2
+
+    def on_trial_complete(
+        self, trial_id: str, result: Optional[Dict] = None, error: bool = False
+    ):
+        """compare with incumbent"""
+        # if better, move, reset num_complete and num_proposed
+        # if not better and num_complete >= 2*dim, num_allowed += 2
+        self.trial_count += 1
+        print("flow2 on_trial_complete")
+        print(result)
+        print(self.space)
+        if not error and result:
+            obj = result.get(self._metric)
+            if obj:
+                obj *= self.metric_op
+                if obj < self.best_obj:
+                    self.best_obj, self.best_config = obj, self._configs[trial_id]
+                    self.incumbent = self.normalize(self.best_config)
+                    self.cost_incumbent = result.get(self.cost_attr)
+                    if self._resource:
+                        self._resource = self.best_config[self.prune_attr]
+                    self._num_complete4incumbent = 0
+                    self._cost_complete4incumbent = 0
+                    self._num_allowed4incumbent = 2 * self.dim
+                    self._proposed_by.clear()
+                    if self._K > 0:
+                        self.step *= np.sqrt(self._K / self._oldK)
+                    if self.step > self.step_ub:
+                        self.step = self.step_ub
+                    self._iter_best_config = self.trial_count
+                    return
+        proposed_by = self._proposed_by.get(trial_id)
+        if proposed_by == self.incumbent:
+            # proposed by current incumbent and no better
+            self._num_complete4incumbent += 1
+            cost = (
+                result.get(self.cost_attr) if result else self._trial_cost.get(trial_id)
+            )
+            if cost:
+                self._cost_complete4incumbent += cost
+            if (
+                self._num_complete4incumbent >= 2 * self.dim
+                and self._num_allowed4incumbent == 0
+            ):
+                self._num_allowed4incumbent = 2
+            if self._num_complete4incumbent == self.dir and (
+                not self._resource or self._resource == self.max_resource
+            ):
+                # check stuck condition if using max resource
+                if self.step >= self.step_lower_bound:
+                    # decrease step size
+                    self._oldK = self._K if self._K else self._iter_best_config
+                    self._K = self.trial_count + 1
+                    self.step *= np.sqrt(self._oldK / self._K)
+                    # logger.info(f"step={self.step}, lb={self.step_lower_bound}")
+                self._num_complete4incumbent -= 2
+                if self._num_allowed4incumbent < 2:
+                    self._num_allowed4incumbent = 2
+        # elif proposed_by: # proposed by older incumbent
+        #     del self._proposed_by[trial_id]
 
 
 LocalSearch = PatchedFLOW2
@@ -139,7 +357,18 @@ class SharingSearchThread(SearchThread):
             return
         if not hasattr(self._search_alg, "_ot_trials"):
             # optuna doesn't handle error
-            self._search_alg.on_trial_complete(trial_id, result, error)
+            self._search_alg.on_trial_complete(
+                trial_id,
+                enforce_conditions_on_config(
+                    result,
+                    self._search_alg.conditional_space,
+                    prefix="config/",
+                    keys_to_keep=set(self._search_alg.space).union(
+                        {self.prune_attr, self.cost_attr}
+                    ),
+                ),
+                error,
+            )
         elif not error:
             print(
                 f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
@@ -488,7 +717,6 @@ class ConditionalBlendSearch(BlendSearch):
             # if not thread_id: logger.info(f"result {result}")
         if result:
             config = self._suggested_configs[trial_id]
-            assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
             (
                 _,
                 config_signature,
@@ -508,6 +736,8 @@ class ConditionalBlendSearch(BlendSearch):
                 if self._admissible_min:
                     normalized_config = self._ls.normalize(config)
                     for key in self._admissible_min:
+                        if key not in config:
+                            continue
                         value = normalized_config[key]
                         if value > self._admissible_max[key]:
                             self._admissible_max[key] = value
@@ -515,13 +745,14 @@ class ConditionalBlendSearch(BlendSearch):
                             self._admissible_min[key] = value
             elif self._create_condition(result):
                 # thread creator
-                assert len(config) == len(self._ls.space) + int(
-                    bool(self._ls.prune_attr)
-                )
                 self._search_thread_pool[self._thread_count] = SharingSearchThread(
                     self._ls.mode,
                     self._ls.create(
-                        config, result[self._metric], cost=result[self._time_attr]
+                        config,
+                        result[self._metric],
+                        cost=result[self._time_attr],
+                        conditional_space=self._conditional_space,
+                        limit_space_to_init_config=True,
                     ),
                     cost_attr=self._time_attr,
                     prune_attr=self._ls.prune_attr,
@@ -588,8 +819,8 @@ class ConditionalBlendSearch(BlendSearch):
             )
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
+            print(f"main choice suggestion: {config}")
             skip = self._should_skip(choice, trial_id, config)
-            config = {**self._search_thread_pool[backup]._search_alg.best_config}
             if skip:
                 if choice:
                     # logger.info(f"skipping choice={choice}, config={config}")
@@ -614,6 +845,7 @@ class ConditionalBlendSearch(BlendSearch):
                     )  # tell GS there is an error
                 self._use_rs = False
                 config = self._search_thread_pool[backup].suggest(trial_id)
+                print(f"backup choice suggestion: {config}")
                 skip = self._should_skip(backup, trial_id, config)
                 if skip:
                     return None
@@ -659,12 +891,6 @@ class ConditionalBlendSearch(BlendSearch):
                 return None  # running but no result yet
             self._init_used = True
         # logger.info(f"config={config}")
-        try:
-            assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr)), {k: v for k, v in self._ls.space.items() if k not in config}
-        except:
-            print("Bad configuration suggested, trying again")
-            traceback.print_exc()
-            return None
         self._suggested_configs[trial_id] = config
         if self._ls.prune_attr:
             prune_attr = config[self._ls.prune_attr]
@@ -676,8 +902,12 @@ class ConditionalBlendSearch(BlendSearch):
                 config, self._conditional_space_estimators
             )
             clean_config_len = len(clean_config)
-            new_clean_config = enforce_conditions_on_config(config, self._conditional_space)
-            assert len(new_clean_config) >= clean_config_len, f"{clean_config}, {new_clean_config}"
+            new_clean_config = enforce_conditions_on_config(
+                config, self._conditional_space
+            )
+            assert (
+                len(new_clean_config) >= clean_config_len
+            ), f"{clean_config}, {new_clean_config}"
             clean_config = new_clean_config
         except:
             print("Bad configuration suggested, trying again")
@@ -750,6 +980,32 @@ class ConditionalBlendSearch(BlendSearch):
             return True
         return False
 
+    def _clean(self, thread_id: int):
+        """delete thread and increase admissible region if converged,
+        merge local threads if they are close
+        """
+        assert thread_id
+        todelete = set()
+        for id in self._search_thread_pool:
+            if id and id != thread_id:
+                if self._inferior(id, thread_id):
+                    todelete.add(id)
+        for id in self._search_thread_pool:
+            if id and id != thread_id:
+                if self._inferior(thread_id, id):
+                    todelete.add(thread_id)
+                    break
+        # logger.info(f"thead {thread_id}.converged="
+        #     f"{self._search_thread_pool[thread_id].converged}")
+        if self._search_thread_pool[thread_id].converged:
+            todelete.add(thread_id)
+            for key in self._admissible_min:
+                if key in self._search_thread_pool[thread_id]._search_alg.space:
+                    self._admissible_max[key] += self._ls.STEPSIZE
+                    self._admissible_min[key] -= self._ls.STEPSIZE
+        for id in todelete:
+            del self._search_thread_pool[id]
+
 
 class BlendSearchTuner(RayTuneTuner):
     def __init__(
@@ -781,7 +1037,7 @@ class BlendSearchTuner(RayTuneTuner):
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 10000/self.X_.shape[0])
+            min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
             step = 4
 
