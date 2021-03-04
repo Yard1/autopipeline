@@ -26,11 +26,11 @@ class DecisionTreeClassifier(TreeEstimator):
         "max_depth": 10,
         "min_samples_split": 2,
         "min_samples_leaf": 1,
-        "min_weight_fraction_leaf": 0.0,
+        "min_weight_fraction_leaf": 1e-10,
         "max_features": "sqrt",  # TODO: make dynamic
         "random_state": None,
         "max_leaf_nodes": None,
-        "min_impurity_decrease": 0.0,
+        "min_impurity_decrease": 1e-10,
         "class_weight": None,
         "ccp_alpha": 0.0,
     }
@@ -43,9 +43,9 @@ class DecisionTreeClassifier(TreeEstimator):
         "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
     }
     _default_tuning_grid_extended = {
-        "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
-        "class_weight": CategoricalDistribution([None, "balanced", "balanced_subsample"]),
+        "min_impurity_decrease": UniformDistribution(1e-10, 0.5, log=True),
+        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.5, log=True),
+        "class_weight": CategoricalDistribution([None, "balanced"]),
     }
 
     _problem_types = {
@@ -67,11 +67,11 @@ class DecisionTreeRegressor(TreeEstimator):
         "max_depth": 10,
         "min_samples_split": 2,
         "min_samples_leaf": 1,
-        "min_weight_fraction_leaf": 0.0,
+        "min_weight_fraction_leaf": 1e-10,
         "max_features": None,  # TODO: make dynamic
         "random_state": None,
         "max_leaf_nodes": None,
-        "min_impurity_decrease": 0.0,
+        "min_impurity_decrease": 1e-10,
         "class_weight": None,
         "ccp_alpha": 0.0,
     }
@@ -84,8 +84,8 @@ class DecisionTreeRegressor(TreeEstimator):
         "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
     }
     _default_tuning_grid_extended = {
-        "min_impurity_decrease": UniformDistribution(0.0, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(0.0, 0.5, log=True),
+        "min_impurity_decrease": UniformDistribution(1e-10, 0.5, log=True),
+        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.5, log=True),
   }
 
     _problem_types = {

@@ -7,6 +7,7 @@ from ....problems import ProblemType
 from ....search.distributions import IntUniformDistribution, CategoricalDistribution
 
 
+# TODO: NCA
 class KNeighborsClassifier(KNNEstimator):
     _component_class = _KNeighborsClassifier
 

@@ -5,6 +5,7 @@ from .....problems import ProblemType
 from .....search.distributions import UniformDistribution
 
 
+# TODO: libsvm for small datasets
 class LinearSVCCombinedPenaltyLossDynamicDual(_LinearSVC):
     def __init__(
         self,
