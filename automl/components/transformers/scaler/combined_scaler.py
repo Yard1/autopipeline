@@ -6,6 +6,10 @@ from ...flow._column_transformer import PandasColumnTransformer, make_column_sel
 from .quantile_transformer import QuantileTransformer
 from .standard_scaler import StandardScaler
 
+from ...component import ComponentConfig
+from ....search.stage import AutoMLStage
+from ...estimators.linear_model.linear_model_estimator import LinearModelEstimator
+
 
 def _scaler_skewness_condition(column, skewness_threshold=0.99):
     return np.abs(column.skew()) > skewness_threshold
@@ -56,3 +60,11 @@ class CombinedScalerTransformer(Scaler):
     }
     _allowed_dtypes = {DataType.NUMERIC}
     _component_level = ComponentLevel.NECESSARY
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        if config is None:
+            return True
+        super_check = super().is_component_valid(config, stage)
+        return super_check and (
+            config.estimator is None or isinstance(config.estimator, LinearModelEstimator)
+        )

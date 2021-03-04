@@ -1,3 +1,8 @@
+from automl.components.estimators.knn.knn import (
+    KNeighborsClassifier,
+    KNeighborsRegressor,
+)
+from automl.components.transformers.scaler.min_max_scaler import MinMaxScaler
 import numpy as np
 
 from typing import Optional
@@ -16,12 +21,17 @@ from ...components.flow import (
 from ...components.transformers import *
 from ...components.estimators import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
-from ...components.estimators.tree.tree_estimator import TreeEstimator
+from ...components.estimators.linear_model.linear_model_estimator import (
+    LinearModelEstimator,
+)
+from ...components.estimators.knn.knn_estimator import KNNEstimator
 from ...utils import validate_type
 
 
 def _scaler_passthrough_condition(config, stage):
-    return config.estimator is None or isinstance(config.estimator, TreeEstimator)
+    return config.estimator is None or not isinstance(
+        config.estimator, (LinearModelEstimator, KNNEstimator)
+    )
 
 
 categorical_selector = make_column_selector(dtype_include="category")
@@ -58,6 +68,7 @@ def create_pipeline_blueprint(
     }
     scalers_normalizers = {
         "CombinedScalerTransformer": CombinedScalerTransformer(),
+        "MinMaxScaler": MinMaxScaler(),
     }
     categorical_imputers = {
         "SimpleCategoricalImputer": SimpleCategoricalImputer(),
@@ -87,6 +98,8 @@ def create_pipeline_blueprint(
         "RandomForestRegressor": RandomForestRegressor(),
         "LinearSVC": LinearSVC(),
         "LinearSVR": LinearSVR(),
+        "KNeighborsClassifier": KNeighborsClassifier(),
+        "KNeighborsRegressor": KNeighborsRegressor(),
     }
     components = {
         **passthrough,

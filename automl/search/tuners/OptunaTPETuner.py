@@ -61,10 +61,6 @@ class ConditionalOptunaSearch(OptunaSearch):
         space = {k: v for k, v in space.items() if k not in const_values}
         self._space = get_optuna_trial_suggestions(space)
 
-        self._conditional_space = {
-            k: v for k, v in self._conditional_space.items() if k in self._space
-        }
-
         self._points_to_evaluate = points_to_evaluate
         assert n_startup_trials is None or isinstance(n_startup_trials, int)
         if n_startup_trials is None:
@@ -73,7 +69,6 @@ class ConditionalOptunaSearch(OptunaSearch):
         #         n_startup_trials = max(10 - len(self._points_to_evaluate), 10)
         #     else:
         #         n_startup_trials = 10
-        
 
         self._study_name = "optuna"  # Fixed study name for in-memory storage
         self._sampler = sampler or ot.samplers.TPESampler(
@@ -238,7 +233,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         config = {
             removeprefix(k, "config/"): v
             for k, v in result.items()
-            if k.startswith("config/")
+            if k.startswith("config/") and v != "passthrough"
         }
         distributions = {k: v for k, v in self._space.items() if k in config}
         distributions = ConditionalOptunaSearch.convert_optuna_params_to_distributions(
