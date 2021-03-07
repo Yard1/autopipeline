@@ -86,7 +86,6 @@ class Trainer:
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
             self.tuner_.fit(X, y, groups=groups)
-            return self
             self.secondary_tuner = HEBOTuner
             self.secondary_tuners_ = []
 
@@ -97,7 +96,12 @@ class Trainer:
             percentile = np.percentile(
                 results_df["mean_test_score"], self.best_percentile
             )
-            grouped_results_df = results_df.groupby(by="config.Estimator")
+            groupby_list = [
+                f"config.{k}"
+                for k in self.pipeline_blueprint_.get_all_distributions().keys()
+            ]
+            groupby_list.reverse()
+            grouped_results_df = results_df.groupby(by=groupby_list)
             for name, group in grouped_results_df:
                 if group["mean_test_score"].max() >= percentile:
                     group_trial_ids = set(group.index)
@@ -113,6 +117,7 @@ class Trainer:
                         for k, v in results.items()
                         if k in group_trial_ids
                     ]
+                    print(known_points[0])
                     self.secondary_tuners_.append(
                         self.secondary_tuner(
                             problem_type=self.problem_type,

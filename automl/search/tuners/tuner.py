@@ -4,6 +4,7 @@ import pandas as pd
 import gc
 import os
 import tempfile
+import traceback
 
 from ray import tune
 
@@ -15,6 +16,7 @@ from .utils import ray_context, split_list_into_chunks, get_all_tunable_params
 from ..utils import call_component_if_needed
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
+from ...components.transformers.passthrough import Passthrough
 from ...problems import ProblemType
 from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
@@ -43,16 +45,23 @@ class Tuner:
         self.cv = cv
         self.random_state = random_state
 
-    def _get_single_default_hyperparams(self, components):
+    def _get_single_default_hyperparams(self, components, grid):
         hyperparams = {}
         valid_keys = set()
         for k, v in components.items():
-            if self._is_component_valid(v, components["Estimator"]):
-                valid_keys.add(k)
-                for k2, v2 in v.get_tuning_grid().items():
-                    name = v.get_hyperparameter_key_suffix(k, k2)
-                    hyperparams[name] = v2.default
-        return {**{k:v for k,v in components.items() if k in valid_keys}, **hyperparams}
+            if not self._is_component_valid(v, components["Estimator"]):
+                try:
+                    v = next(x for x in grid[k] if self._is_component_valid(x, components["Estimator"]))
+                except StopIteration:
+                    continue
+            valid_keys.add(k)
+            for k2, v2 in v.get_tuning_grid().items():
+                name = v.get_hyperparameter_key_suffix(k, k2)
+                hyperparams[name] = v2.default
+        return {
+            **{k: v for k, v in components.items() if k in valid_keys},
+            **hyperparams,
+        }
 
     def _are_components_valid(self, components: dict) -> bool:
         for k, v in components.items():
@@ -82,7 +91,7 @@ class Tuner:
             k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
         }
         default_grid_list = [
-            self._get_single_default_hyperparams(components)
+            self._get_single_default_hyperparams(components, default_grid)
             for components in ParameterGrid(default_grid)
         ]
         default_grid_list = [
@@ -103,6 +112,17 @@ class Tuner:
             if config not in self.default_grid
         ]
         self.default_grid += preset_configurations
+
+        default_grid_list_dict = []
+        default_grid_list_no_dups = []
+        for config in self.default_grid:
+            str_config = {
+                k: str(v) for k, v in config.items() if not isinstance(v, Passthrough)
+            }
+            if str_config not in default_grid_list_dict:
+                default_grid_list_dict.append(str_config)
+                default_grid_list_no_dups.append(config)
+        self.default_grid = default_grid_list_no_dups
 
         self._set_up_early_stopping(X, y, groups=groups)
 

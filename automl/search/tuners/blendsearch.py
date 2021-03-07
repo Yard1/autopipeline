@@ -736,8 +736,7 @@ class ConditionalBlendSearch(BlendSearch):
                 del self._result[config_signature]
             else:  # add to result cache
                 self._result[config_signature] = result
-                if enforced_config_signature:
-                    self._result[enforced_config_signature] = result
+                self._result[enforced_config_signature] = result
             # update target metric if improved
             if (result[self._metric] - self._metric_target) * self._ls.metric_op < 0:
                 self._metric_target = result[self._metric]
@@ -816,7 +815,7 @@ class ConditionalBlendSearch(BlendSearch):
 
     def suggest(self, trial_id: str) -> Optional[Dict]:
         """choose thread, suggest a valid config"""
-        print(f"suggest {trial_id}")
+        print(f"suggest {trial_id}, {len(self._points_to_evaluate)}")
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
             if choice < 0:
@@ -892,8 +891,7 @@ class ConditionalBlendSearch(BlendSearch):
                 enforced_config_signature,
             ) = self._has_config_been_already_tried(config)
             self._result[config_signature] = {}
-            if enforced_config_signature:
-                self._result[enforced_config_signature] = {}
+            self._result[enforced_config_signature] = {}
         else:  # use init config
             init_config = (
                 self._points_to_evaluate.pop(0)
@@ -910,14 +908,15 @@ class ConditionalBlendSearch(BlendSearch):
                 config_signature,
                 enforced_config_signature,
             ) = self._has_config_been_already_tried(config)
-            if result:  # tried before
-                # self.on_trial_complete(trial_id, result)
-                return None
-            elif result is None:  # not tried before
+            if result is None:  # not tried before
                 self._result[config_signature] = {}
-                if enforced_config_signature:
-                    self._result[enforced_config_signature] = {}
+                self._result[enforced_config_signature] = {}
             else:
+                print("result is not None")
+                print(config)
+                print(result)
+                print(config_signature)
+                print(enforced_config_signature)
                 return None  # running but no result yet
             self._init_used = True
             self._trial_proposed_by[trial_id] = 0
@@ -965,7 +964,7 @@ class ConditionalBlendSearch(BlendSearch):
         )
         result = None
         result = self._result.get(config_signature, None)
-        if not result:
+        if result is None:
             result = self._result.get(enforced_config_signature, None)
         return result, config_signature, enforced_config_signature
 

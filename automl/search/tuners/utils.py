@@ -133,12 +133,13 @@ def enforce_conditions_on_config(
 
 
 def get_all_tunable_params(
-    pipeline: Pipeline, to_str=False, use_extended=False
+    pipeline: Pipeline, to_str=False, use_extended=False, space=None
 ) -> Tuple[dict, dict]:
-    space = {
-        k: v
-        for k, v in pipeline.get_all_distributions(use_extended=use_extended).items()
-    }
+    if space is None:
+        space = {
+            k: v
+            for k, v in pipeline.get_all_distributions(use_extended=use_extended).items()
+        }
     string_space = {}
     for k, v in space.items():
         choices = v.values

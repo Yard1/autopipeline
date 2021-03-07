@@ -96,22 +96,22 @@ class HEBOTuner(RayTuneTuner):
         )
 
     def _pre_search(self, X, y, groups=None):
+        print("_pre_search")
+        print(self.known_points[0][0])
         self.pipeline_blueprint = copy(self.pipeline_blueprint)
-        self.pipeline_blueprint.remove_invalid_components(
-            pipeline_config=ComponentConfig(
-                estimator=self.known_points[0][0]["Estimator"]
-            ),
-            current_stage=AutoMLStage.TUNE,
-        )
-        self.pipeline_blueprint.components[-1] = (self.pipeline_blueprint.components[-1][0], [next(
-            x
-            for x in self.pipeline_blueprint.components[-1][1]
-            if str(x) == self.known_points[0][0]["Estimator"]
-        )])
         super()._pre_search(X, y, groups=groups)
         self._tune_kwargs["num_samples"] -= len(self.default_grid)
+        space = {}
+        for k, v in self.pipeline_blueprint.get_all_distributions(
+            use_extended=True
+        ).items():
+            if k in self.known_points[0][0] and self.known_points[0][0][k] != "passthrough":
+                space[k] = CategoricalDistribution(
+                    [next(x for x in v.values if str(x) == self.known_points[0][0][k])]
+                )
+        print(space)
         space, _ = get_all_tunable_params(
-            self.pipeline_blueprint, to_str=True, use_extended=True
+            self.pipeline_blueprint, to_str=True, use_extended=True, space=space
         )
         self._const_values = {
             k: v.values[0]
@@ -149,6 +149,7 @@ class HEBOTuner(RayTuneTuner):
 
     def _treat_config(self, config):
         config = {**self._const_values, **config}
+        print(config)
         return super()._treat_config(config)
 
     def _search(self, X, y, groups=None):
