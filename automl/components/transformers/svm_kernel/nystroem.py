@@ -22,7 +22,7 @@ class NystroemRBF(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 200,
+        "n_components": 500,
         "random_state": None,
         "n_jobs": None,
     }
@@ -30,36 +30,6 @@ class NystroemRBF(SVMKernel):
     _component_level = ComponentLevel.UNCOMMON
 
     _default_tuning_grid = {"gamma": UniformDistribution(3.0517578125e-05, 8, log=True)}
-
-    _default_tuning_grid_extended = {
-        "n_components": IntUniformDistribution(50, 10000, log=True)
-    }
-
-
-class NystroemPoly(SVMKernel):
-    _component_class = Nystroem
-    _default_parameters = {
-        "kernel": "poly",
-        "gamma": 0.1,
-        "coef0": 0,
-        "degree": 3,
-        "kernel_params": None,
-        "n_components": 200,
-        "random_state": None,
-        "n_jobs": None,
-    }
-    _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
-    _component_level = ComponentLevel.RARE
-
-    _default_tuning_grid = {
-        "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
-        "coef0": UniformDistribution(-1, 1),
-        "degree": IntUniformDistribution(2, 5),
-    }
-
-    _default_tuning_grid_extended = {
-        "n_components": IntUniformDistribution(50, 10000, log=True)
-    }
 
 
 class NystroemSigmoid(SVMKernel):
@@ -70,7 +40,7 @@ class NystroemSigmoid(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 200,
+        "n_components": 500,
         "random_state": None,
         "n_jobs": None,
     }
@@ -80,8 +50,4 @@ class NystroemSigmoid(SVMKernel):
     _default_tuning_grid = {
         "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
         "coef0": UniformDistribution(-1, 1),
-    }
-
-    _default_tuning_grid_extended = {
-        "n_components": IntUniformDistribution(50, 10000, log=True)
     }

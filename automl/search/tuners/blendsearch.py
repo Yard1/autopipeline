@@ -330,6 +330,7 @@ class SharingSearchThread(SearchThread):
     ):
         """When search_alg is omitted, use local search FLOW2"""
         self._search_alg = search_alg
+        self._is_ls = isinstance(search_alg, FLOW2)
         self._mode = mode
         self._metric_op = 1 if mode == "min" else -1
         self.cost_best = self.cost_last = self.cost_total = self.cost_best1 = getattr(
@@ -342,6 +343,7 @@ class SharingSearchThread(SearchThread):
         # eci: expected cost for improvement
         self.eci = self.cost_best
         self.priority = self.speed = 0
+        self._init_config = True
         if cost_attr:
             self.cost_attr = cost_attr
         self.prune_attr = prune_attr
@@ -353,22 +355,28 @@ class SharingSearchThread(SearchThread):
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
     ):
         """update the statistics of the thread"""
+        print(f"on_trial_complete {trial_id} {self._search_alg}")
         if not self._search_alg:
             return
         if not hasattr(self._search_alg, "_ot_trials"):
             # optuna doesn't handle error
-            self._search_alg.on_trial_complete(
-                trial_id,
-                enforce_conditions_on_config(
-                    result,
-                    self._search_alg.conditional_space,
-                    prefix="config/",
-                    keys_to_keep=set(self._search_alg.space).union(
-                        {self.prune_attr, self.cost_attr}
+            if self._is_ls or not self._init_config:
+                self._search_alg.on_trial_complete(
+                    trial_id,
+                    enforce_conditions_on_config(
+                        result,
+                        self._search_alg.conditional_space,
+                        prefix="config/",
+                        keys_to_keep=set(self._search_alg.space).union(
+                            {self.prune_attr, self.cost_attr}
+                        ),
                     ),
-                ),
-                error,
-            )
+                    error,
+                )
+            else:
+                # init config is not proposed by self._search_alg
+                # under this thread
+                self._init_config = False
         elif not error:
             print(
                 f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
@@ -376,7 +384,7 @@ class SharingSearchThread(SearchThread):
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if (
-                        not f"{self.prune_attr}_" in result
+                        f"{self.prune_attr}_" not in result
                         or np.around(result[f"{self.prune_attr}_"], 1)
                         >= self.max_prune_attr
                     ):
@@ -401,7 +409,7 @@ class SharingSearchThread(SearchThread):
                             ),
                         )
                 elif (
-                    not f"{self.prune_attr}_" in result
+                    f"{self.prune_attr}_" not in result
                     or np.around(result[f"{self.prune_attr}_"], 1)
                     >= self.max_prune_attr
                 ):
@@ -658,8 +666,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._thread_count,
             self._init_used,
             self._trial_proposed_by,
-            self._admissible_min,
-            self._admissible_max,
+            self._ls_bound_min,
+            self._ls_bound_max,
             self._result,
             self._deadline,
             self._suggested_configs,
@@ -679,8 +687,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._thread_count,
             self._init_used,
             self._trial_proposed_by,
-            self._admissible_min,
-            self._admissible_max,
+            self._ls_bound_min,
+            self._ls_bound_max,
             self._result,
             self._deadline,
             self._suggested_configs,
@@ -696,7 +704,7 @@ class ConditionalBlendSearch(BlendSearch):
         if trial_id not in self._trial_proposed_by:
             return
         thread_id = self._trial_proposed_by[trial_id]
-        if not thread_id in self._search_thread_pool:
+        if thread_id not in self._search_thread_pool:
             return
         config = {
             f"config/{k}": v for k, v in self._suggested_configs[trial_id].items()
@@ -713,6 +721,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._search_thread_pool[thread_id].on_trial_complete(
                 trial_id, result, error
             )
+            if thread_id > 0 and self._global_search_thread:
+                self._global_search_thread.on_trial_complete(trial_id, result, error)
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
         if result:
@@ -731,19 +741,7 @@ class ConditionalBlendSearch(BlendSearch):
             # update target metric if improved
             if (result[self._metric] - self._metric_target) * self._ls.metric_op < 0:
                 self._metric_target = result[self._metric]
-            if thread_id:  # from local search
-                # update admissible region
-                if self._admissible_min:
-                    normalized_config = self._ls.normalize(config)
-                    for key in self._admissible_min:
-                        if key not in config:
-                            continue
-                        value = normalized_config[key]
-                        if value > self._admissible_max[key]:
-                            self._admissible_max[key] = value
-                        elif value < self._admissible_min[key]:
-                            self._admissible_min[key] = value
-            elif self._create_condition(result):
+            if not thread_id and self._create_condition(result):
                 # thread creator
                 self._search_thread_pool[self._thread_count] = SharingSearchThread(
                     self._ls.mode,
@@ -764,8 +762,12 @@ class ConditionalBlendSearch(BlendSearch):
                 thread_id = self._thread_count
                 self._thread_count += 1
 
-        if thread_id != 0 and self._global_search_thread:
-            self._global_search_thread.on_trial_complete(trial_id, result, error)
+                self._update_admissible_region(
+                    config, self._ls_bound_min, self._ls_bound_max
+                )
+            # reset admissible region to ls bounding box
+            self._gs_admissible_min.update(self._ls_bound_min)
+            self._gs_admissible_max.update(self._ls_bound_max)
 
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
@@ -774,35 +776,47 @@ class ConditionalBlendSearch(BlendSearch):
             # local search thread
             self._clean(thread_id)
 
+    def _update_admissible_region(self, config, admissible_min, admissible_max):
+        # update admissible region
+        normalized_config = self._ls.normalize(config)
+        for key in admissible_min:
+            if key in config:
+                value = normalized_config[key]
+                if value > admissible_max[key]:
+                    admissible_max[key] = value
+                elif value < admissible_min[key]:
+                    admissible_min[key] = value
+
     def _valid(self, config: Dict) -> bool:
         """config validator"""
         try:
-            for key in self._admissible_min:
+            for key in self._gs_admissible_min:
                 if key in config:
                     value = config[key]
                     # logger.info(
                     #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
                     if (
-                        value < self._admissible_min[key]
-                        or value > self._admissible_max[key]
+                        value + self._ls.STEPSIZE < self._gs_admissible_min[key]
+                        or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
                     ):
                         return False
         except TypeError:
             normalized_config = self._ls.normalize(config)
-            for key in self._admissible_min:
-                if key in normalized_config:
+            for key in self._gs_admissible_min:
+                if key in config:
                     value = normalized_config[key]
                     # logger.info(
                     #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
                     if (
-                        value < self._admissible_min[key]
-                        or value > self._admissible_max[key]
+                        value + self._ls.STEPSIZE < self._gs_admissible_min[key]
+                        or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
                     ):
                         return False
         return True
 
     def suggest(self, trial_id: str) -> Optional[Dict]:
         """choose thread, suggest a valid config"""
+        print(f"suggest {trial_id}")
         if self._init_used and not self._points_to_evaluate:
             choice, backup = self._select_thread()
             if choice < 0:
@@ -835,27 +849,43 @@ class ConditionalBlendSearch(BlendSearch):
                 if skip:
                     return None
             # if not choice: logger.info(config)
-            if choice or backup == choice or self._valid(config):
+            if choice or self._valid(config):
                 # LS or valid or no backup choice
                 self._trial_proposed_by[trial_id] = choice
             else:  # invalid config proposed by GS
-                if not self._use_rs:
-                    self._search_thread_pool[choice].on_trial_complete(
-                        trial_id, {}, error=True
-                    )  # tell GS there is an error
+                # if not self._use_rs:
+                #    self._search_thread_pool[choice].on_trial_complete(
+                #        trial_id, {}, error=True
+                #    )  # tell GS there is an error
                 self._use_rs = False
-                config = self._search_thread_pool[backup].suggest(trial_id)
-                print(f"backup choice suggestion: {config}")
-                skip = self._should_skip(backup, trial_id, config)
-                if skip:
-                    return None
-                self._trial_proposed_by[trial_id] = backup
-                choice = backup
-            # if choice: self._pending.add(choice) # local search thread pending
-            if not choice:
+                if choice == backup:
+                    # use CFO's init point
+                    init_config = self._ls.init_config
+                    config = self._ls.complete_config(
+                        init_config, self._ls_bound_min, self._ls_bound_max
+                    )
+                    self._trial_proposed_by[trial_id] = choice
+                else:
+                    config = self._search_thread_pool[backup].suggest(trial_id)
+                    skip = self._should_skip(backup, trial_id, config)
+                    if skip:
+                        return None
+                    self._trial_proposed_by[trial_id] = backup
+                    choice = backup
+            if not choice:  # global search
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
                     config[self._ls.prune_attr] = self._ls.min_resource
+                # temporarily relax admissible region for parallel proposals
+                self._update_admissible_region(
+                    config, self._gs_admissible_min, self._gs_admissible_max
+                )
+            else:
+                self._update_admissible_region(
+                    config, self._ls_bound_min, self._ls_bound_max
+                )
+                self._gs_admissible_min.update(self._ls_bound_min)
+                self._gs_admissible_max.update(self._ls_bound_max)
             (
                 result,
                 config_signature,
@@ -871,7 +901,7 @@ class ConditionalBlendSearch(BlendSearch):
                 else self._ls.init_config
             )
             config = self._ls.complete_config(
-                init_config, self._admissible_min, self._admissible_max
+                init_config, self._ls_bound_min, self._ls_bound_max
             )
             assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
             # logger.info(f"reset config to {config}")
@@ -890,6 +920,7 @@ class ConditionalBlendSearch(BlendSearch):
             else:
                 return None  # running but no result yet
             self._init_used = True
+            self._trial_proposed_by[trial_id] = 0
         # logger.info(f"config={config}")
         self._suggested_configs[trial_id] = config
         if self._ls.prune_attr:
@@ -972,11 +1003,11 @@ class ConditionalBlendSearch(BlendSearch):
                     if choice:
                         # local search thread
                         self._clean(choice)
-                else:
-                    # tell the thread there is an error
-                    self._search_thread_pool[choice].on_trial_complete(
-                        trial_id, {}, error=True
-                    )
+                # else:
+                #    # tell the thread there is an error
+                #    self._search_thread_pool[choice].on_trial_complete(
+                #        trial_id, {}, error=True
+                #    )
             return True
         return False
 
@@ -999,10 +1030,10 @@ class ConditionalBlendSearch(BlendSearch):
         #     f"{self._search_thread_pool[thread_id].converged}")
         if self._search_thread_pool[thread_id].converged:
             todelete.add(thread_id)
-            for key in self._admissible_min:
+            for key in self._ls_bound_max:
                 if key in self._search_thread_pool[thread_id]._search_alg.space:
-                    self._admissible_max[key] += self._ls.STEPSIZE
-                    self._admissible_min[key] -= self._ls.STEPSIZE
+                    self._ls_bound_max[key] += self._ls.STEPSIZE
+                    self._ls_bound_min[key] -= self._ls.STEPSIZE
         for id in todelete:
             del self._search_thread_pool[id]
 

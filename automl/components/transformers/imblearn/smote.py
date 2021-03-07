@@ -94,7 +94,6 @@ class PandasAutoSMOTE(BaseEstimator):
             Xt = pd.DataFrame(
                 Xt, index=self.get_index(Xt, X), columns=self.get_columns(Xt, X)
             )
-            Xt = Xt.infer_objects()
         Xt = Xt.astype(self.get_dtypes(Xt, X))
 
         if not isinstance(yt, pd.Series):

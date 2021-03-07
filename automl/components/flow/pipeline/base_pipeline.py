@@ -41,7 +41,6 @@ class BasePipeline(_ImblearnPipeline):
             self.X_dtypes_ = X.dtypes
         else:
             X = pd.DataFrame(X, columns=self.X_columns_)
-            X = X.infer_objects()
             X = X.astype(self.X_dtypes_)
         if y is not None:
             if not hasattr(self, "y_name_"):
@@ -51,7 +50,6 @@ class BasePipeline(_ImblearnPipeline):
                 self.y_dtype_ = y.dtype
             else:
                 y = pd.Series(y, name=self.y_name_)
-                y = y.infer_objects()
                 y = y.astype(self.y_dtype_)
         return X, y
 

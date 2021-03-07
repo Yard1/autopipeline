@@ -91,6 +91,8 @@ class BorutaSHAP(BorutaPy):
                 colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1]
             )
 
+        X = X.apply(categorical_column_to_int_categories)
+
         # check input params
         self._check_params(X, y)
 

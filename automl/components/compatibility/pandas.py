@@ -40,7 +40,6 @@ class PandasSeriesTransformerMixin:
                     index=self.get_index(Xt, X),
                     name=self.get_name(Xt, X),
                 )
-            Xt = Xt.infer_objects()
         Xt = Xt.astype(self.get_dtype(Xt, X))
         return Xt
 
@@ -88,7 +87,6 @@ class PandasDataFrameTransformerMixin:
                 Xt = pd.DataFrame(
                     Xt, index=self.get_index(Xt, X), columns=self.get_columns(Xt, X)
                 )
-            Xt = Xt.infer_objects()
         Xt = Xt.astype(self.get_dtypes(Xt, X))
         return Xt
 

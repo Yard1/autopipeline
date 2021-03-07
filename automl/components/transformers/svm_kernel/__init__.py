@@ -1,1 +1,2 @@
-from .nystroem import NystroemPoly, NystroemRBF, NystroemSigmoid
+from .nystroem import NystroemRBF, NystroemSigmoid
+from .pcs import PolynomialCountSketch

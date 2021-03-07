@@ -85,7 +85,7 @@ def create_pipeline_blueprint(
     }
     svm_kernels = {
         "NystroemRBF": NystroemRBF(),
-        "NystroemPoly": NystroemPoly(),
+        "PolynomialCountSketch": PolynomialCountSketch(),
         "NystroemSigmoid": NystroemSigmoid(),
     }
     estimators = {

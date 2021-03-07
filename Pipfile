@@ -26,6 +26,7 @@ boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
 flaml = "*"
 hebo = "*"
 ray = {extras = ["tune"],version = "*"}
+fastai = "*"
 
 [requires]
 python_version = "3.8"

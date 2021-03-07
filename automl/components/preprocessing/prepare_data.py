@@ -9,6 +9,8 @@ from pandas.api.types import (
     is_datetime64_any_dtype,
 )
 
+from fastai.tabular.core import df_shrink, add_datepart
+
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
@@ -83,17 +85,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if is_datetime64_any_dtype(col.dtype):
             return col.astype(self._datetime_dtype)
 
-        if is_integer_dtype(col.dtype):
-            if self.int_dtype is None:
-                ii32 = np.iinfo(np.int32)
-                # err on the safe side - 20%
-                min_32_limit, max_32_limit = ii32.min * 0.8, ii32.max * 0.8
-                if col.min() >= min_32_limit and col.max() <= max_32_limit:
-                    col = col.astype(np.int32)
-                else:
-                    col = col.astype(np.int64)
-            else:
-                col = col.astype(self.int_dtype)
+        if is_integer_dtype(col.dtype) and self.int_dtype is not None:
+            return col.astype(self.int_dtype)
 
         col_unqiue = col.unique()
         if (
@@ -156,6 +149,9 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         X = X.apply(self._convert_dtypes)
 
+        for datetime_column in self.datetime_columns_:
+            add_datepart(X, datetime_column, prefix=f"{datetime_column}_")
+
         if was_series:
             X = X.squeeze()
 
@@ -179,6 +175,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if X.shape[1] > 1 and self.find_id_column:
             X = self._set_index_to_id_column(X)
 
+        X = df_shrink(X, obj2cat=False)
         X = X.apply(self._infer_dtypes)
         X = self._drop_0_variance(X)
 
@@ -188,6 +185,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         self.datetime_columns_ = set(
             self.datetime_columns_[self.datetime_columns_].index
         )
+        for datetime_column in self.datetime_columns_:
+            add_datepart(X, datetime_column, prefix=f"{datetime_column}_")
 
         if was_series:
             X = X.squeeze()
