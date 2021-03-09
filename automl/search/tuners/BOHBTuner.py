@@ -242,7 +242,7 @@ class BOHBTuner(RayTuneTuner):
             space=self.pipeline_blueprint,
             metric="mean_test_score",
             mode="max",
-            points_to_evaluate=self.default_grid,
+            points_to_evaluate=self.default_grid_,
             seed=self.random_state,
         )
 

@@ -45,14 +45,15 @@ class ConditionalOptunaSearch(OptunaSearch):
         sampler: Optional[BaseSampler] = None,
         seed: Optional[int] = None,
         n_startup_trials: Optional[int] = None,
+        use_extended: bool = False,
     ):
         assert ot is not None, "Optuna must be installed! Run `pip install optuna`."
         super(OptunaSearch, self).__init__(
             metric=metric, mode=mode, max_concurrent=None, use_early_stopped_trials=None
         )
 
-        self._conditional_space = get_conditions(space, to_str=True)
-        space, _ = get_all_tunable_params(space, to_str=True)
+        self._conditional_space = get_conditions(space, to_str=True, use_extended=use_extended)
+        space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
         const_values = {
             k
             for k, v in space.items()
@@ -354,7 +355,7 @@ class OptunaTPETuner(RayTuneTuner):
             space=self.pipeline_blueprint,
             metric="mean_test_score",
             mode="max",
-            points_to_evaluate=self.default_grid,
+            points_to_evaluate=self.default_grid_,
             seed=self.random_state,
         )
         print(f"cache: {self._cache}")

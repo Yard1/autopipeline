@@ -256,6 +256,9 @@ class AutoML(BaseEstimator):
             #cache="/home/baum/Documents/Coding/Python/automl",
         )
 
-        self.trainer_.fit(X, y)
+        self.X_ = X
+        self.y_ = y
+
+        return self.trainer_.fit(X, y)
 
         return X, y

@@ -395,7 +395,7 @@ class BorutaSHAPClassification(FeatureSelector):
         "early_stopping": True,
         "n_iter_no_change": 10,
     }
-    _component_level = ComponentLevel.RARE # TODO: RARE
+    _component_level = ComponentLevel.RARE
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
 
@@ -413,5 +413,5 @@ class BorutaSHAPRegression(FeatureSelector):
         "early_stopping": True,
         "n_iter_no_change": 10,
     }
-    _component_level = ComponentLevel.RARE # TODO: RARE
+    _component_level = ComponentLevel.RARE
     _problem_types = {ProblemType.REGRESSION}

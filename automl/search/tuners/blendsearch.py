@@ -185,6 +185,10 @@ class PatchedFLOW2(FLOW2):
         """whether the incumbent can reach the incumbent of other"""
         config1, config2 = self.best_config, other.best_config
         incumbent1, incumbent2 = self.incumbent, other.incumbent
+        if self.prune_attr not in config1:
+            config1[self.prune_attr] = self.min_resource
+        if self.prune_attr not in config2:
+            config2[self.prune_attr] = other.min_resource
         if self._resource and config1[self.prune_attr] > config2[self.prune_attr]:
             # resource will not decrease
             return False
@@ -384,9 +388,8 @@ class SharingSearchThread(SearchThread):
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if (
-                        f"{self.prune_attr}_" not in result
-                        or np.around(result[f"{self.prune_attr}_"], 1)
-                        >= self.max_prune_attr
+                        self.prune_attr not in result
+                        or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
                     ):
                         print("adding trial result to optuna")
                         self._search_alg.on_trial_complete(
@@ -409,9 +412,8 @@ class SharingSearchThread(SearchThread):
                             ),
                         )
                 elif (
-                    f"{self.prune_attr}_" not in result
-                    or np.around(result[f"{self.prune_attr}_"], 1)
-                    >= self.max_prune_attr
+                    self.prune_attr not in result
+                    or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
                 ):
                     print("adding ls result to optuna")
                     return_val = self._search_alg.add_evaluated_trial(
@@ -509,6 +511,7 @@ class ConditionalBlendSearch(BlendSearch):
         global_search_alg: Optional[Searcher] = None,
         time_attr: Optional[str] = None,
         seed: Optional[int] = None,
+        use_extended: bool = False,
         mem_size=None,
     ):
         """Constructor
@@ -560,7 +563,7 @@ class ConditionalBlendSearch(BlendSearch):
             mem_size: A function to estimate the memory size for a given config.
         """
         self._metric, self._mode = metric, mode
-        self._conditional_space = get_conditions(space, to_str=True)
+        self._conditional_space = get_conditions(space, to_str=True, use_extended=use_extended)
         self._time_attr = "time_total_s" or time_attr
 
         LocalSearch.cost_attr = self._time_attr
@@ -575,12 +578,13 @@ class ConditionalBlendSearch(BlendSearch):
                 mode=mode,
                 seed=seed,
                 n_startup_trials=1,
+                use_extended=use_extended,
             )
         else:
             self._gs = None
 
-        init_config = self._get_all_default_values(space, get_categorical=False)
-        space, _ = get_all_tunable_params(space, to_str=True)
+        init_config = self._get_all_default_values(space, get_categorical=False, use_extended=use_extended)
+        space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
         space = get_tune_distributions(space)
         const_values = {
             k
@@ -618,14 +622,14 @@ class ConditionalBlendSearch(BlendSearch):
     def _conditional_space_estimators(self):
         return {"Estimator": self._conditional_space["Estimator"]}
 
-    def _get_all_default_values(self, pipeline_blueprint, get_categorical=True) -> dict:
+    def _get_all_default_values(self, pipeline_blueprint, get_categorical=True, use_extended=False) -> dict:
         default_grid = {
-            k: v for k, v in pipeline_blueprint.get_all_distributions().items()
+            k: v for k, v in pipeline_blueprint.get_all_distributions(use_extended=use_extended).items()
         }
         default_values = {}
         for k, v in default_grid.items():
             for v2 in v.values:
-                for k3, v3 in v2.get_tuning_grid().items():
+                for k3, v3 in v2.get_tuning_grid(use_extended=use_extended).items():
                     if not get_categorical and isinstance(v3, CategoricalDistribution):
                         continue
                     name = v2.get_hyperparameter_key_suffix(k, k3)
@@ -716,6 +720,8 @@ class ConditionalBlendSearch(BlendSearch):
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
     ):
         """search thread updater and cleaner"""
+        if result is None:
+            result = {}
         thread_id = self._trial_proposed_by.get(trial_id)
         if thread_id in self._search_thread_pool:
             self._search_thread_pool[thread_id].on_trial_complete(
@@ -1044,6 +1050,7 @@ class BlendSearchTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
+        use_extended: bool = True,
         num_samples: int = 100,
         early_stopping=True,
         cache=False,
@@ -1055,6 +1062,7 @@ class BlendSearchTuner(RayTuneTuner):
             pipeline_blueprint=pipeline_blueprint,
             cv=cv,
             random_state=random_state,
+            use_extended=use_extended,
             num_samples=num_samples,
             cache=cache,
             **tune_kwargs,
@@ -1087,8 +1095,9 @@ class BlendSearchTuner(RayTuneTuner):
             space=self.pipeline_blueprint,
             metric="mean_test_score",
             mode="max",
-            points_to_evaluate=self.default_grid,
+            points_to_evaluate=self.default_grid_,
             seed=self.random_state,
+            use_extended=self.use_extended,
             **self._searcher_kwargs,
         )
 
@@ -1145,7 +1154,7 @@ class BlendSearchTuner(RayTuneTuner):
             tune.report(
                 done=True,
                 mean_test_score=np.mean(scores["test_score"]),
-                dataset_fraction_=prune_attr,
+                dataset_fraction=prune_attr,
                 estimator_fit_time=estimator_fit_time,
             )
         else:

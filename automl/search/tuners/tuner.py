@@ -4,7 +4,7 @@ import pandas as pd
 import gc
 import os
 import tempfile
-import traceback
+from abc import ABC
 
 from ray import tune
 
@@ -12,7 +12,8 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
 
-from .utils import ray_context, split_list_into_chunks, get_all_tunable_params
+from .utils import get_all_tunable_params
+from ..utils import ray_context
 from ..utils import call_component_if_needed
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
@@ -32,18 +33,20 @@ def remove_component_suffix(key: str):
     return "__".join(split_key)
 
 
-class Tuner:
+class Tuner(ABC):
     def __init__(
         self,
         problem_type: ProblemType,
         pipeline_blueprint,
         cv,
         random_state,
+        use_extended: bool = False,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
         self.cv = cv
         self.random_state = random_state
+        self.use_extended = use_extended
 
     def _get_single_default_hyperparams(self, components, grid):
         hyperparams = {}
@@ -55,7 +58,7 @@ class Tuner:
                 except StopIteration:
                     continue
             valid_keys.add(k)
-            for k2, v2 in v.get_tuning_grid().items():
+            for k2, v2 in v.get_tuning_grid(use_extended=self.use_extended).items():
                 name = v.get_hyperparameter_key_suffix(k, k2)
                 hyperparams[name] = v2.default
         return {
@@ -88,7 +91,7 @@ class Tuner:
 
     def _get_default_components(self, pipeline_blueprint) -> dict:
         default_grid = {
-            k: v.values for k, v in pipeline_blueprint.get_all_distributions().items()
+            k: v.values for k, v in pipeline_blueprint.get_all_distributions(use_extended=self.use_extended).items()
         }
         default_grid_list = [
             self._get_single_default_hyperparams(components, default_grid)
@@ -105,24 +108,24 @@ class Tuner:
         self.X_ = X
         self.y_ = y
         self.groups_ = groups
-        self.default_grid = self._get_default_components(self.pipeline_blueprint)
+        self.default_grid_ = self._get_default_components(self.pipeline_blueprint)
         preset_configurations = [
             config
             for config in self.pipeline_blueprint.preset_configurations
-            if config not in self.default_grid
+            if config not in self.default_grid_
         ]
-        self.default_grid += preset_configurations
+        self.default_grid_ += preset_configurations
 
         default_grid_list_dict = []
         default_grid_list_no_dups = []
-        for config in self.default_grid:
+        for config in self.default_grid_:
             str_config = {
                 k: str(v) for k, v in config.items() if not isinstance(v, Passthrough)
             }
             if str_config not in default_grid_list_dict:
                 default_grid_list_dict.append(str_config)
                 default_grid_list_no_dups.append(config)
-        self.default_grid = default_grid_list_no_dups
+        self.default_grid_ = default_grid_list_no_dups
 
         self._set_up_early_stopping(X, y, groups=groups)
 
@@ -140,6 +143,7 @@ class RayTuneTuner(Tuner):
         pipeline_blueprint,
         cv,
         random_state,
+        use_extended: bool = False,
         num_samples: int = 50,
         cache=False,
         **tune_kwargs,
@@ -147,6 +151,7 @@ class RayTuneTuner(Tuner):
         self.cache = cache
         self._set_cache()
         self.tune_kwargs = tune_kwargs
+        self.num_samples = num_samples
         self._tune_kwargs = {
             "run_or_experiment": self._trial_with_cv,
             "search_alg": None,
@@ -161,7 +166,12 @@ class RayTuneTuner(Tuner):
             pipeline_blueprint=pipeline_blueprint,
             cv=cv,
             random_state=random_state,
+            use_extended=use_extended,
         )
+
+    @property
+    def total_num_samples(self):
+        return len(self.default_grid_) + self.num_samples
 
     def _set_cache(self):
         validate_type(self.cache, "cache", (str, bool))
@@ -224,9 +234,9 @@ class RayTuneTuner(Tuner):
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["num_samples"] += len(self.default_grid)
-        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint)
-        for conf in self.default_grid:
+        self._tune_kwargs["num_samples"] += len(self.default_grid_)
+        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint, use_extended=self.use_extended)
+        for conf in self.default_grid_:
             for k, v in conf.items():
                 if str(v) in self._component_strings_:
                     conf[k] = str(v)

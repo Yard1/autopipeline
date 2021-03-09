@@ -39,6 +39,7 @@ class HEBOTuner(RayTuneTuner):
         pipeline_blueprint,
         cv,
         random_state,
+        use_extended: bool = True,
         num_samples: int = 24,
         early_stopping=True,
         early_stopping_brackets=1,
@@ -57,6 +58,7 @@ class HEBOTuner(RayTuneTuner):
             random_state=random_state,
             num_samples=num_samples,
             cache=cache,
+            use_extended=use_extended,
             **tune_kwargs,
         )
 
@@ -97,36 +99,60 @@ class HEBOTuner(RayTuneTuner):
 
     def _pre_search(self, X, y, groups=None):
         print("_pre_search")
-        print(self.known_points[0][0])
+        points_to_evaluate, evaluated_rewards = zip(*self.known_points)
+        print(points_to_evaluate[0])
         self.pipeline_blueprint = copy(self.pipeline_blueprint)
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["num_samples"] -= len(self.default_grid)
+        self._tune_kwargs["num_samples"] -= len(self.default_grid_)
         space = {}
         for k, v in self.pipeline_blueprint.get_all_distributions(
-            use_extended=True
+            use_extended=self.use_extended
         ).items():
-            if k in self.known_points[0][0] and self.known_points[0][0][k] != "passthrough":
+            if k in points_to_evaluate[0] and points_to_evaluate[0][k] != "passthrough":
                 space[k] = CategoricalDistribution(
-                    [next(x for x in v.values if str(x) == self.known_points[0][0][k])]
+                    [next(x for x in v.values if str(x) == points_to_evaluate[0][k])]
                 )
         print(space)
         space, _ = get_all_tunable_params(
-            self.pipeline_blueprint, to_str=True, use_extended=True, space=space
+            self.pipeline_blueprint,
+            to_str=True,
+            use_extended=self.use_extended,
+            space=space,
         )
+        if "Estimator__\u200bRandomForestClassifier\u200b__n_estimators" in space:
+            space[
+                "Estimator__\u200bRandomForestClassifier\u200b__n_estimators"
+            ].upper = max(
+                points_to_evaluate,
+                key=lambda x: x[
+                    "Estimator__\u200bRandomForestClassifier\u200b__n_estimators"
+                ],
+            )[
+                "Estimator__\u200bRandomForestClassifier\u200b__n_estimators"
+            ]
+        if "Estimator__\u200bLGBMClassifier\u200b__n_estimators" in space:
+            space["Estimator__\u200bLGBMClassifier\u200b__n_estimators"].upper = max(
+                points_to_evaluate,
+                key=lambda x: x["Estimator__\u200bLGBMClassifier\u200b__n_estimators"],
+            )["Estimator__\u200bLGBMClassifier\u200b__n_estimators"]
+        if "Estimator__\u200bLGBMClassifier\u200b__num_leaves" in space:
+            space["Estimator__\u200bLGBMClassifier\u200b__num_leaves"].upper = max(
+                points_to_evaluate,
+                key=lambda x: x["Estimator__\u200bLGBMClassifier\u200b__num_leaves"],
+            )["Estimator__\u200bLGBMClassifier\u200b__num_leaves"]
         self._const_values = {
             k: v.values[0]
             for k, v in space.items()
             if (isinstance(v, CategoricalDistribution) and len(v.values) == 1)
             or k == "Estimator"
         }
-        self._const_values["Estimator"] = self.known_points[0][0]["Estimator"]
+        self._const_values["Estimator"] = points_to_evaluate[0]["Estimator"]
         space = {k: v for k, v in space.items() if k not in self._const_values}
         default_values = {
-            k: v.default for k, v in space.items() if k not in self.known_points[0][0]
+            k: v.default for k, v in space.items() if k not in points_to_evaluate[0]
         }
         print(space)
         space = get_tune_distributions(space)
-        points_to_evaluate, evaluated_rewards = zip(*self.known_points)
         points_to_evaluate = [
             {**default_values, **{k: v for k, v in x.items() if k in space}}
             for x in points_to_evaluate

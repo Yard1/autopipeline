@@ -23,6 +23,8 @@ def get_lgbm_n_estimators(config, space):
     if X is None:
         return IntUniformDistribution(10, 100, log=True)
     return IntUniformDistribution(10, min(32768, int(X.shape[0])), log=True)
+    # TODO make sure that secondary tuner gets the max number BlendSearch got
+    #return IntUniformDistribution(10, min(1000, int(X.shape[0])), log=True)
 
 
 class LGBMClassifier(GradientBoosterEstimator):

@@ -1,8 +1,3 @@
-import ray
-import os
-from unittest.mock import patch
-import contextlib
-
 from typing import Optional, Union, Dict, List, Tuple
 from collections import defaultdict
 
@@ -14,37 +9,6 @@ from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
 
 
-class ray_context:
-    DEFAULT_CONFIG = {
-        "ignore_reinit_error": True,
-        "configure_logging": False,
-        "include_dashboard": False,
-        # "local_mode": True,
-        # "num_cpus": 1,
-    }
-
-    def __init__(self, global_checkpoint_s=10, **ray_config):
-        self.global_checkpoint_s = global_checkpoint_s
-        self.ray_config = {**self.DEFAULT_CONFIG, **ray_config}
-        self.ray_init = False
-
-    def __enter__(self):
-        self.ray_init = ray.is_initialized()
-        if not self.ray_init:
-            with patch.dict(
-                "os.environ",
-                {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s)},
-            ) if "TUNE_GLOBAL_CHECKPOINT_S" not in os.environ else contextlib.nullcontext():
-                ray.init(
-                    **self.ray_config
-                    # log_to_driver=self.verbose == 2
-                )
-
-    def __exit__(self, type, value, traceback):
-        if not self.ray_init and ray.is_initialized():
-            ray.shutdown()
-
-
 def split_list_into_chunks(lst: list, chunk_size: int):
     return [
         lst[i * chunk_size : (i + 1) * chunk_size]
@@ -52,7 +16,7 @@ def split_list_into_chunks(lst: list, chunk_size: int):
     ]
 
 
-def get_conditions(spec: Dict, to_str=False) -> dict:
+def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
     spec = copy(spec)
     conditions_spec = defaultdict(dict)
     estimator_name, estimators = spec.get_estimator_distribution()
@@ -79,14 +43,14 @@ def get_conditions(spec: Dict, to_str=False) -> dict:
             if to_str
             else remaining_components
         )
-        for k2, v2 in estimator.get_tuning_grid().items():
+        for k2, v2 in estimator.get_tuning_grid(use_extended=use_extended).items():
             name = estimator.get_hyperparameter_key_suffix(estimator_name, k2)
             conditions_spec[estimator_name][estimator_key][name] = True
 
     for k, v in preprocessors_grid.items():
         conditions_spec[k] = defaultdict(dict)
         for choice in v.values:
-            for k2, v2 in choice.get_tuning_grid().items():
+            for k2, v2 in choice.get_tuning_grid(use_extended=use_extended).items():
                 name = choice.get_hyperparameter_key_suffix(k, k2)
                 choice_key = str(choice) if to_str else choice
                 conditions_spec[k][choice_key][name] = True
@@ -138,7 +102,9 @@ def get_all_tunable_params(
     if space is None:
         space = {
             k: v
-            for k, v in pipeline.get_all_distributions(use_extended=use_extended).items()
+            for k, v in pipeline.get_all_distributions(
+                use_extended=use_extended
+            ).items()
         }
     string_space = {}
     for k, v in space.items():

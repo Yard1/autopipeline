@@ -208,7 +208,9 @@ def get_rf_n_estimators(config, space):
     X = config.X
     if X is None:
         return IntUniformDistribution(10, 100, log=True)
+    # TODO make sure that secondary tuner gets the max number BlendSearch got
     return IntUniformDistribution(10, min(2048, int(X.shape[0])), log=True)
+    #return IntUniformDistribution(10, min(1000, int(X.shape[0])), log=True)
 
 
 class RandomForestClassifier(TreeEstimator):

@@ -1,13 +1,15 @@
 from typing import List, Optional
 
 import pandas as pd
+import numpy as np
 
-from copy import copy
+from copy import copy, deepcopy
 from sklearn.base import clone
 from imblearn.pipeline import Pipeline as _ImblearnPipeline
 from sklearn.utils import _print_elapsed_time
 from sklearn.utils.validation import check_memory
 from sklearn.utils.metaestimators import if_delegate_has_method
+from sklearn.base import is_classifier
 from time import time
 
 from ..flow import Flow
@@ -43,11 +45,19 @@ class BasePipeline(_ImblearnPipeline):
             X = pd.DataFrame(X, columns=self.X_columns_)
             X = X.astype(self.X_dtypes_)
         if y is not None:
-            if not hasattr(self, "y_name_"):
-                validate_type(y, "y", pd.Series)
-            if fit and isinstance(y, pd.Series):
-                self.y_name_ = y.name
-                self.y_dtype_ = y.dtype
+            if fit:
+                if isinstance(y, pd.Series):
+                    self.y_name_ = y.name
+                    self.y_dtype_ = y.dtype
+                else:
+                    self.y_name_ = "target"
+                    if is_classifier(self._final_estimator):
+                        y = y.astype(int)
+                        self.y_dtype_ = "category"
+                    else:
+                        self.y_dtype_ = np.float32  # TODO make dynamic
+                    y = pd.Series(y, name=self.y_name_)
+                    y = y.astype(self.y_dtype_)
             else:
                 y = pd.Series(y, name=self.y_name_)
                 y = y.astype(self.y_dtype_)
@@ -204,6 +214,7 @@ class Pipeline(Flow):
             for name, component in steps
         ]
         params["steps"] = steps
+        print(params)
 
         return self._component_class(**params)
 
