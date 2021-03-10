@@ -89,8 +89,8 @@ class PandasStackingClassifier(StackingClassifier):
         )
         #if not any(self.estimators[0][0] in col for col in X.columns):
         print("doing CV", flush=True)
-        predictions = Parallel(n_jobs=self.n_jobs)(
-            delayed(cross_val_predict)(
+        predictions = [
+            cross_val_predict(
                 clone(est),
                 X,
                 y,
@@ -102,7 +102,7 @@ class PandasStackingClassifier(StackingClassifier):
             )
             for est, meth in zip(all_estimators, self.stack_method_)
             if est != "drop"
-        )
+        ]
 
         X_meta = self._concatenate_predictions(X, predictions)
         #else:

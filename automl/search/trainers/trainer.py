@@ -50,7 +50,7 @@ class Trainer:
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
-        best_percentile: int = 5,
+        best_percentile: int = 1,
         max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 1,
