@@ -408,10 +408,10 @@ class DynamicMemory(Memory):
         cachedir=None,
         mmap_mode=None,
         compress=False,
-        verbose=1,
+        verbose=0,
         bytes_limit=None,
         backend_options=None,
-        min_time_to_cache=10,
+        min_time_to_cache=8,
     ):
         super().__init__(
             location=location,
@@ -481,4 +481,4 @@ class DynamicMemory(Memory):
 def dynamic_memory_factory(cache, **kwargs):
     memory = tempfile.gettempdir() if cache is True else cache
     memory = memory if not memory == os.getcwd() else ".."
-    return DynamicMemory(memory, **kwargs, verbose=0)
+    return DynamicMemory(memory, **kwargs)
