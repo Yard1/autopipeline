@@ -170,6 +170,8 @@ class RayTuneTuner(Tuner):
 
     @property
     def total_num_samples(self):
+        if self.num_samples < 0:
+            return -1
         return len(self.default_grid_) + self.num_samples
 
     def _set_cache(self):
@@ -232,7 +234,6 @@ class RayTuneTuner(Tuner):
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["num_samples"] += len(self.default_grid_)
         _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint, use_extended=self.use_extended)
         for conf in self.default_grid_:
             for k, v in conf.items():
@@ -241,6 +242,7 @@ class RayTuneTuner(Tuner):
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
+        tune_kwargs["num_samples"] = self.total_num_samples
         gc.collect()
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)

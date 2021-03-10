@@ -75,6 +75,7 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
+        "CatBoostEncoder": CatBoostEncoder(),
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {

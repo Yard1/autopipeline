@@ -53,7 +53,7 @@ class Trainer:
         best_percentile: int = 5,
         max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
-        stacking_level: int = 0,
+        stacking_level: int = 1,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,

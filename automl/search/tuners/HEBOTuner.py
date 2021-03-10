@@ -103,7 +103,6 @@ class HEBOTuner(RayTuneTuner):
         print(points_to_evaluate[0])
         self.pipeline_blueprint = copy(self.pipeline_blueprint)
         super()._pre_search(X, y, groups=groups)
-        self._tune_kwargs["num_samples"] -= len(self.default_grid_)
         space = {}
         for k, v in self.pipeline_blueprint.get_all_distributions(
             use_extended=self.use_extended
