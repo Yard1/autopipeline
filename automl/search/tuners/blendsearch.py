@@ -27,9 +27,7 @@ from typing import Dict, Optional, List, Tuple
 import numpy as np
 import traceback
 import pickle
-import os
 import gc
-import tempfile
 from ray.tune.sample import Categorical
 
 from sklearn.model_selection import cross_validate
@@ -62,6 +60,7 @@ from .tuner import RayTuneTuner, remove_component_suffix
 from ..utils import call_component_if_needed
 from ...problems import ProblemType
 from ...components import Component
+from ...utils.memory import dynamic_memory_factory
 
 GlobalSearch = ConditionalOptunaSearch
 
@@ -1117,8 +1116,7 @@ class BlendSearchTuner(RayTuneTuner):
         print(config_called)
 
         estimator.set_params(**config_called)
-        memory = tempfile.gettempdir() if self._cache is True else self._cache
-        memory = memory if not memory == os.getcwd() else ".."
+        memory = dynamic_memory_factory(self._cache)
         estimator.set_params(memory=memory)
 
         if prune_attr and prune_attr < 1.0:

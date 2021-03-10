@@ -259,6 +259,6 @@ class AutoML(BaseEstimator):
         self.X_ = X
         self.y_ = y
 
-        return self.trainer_.fit(X, y)
+        #return self.trainer_.fit(X, y)
 
         return X, y

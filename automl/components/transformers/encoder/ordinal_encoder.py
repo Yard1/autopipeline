@@ -16,7 +16,7 @@ from ....search.stage import AutoMLStage
 
 from sklearn.utils.validation import check_is_fitted
 
-
+# TODO look into .codes
 class PandasOrdinalEncoder(PandasDataFrameTransformerMixin, _OrdinalEncoder):
     def fit(self, X, y=None, **fit_params):
         """

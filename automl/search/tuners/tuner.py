@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 
 import gc
-import os
-import tempfile
 from abc import ABC
 
 from ray import tune
@@ -22,6 +20,7 @@ from ...problems import ProblemType
 from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
 from ...utils.exceptions import validate_type
+from ...utils.memory import dynamic_memory_factory
 
 import logging
 
@@ -198,8 +197,7 @@ class RayTuneTuner(Tuner):
         config_called = self._treat_config(config)
 
         estimator.set_params(**config_called)
-        memory = tempfile.gettempdir() if self._cache is True else self._cache
-        memory = memory if not memory == os.getcwd() else ".."
+        memory = dynamic_memory_factory(self._cache)
         estimator.set_params(memory=memory)
 
         for idx, fraction in enumerate(self.early_stopping_fractions_):

@@ -34,6 +34,7 @@ from ...components.estimators.ensemble.stack import PandasStackingClassifier
 from ...components.estimators.linear_model import LogisticRegression
 from ...problems.problem_type import ProblemType
 from ...utils import validate_type
+from ...utils.memory import dynamic_memory_factory
 
 import logging
 
@@ -52,7 +53,7 @@ class Trainer:
         best_percentile: int = 5,
         max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
-        stacking_level: int = 1,
+        stacking_level: int = 0,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,
@@ -141,18 +142,21 @@ class Trainer:
         )
         print("ensemble created")
         gc.collect()
+        print("fitting ensemble")
+        ensemble.n_jobs = -1  # TODO make dynamic
+        with joblib.parallel_backend("ray"):
+            ensemble.fit(
+                X,
+                y,
+                fit_final_estimator=self.current_stacking_level >= self.stacking_level,
+            )
+        ensemble.n_jobs = None
+        self.ensembles_.append(ensemble)
         if self.current_stacking_level >= self.stacking_level:
             # rfecv = RFECV(ensemble, step=1, cv=self.cv_)
-            self.ensembles_.append(ensemble)
-            self.final_ensemble_ = self._create_final_ensemble()
             print("fitting final ensemble", flush=True)
-            with joblib.parallel_backend("ray"):
-                self.final_ensemble_.fit(X.drop(self.meta_columns_, axis=1), y)
+            self.final_ensemble_ = self._create_final_ensemble()
             return
-        print("fitting ensemble")
-        with joblib.parallel_backend("ray"):
-            ensemble.fit(X, y, fit_final_estimator=False)
-        self.ensembles_.append(ensemble)
         X_stack = ensemble.stacked_predictions_
         self.meta_columns_.extend(X_stack.columns)
         return self._fit_one_layer(pd.concat((X, X_stack), axis=1), y, groups=groups)
@@ -180,16 +184,17 @@ class Trainer:
         final_estimator = final_estimator or LogisticRegression()()
         print("creating stacking classifier")
         return PandasStackingClassifier(
-            estimators=estimators, final_estimator=final_estimator, n_jobs=-1
+            estimators=estimators, final_estimator=final_estimator, n_jobs=None
         )
 
     def _create_final_ensemble(self):
         if len(self.ensembles_) <= 1:
             return self.ensembles_[0]
-        cloned_ensembles = [clone(ensemble) for ensemble in self.ensembles_]
-        for idx in range(0, len(cloned_ensembles)-1):
-            cloned_ensembles[idx].set_params(passthrough=True)
-            cloned_ensembles[idx].set_params(final_estimator=cloned_ensembles[idx + 1])
+        cloned_ensembles = [deepcopy(ensemble) for ensemble in self.ensembles_]
+        for idx in range(0, len(cloned_ensembles) - 1):
+            cloned_ensembles[idx].passthrough = True
+            cloned_ensembles[idx].final_estimator = cloned_ensembles[idx + 1]
+            cloned_ensembles[idx].final_estimator_ = cloned_ensembles[idx + 1]
         return cloned_ensembles[0]
 
     def _run_secondary_tuning(self, X, y, pipeline_blueprint, percentile, groups=None):
@@ -251,7 +256,7 @@ class Trainer:
         estimator = pipeline_blueprint(random_state=self.random_state)
         config_called = self.last_tuner_._treat_config(config)
         estimator.set_params(**config_called)
-        estimator.memory = "/tmp"  # TODO make dynamic
+        estimator.memory = dynamic_memory_factory(True)  # TODO make dynamic
         return estimator
 
     def _select_configurations_for_ensembling(

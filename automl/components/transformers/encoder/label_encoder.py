@@ -14,7 +14,7 @@ from ...compatibility.pandas import (
 
 from sklearn.utils.validation import check_is_fitted
 
-
+# TODO look into .codes
 class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
     def get_dtype(self, r, X, y=None):
         return pd.CategoricalDtype(self.indices_.values())
