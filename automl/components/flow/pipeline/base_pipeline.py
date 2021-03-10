@@ -214,7 +214,6 @@ class Pipeline(Flow):
             for name, component in steps
         ]
         params["steps"] = steps
-        print(params)
 
         return self._component_class(**params)
 

@@ -19,7 +19,6 @@ import io
 import numpy as np
 
 import pickle
-from joblib import hashing
 from joblib.func_inspect import get_func_code, get_func_name, filter_args
 from joblib.func_inspect import format_call
 from joblib.func_inspect import format_signature
@@ -495,7 +494,7 @@ class DynamicMemory(Memory):
         verbose=0,
         bytes_limit=None,
         backend_options=None,
-        min_time_to_cache=8,
+        min_time_to_cache=6,
     ):
         super().__init__(
             location=location,
