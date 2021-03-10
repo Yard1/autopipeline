@@ -6,6 +6,8 @@ from joblib.memory import (
     NotMemorizedResult,
     _format_load_msg,
 )
+import itertools
+from typing import Optional
 import functools
 import time
 import traceback
@@ -26,6 +28,7 @@ from joblib._store_backends import StoreBackendBase, FileSystemStoreBackend
 from joblib.hashing import Hasher, NumpyHasher
 
 from pandas.util import hash_pandas_object, hash_array
+from pandas.core.util.hashing import _default_hash_key, hash_tuples, combine_hash_arrays
 from pandas.core.dtypes.generic import (
     ABCDataFrame,
     ABCIndexClass,
@@ -36,6 +39,87 @@ from pandas.core.dtypes.generic import (
 from xxhash import xxh3_128
 
 Pickler = pickle._Pickler
+
+
+def fast_hash_pandas_object(
+    obj,
+    index: bool = True,
+    encoding: str = "utf8",
+    hash_key: Optional[str] = _default_hash_key,
+    categorize: bool = True,
+):
+    """
+    Return a data hash of the Index/Series/DataFrame.
+
+    Parameters
+    ----------
+    index : bool, default True
+        Include the index in the hash (if Series/DataFrame).
+    encoding : str, default 'utf8'
+        Encoding for data & key when strings.
+    hash_key : str, default _default_hash_key
+        Hash_key for string key to encode.
+    categorize : bool, default True
+        Whether to first categorize object arrays before hashing. This is more
+        efficient when the array contains duplicate values.
+
+    Returns
+    -------
+    Series of uint64, same length as the object
+    """
+    if hash_key is None:
+        hash_key = _default_hash_key
+
+    if isinstance(obj, ABCMultiIndex):
+        return hash_tuples(obj, encoding, hash_key)
+
+    elif isinstance(obj, ABCIndexClass):
+        h = hash_array(obj._values, encoding, hash_key, categorize).astype(
+            "uint64", copy=False
+        )
+
+    elif isinstance(obj, ABCSeries):
+        h = hash_array(obj._values, encoding, hash_key, categorize).astype(
+            "uint64", copy=False
+        )
+        if index:
+            index_iter = (
+                hash_pandas_object(
+                    obj.index,
+                    index=False,
+                    encoding=encoding,
+                    hash_key=hash_key,
+                    categorize=categorize,
+                )._values
+                for _ in [None]
+            )
+            arrays = itertools.chain([h], index_iter)
+            h = combine_hash_arrays(arrays, 2)
+
+    elif isinstance(obj, ABCDataFrame):
+        hashes = (hash_array(series._values) for _, series in obj.items())
+        num_items = len(obj.columns)
+        if index:
+            index_hash_generator = (
+                hash_pandas_object(
+                    obj.index,
+                    index=False,
+                    encoding=encoding,
+                    hash_key=hash_key,
+                    categorize=categorize,
+                )._values
+                for _ in [None]
+            )
+            num_items += 1
+
+            # keep `hashes` specifically a generator to keep mypy happy
+            _hashes = itertools.chain(hashes, index_hash_generator)
+            hashes = (x for x in _hashes)
+        h = combine_hash_arrays(hashes, num_items)
+
+    else:
+        raise TypeError(f"Unexpected type for hashing {type(obj)}")
+    return h
 
 
 class xxHasher(Hasher):
@@ -75,8 +159,8 @@ class xxNumpyHasher(NumpyHasher):
 class xxPandasHasher(xxNumpyHasher):
     def _hash_pandas(self, obj):
         try:
-            hashed_obj = hash_pandas_object(obj)
-            return (obj.__class__, hashed_obj._values, hashed_obj.index._values)
+            hashed_obj = fast_hash_pandas_object(obj)
+            return (obj.__class__, hashed_obj)
         except TypeError:
             return obj
 

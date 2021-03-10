@@ -264,8 +264,6 @@ class PatchedFLOW2(FLOW2):
         # if not better and num_complete >= 2*dim, num_allowed += 2
         self.trial_count += 1
         print("flow2 on_trial_complete")
-        print(result)
-        print(self.space)
         if not error and result:
             obj = result.get(self._metric)
             if obj:
@@ -1112,8 +1110,6 @@ class BlendSearchTuner(RayTuneTuner):
             prune_attr = config.get(prune_attr)
 
         print(f"prune_attr: {prune_attr}")
-
-        print(config_called)
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self._cache)
