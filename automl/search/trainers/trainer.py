@@ -53,7 +53,7 @@ class Trainer:
         best_percentile: int = 1,
         max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
-        stacking_level: int = 1,
+        stacking_level: int = 0,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,
@@ -120,6 +120,8 @@ class Trainer:
 
         results = self.last_tuner_.analysis_.results
         results_df = self.last_tuner_.analysis_.results_df
+        results_df = results_df.dropna(subset=["done"], how="any")
+        results_df = results_df[results_df["done"]]
         self.all_results_.append(results)
         self.all_results_df_.append(results_df)
 
@@ -153,7 +155,6 @@ class Trainer:
         ensemble.n_jobs = None
         self.ensembles_.append(ensemble)
         if self.current_stacking_level >= self.stacking_level:
-            # rfecv = RFECV(ensemble, step=1, cv=self.cv_)
             print("fitting final ensemble", flush=True)
             self.final_ensemble_ = self._create_final_ensemble()
             return
@@ -181,8 +182,10 @@ class Trainer:
             )
             for idx, config in enumerate(configurations_for_ensembling)
         ]
+        if not estimators:
+            raise ValueError("No estimators selected for stacking!")
         final_estimator = final_estimator or LogisticRegression()()
-        print("creating stacking classifier")
+        print(f"creating stacking classifier with {len(estimators)}")
         return PandasStackingClassifier(
             estimators=estimators, final_estimator=final_estimator, n_jobs=None
         )
@@ -236,6 +239,8 @@ class Trainer:
                 secondary_results_df = self.secondary_tuners_[
                     self.current_stacking_level
                 ][-1].analysis_.results_df
+                secondary_results_df = secondary_results_df.dropna(subset=["done"], how="any")
+                secondary_results_df = secondary_results_df[secondary_results_df["done"]]
                 if "dataset_fraction" in secondary_results_df.columns:
                     secondary_results_df = secondary_results_df[
                         secondary_results_df["dataset_fraction"]

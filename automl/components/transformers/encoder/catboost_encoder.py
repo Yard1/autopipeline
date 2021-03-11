@@ -7,7 +7,6 @@ from .encoder import Encoder
 from ..transformer import DataType
 from ..utils import categorical_column_to_int_categories
 from ...component import ComponentLevel, ComponentConfig
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ....search.stage import AutoMLStage
 
 

@@ -50,8 +50,8 @@ class PolynomialCountSketch(SVMKernel):
     _component_level = ComponentLevel.RARE
 
     _default_tuning_grid = {
-        "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
-        "coef0": UniformDistribution(-1, 1),
+    #    "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
+    #    "coef0": UniformDistribution(-1, 1),
         "degree": IntUniformDistribution(2, 3),
     }
 

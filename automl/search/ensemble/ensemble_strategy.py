@@ -75,7 +75,7 @@ class RoundRobinEstimator(EnsembleStrategy):
         ]
         idx = 0
         iter = True
-        while iter and any(len(group) > idx for group in group_dfs):
+        while iter and any(len(group) > idx for group in group_dfs):  # TODO optimize
             for group in group_dfs:
                 if len(selected_configurations) >= configurations_to_select:
                     iter = False

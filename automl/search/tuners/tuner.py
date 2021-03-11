@@ -151,6 +151,7 @@ class RayTuneTuner(Tuner):
         self._set_cache()
         self.tune_kwargs = tune_kwargs
         self.num_samples = num_samples
+        self.target_metric = "roc_auc"
         self._tune_kwargs = {
             "run_or_experiment": self._trial_with_cv,
             "search_alg": None,
@@ -167,6 +168,31 @@ class RayTuneTuner(Tuner):
             random_state=random_state,
             use_extended=use_extended,
         )
+
+    @property
+    def scoring_dict(self):
+        if self.problem_type == ProblemType.BINARY:
+            return {
+                "accuracy": "accuracy",
+                "balanced_accuracy": "balanced_accuracy",
+                "roc_auc": "roc_auc",
+                "precision": "precision",
+                "recall": "recall",
+                "f1": "f1",
+            }
+        elif self.problem_type == ProblemType.MULTICLASS:
+            return {
+                "accuracy": "accuracy",
+                "balanced_accuracy": "balanced_accuracy",
+                "roc_auc": "roc_auc_ovr_weighted",
+                "roc_auc_unweighted": "roc_auc_ovr",
+                "precision_macro": "precision_macro",
+                "precision_weighted": "precision_weighted",
+                "recall_macro": "recall_macro",
+                "recall_weighted": "recall_weighted",
+                "f1_macro": "f1_macro",
+                "f1_weighted": "f1_weighted"
+            }
 
     @property
     def total_num_samples(self):
@@ -220,16 +246,20 @@ class RayTuneTuner(Tuner):
                 cv=subsample_cv,
                 groups=self.groups_,
                 error_score="raise",
+                scoring=self.scoring_dict,
                 # fit_params=self.fit_params,
                 # groups=self.groups,
                 # return_train_score=self.return_train_score,
                 # scoring=self.scoring,
             )
+            metrics = {metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring_dict.keys()}
             gc.collect()
+
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
-                mean_test_score=np.mean(scores["test_score"]),
-                dataset_fraction_=fraction,
+                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
+                #dataset_fraction=fraction, # TODO reenable
+                **metrics,
             )
 
     def _pre_search(self, X, y, groups=None):

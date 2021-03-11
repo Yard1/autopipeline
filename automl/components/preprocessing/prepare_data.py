@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import pandas as pd
 import numpy as np
@@ -10,11 +10,13 @@ from pandas.api.types import (
 )
 
 from fastai.tabular.core import df_shrink, add_datepart
+from pandas.core.dtypes.common import is_categorical_dtype
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 import warnings
+from ...utils.exceptions import validate_type
 
 
 def _is_id_column(col):
@@ -26,12 +28,19 @@ def _is_id_column(col):
     )
 
 
+def replace_inf_in_col(col):
+    try:
+        return col.replace([np.inf, -np.inf], None)  # TODO: ensure this actually works
+    except:
+        return col
+
+
 def clean_df(df):
     if isinstance(df, pd.DataFrame):
         df.columns = [str(col) for col in df.columns]
     else:
         df.name = str(df.name)
-    df.replace([np.inf, -np.inf], None, inplace=True)
+    df = df.apply(replace_inf_in_col)
     return df
 
 
@@ -44,6 +53,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         find_id_column: bool = True,
         float_dtype: type = np.float32,
         int_dtype: Optional[type] = None,
+        ordinal_columns: Optional[Dict[str, list]] = None,
         copy_X: bool = True,
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:
@@ -56,12 +66,14 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             raise TypeError(
                 f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}"
             )
+        validate_type(ordinal_columns, "ordinal_columns", (dict, None))
 
         self.allowed_dtypes = allowed_dtypes
         self.find_id_column = find_id_column
         self.float_dtype = float_dtype
         self.int_dtype = int_dtype
         self.copy_X = copy_X
+        self.ordinal_columns = ordinal_columns or {}
 
     def _set_index_to_id_column(self, X):
         possible_id_columns = X.apply(_is_id_column)
@@ -88,6 +100,11 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if is_integer_dtype(col.dtype) and self.int_dtype is not None:
             return col.astype(self.int_dtype)
 
+        if is_categorical_dtype(col.dtype):
+            if col.dtype.ordered:
+                return col.cat.codes.replace(-1, None)
+            return col
+
         col_unqiue = col.unique()
         if (
             not is_numeric_dtype(col.dtype)
@@ -101,6 +118,14 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                 col = col.astype(self._datetime_dtype)
             except:
                 pass
+            if col.name in self.ordinal_columns:
+                if set(col_unqiue) != set(self.ordinal_columns[col.name]):
+                    raise ValueError(
+                        f"Ordered values for column '{col.name}' are mismatched. Got {self.ordinal_columns[col.name]}, actual categories {col_unqiue}."
+                    )
+                return col.astype(
+                    pd.CategoricalDtype(self.ordinal_columns[col.name], ordered=True)
+                ).cat.codes.replace(-1, None)
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))
             except:

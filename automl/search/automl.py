@@ -1,6 +1,6 @@
 from automl.components.component import ComponentLevel
 from automl.utils.logging import make_header
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -159,6 +159,7 @@ class AutoML(BaseEstimator):
         y: pd.Series,
         X_validation: Optional[pd.DataFrame] = None,
         y_validation: Optional[pd.Series] = None,
+        ordinal_columns: Optional[Dict[str, list]] = None,
     ):
         logger.info(make_header("AutoML Fit"))
 
@@ -194,7 +195,7 @@ class AutoML(BaseEstimator):
             float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False
         )
         X_validator = PrepareDataFrame(
-            float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False
+            float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False, ordinal_columns=ordinal_columns
         )
 
         y = y_validator.fit_transform(y)
@@ -261,4 +262,4 @@ class AutoML(BaseEstimator):
 
         return self.trainer_.fit(X, y)
 
-        return X, y
+        #return X, y

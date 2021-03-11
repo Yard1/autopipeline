@@ -1153,7 +1153,7 @@ class BlendSearchTuner(RayTuneTuner):
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
-        self._tune_kwargs["time_budget_s"] = 180
+        self._tune_kwargs["time_budget_s"] = 60
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping and self.X_.shape[0] > 2000:
@@ -1223,6 +1223,7 @@ class BlendSearchTuner(RayTuneTuner):
             error_score="raise",
             return_estimator=True,
             verbose=0,
+            scoring=self.scoring_dict,
             # fit_params=self.fit_params,
             # groups=self.groups,
             # return_train_score=self.return_train_score,
@@ -1232,19 +1233,22 @@ class BlendSearchTuner(RayTuneTuner):
         estimator_fit_time = np.sum(
             [x.final_estimator_fit_time_ for x in scores["estimator"]]
         )
+        metrics = {metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring_dict.keys()}
         gc.collect()
         if prune_attr:
             tune.report(
                 done=True,
-                mean_test_score=np.mean(scores["test_score"]),
+                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
                 dataset_fraction=prune_attr,
                 estimator_fit_time=estimator_fit_time,
+                **metrics,
             )
         else:
             tune.report(
                 done=True,
-                mean_test_score=np.mean(scores["test_score"]),
+                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
                 estimator_fit_time=estimator_fit_time,
+                **metrics,
             )
 
     def _search(self, X, y, groups=None):
