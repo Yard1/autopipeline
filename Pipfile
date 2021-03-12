@@ -7,7 +7,6 @@ verify_ssl = true
 ipython = "*"
 ipykernel = "*"
 flake8 = "*"
-black = "*"
 
 [packages]
 scikit-learn = "*"
@@ -26,7 +25,7 @@ shap = "*"
 boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
 flaml = "*"
 hebo = "*"
-ray = {extras = ["tune"],version = "*"}
+ray = {file = "https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-2.0.0.dev0-cp38-cp38-manylinux2014_x86_64.whl"}
 fastai = "*"
 xxhash = "*"
 

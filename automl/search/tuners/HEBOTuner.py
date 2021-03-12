@@ -172,11 +172,6 @@ class HEBOTuner(RayTuneTuner):
             batch=True,
         )
 
-    def _treat_config(self, config):
-        config = {**self._const_values, **config}
-        print(config)
-        return super()._treat_config(config)
-
     def _search(self, X, y, groups=None):
         self._pre_search(X, y, groups=groups)
 

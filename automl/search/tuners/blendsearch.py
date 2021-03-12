@@ -54,10 +54,11 @@ from ray.tune.suggest.suggestion import (
 )
 from ray.tune.utils.util import unflatten_dict
 
+from .trainable import SklearnTrainable
 from .OptunaTPETuner import ConditionalOptunaSearch
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
-from .tuner import RayTuneTuner, remove_component_suffix
+from .tuner import RayTuneTuner
 from ..utils import call_component_if_needed
 from ...problems import ProblemType
 from ...components import Component
@@ -1136,7 +1137,7 @@ class BlendSearchTuner(RayTuneTuner):
         cv,
         random_state,
         use_extended: bool = True,
-        num_samples: int = -1,
+        num_samples: int = 10,
         early_stopping=True,
         cache=False,
         **tune_kwargs,
@@ -1154,6 +1155,8 @@ class BlendSearchTuner(RayTuneTuner):
         )
         self._searcher_kwargs = {}
         self._tune_kwargs["time_budget_s"] = 60
+        self._tune_kwargs["run_or_experiment"] = SklearnTrainable
+        self._tune_kwargs["stop"] = {"training_iteration": 1}
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping and self.X_.shape[0] > 2000:
@@ -1177,79 +1180,19 @@ class BlendSearchTuner(RayTuneTuner):
         super()._pre_search(X, y, groups=groups)
         if self._cache:
             self._searcher_kwargs["time_attr"] = "estimator_fit_time"
-        self._tune_kwargs["search_alg"] = ConditionalBlendSearch(
-            space=self.pipeline_blueprint,
-            metric="mean_test_score",
-            mode="max",
-            points_to_evaluate=self.default_grid_,
-            seed=self.random_state,
-            use_extended=self.use_extended,
-            **self._searcher_kwargs,
+        print(self._searcher_kwargs)
+        self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
+            ConditionalBlendSearch(
+                space=self.pipeline_blueprint,
+                metric="mean_test_score",
+                mode="max",
+                points_to_evaluate=self.default_grid_,
+                seed=self.random_state,
+                use_extended=self.use_extended,
+                **self._searcher_kwargs,
+            ),
+            max_concurrent=8,
         )
-
-    def _trial_with_cv(self, config, checkpoint_dir=None):
-        estimator = self.pipeline_blueprint(random_state=self.random_state)
-
-        prune_attr = self._searcher_kwargs.get("prune_attr")
-
-        config_called = self._treat_config(config)
-        config_called.pop(prune_attr, None)
-
-        if prune_attr:
-            prune_attr = config.get(prune_attr)
-
-        print(f"trial prune_attr: {prune_attr}")
-
-        estimator.set_params(**config_called)
-        memory = dynamic_memory_factory(self._cache)
-        estimator.set_params(memory=memory)
-
-        if prune_attr and prune_attr < 1.0:
-            subsample_cv = _SubsampleMetaSplitter(
-                base_cv=self.cv,
-                fraction=prune_attr,
-                subsample_test=True,
-                random_state=self.random_state,
-            )
-        else:
-            subsample_cv = self.cv
-
-        scores = cross_validate(
-            estimator,
-            self.X_,
-            self.y_,
-            cv=subsample_cv,
-            groups=self.groups_,
-            error_score="raise",
-            return_estimator=True,
-            verbose=0,
-            scoring=self.scoring_dict,
-            # fit_params=self.fit_params,
-            # groups=self.groups,
-            # return_train_score=self.return_train_score,
-            # scoring=self.scoring,
-        )
-
-        estimator_fit_time = np.sum(
-            [x.final_estimator_fit_time_ for x in scores["estimator"]]
-        )
-        metrics = {metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring_dict.keys()}
-        gc.collect()
-        if prune_attr:
-            tune.report(
-                done=True,
-                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
-                dataset_fraction=prune_attr,
-                estimator_fit_time=estimator_fit_time,
-                **metrics,
-            )
-        else:
-            tune.report(
-                done=True,
-                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
-                estimator_fit_time=estimator_fit_time,
-                **metrics,
-            )
 
     def _search(self, X, y, groups=None):
         self._pre_search(X, y, groups=groups)

@@ -12,7 +12,6 @@ from sklearn.model_selection._search import ParameterGrid
 
 from .utils import get_all_tunable_params
 from ..utils import ray_context
-from ..utils import call_component_if_needed
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
 from ...components.transformers.passthrough import Passthrough
@@ -25,11 +24,6 @@ from ...utils.memory import dynamic_memory_factory
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def remove_component_suffix(key: str):
-    split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
-    return "__".join(split_key)
 
 
 class Tuner(ABC):
@@ -53,7 +47,11 @@ class Tuner(ABC):
         for k, v in components.items():
             if not self._is_component_valid(v, components["Estimator"]):
                 try:
-                    v = next(x for x in grid[k] if self._is_component_valid(x, components["Estimator"]))
+                    v = next(
+                        x
+                        for x in grid[k]
+                        if self._is_component_valid(x, components["Estimator"])
+                    )
                 except StopIteration:
                     continue
             valid_keys.add(k)
@@ -90,7 +88,10 @@ class Tuner(ABC):
 
     def _get_default_components(self, pipeline_blueprint) -> dict:
         default_grid = {
-            k: v.values for k, v in pipeline_blueprint.get_all_distributions(use_extended=self.use_extended).items()
+            k: v.values
+            for k, v in pipeline_blueprint.get_all_distributions(
+                use_extended=self.use_extended
+            ).items()
         }
         default_grid_list = [
             self._get_single_default_hyperparams(components, default_grid)
@@ -153,13 +154,14 @@ class RayTuneTuner(Tuner):
         self.num_samples = num_samples
         self.target_metric = "roc_auc"
         self._tune_kwargs = {
-            "run_or_experiment": self._trial_with_cv,
+            "run_or_experiment": None,
             "search_alg": None,
             "scheduler": None,
             "num_samples": num_samples,
             "verbose": 2,
             "reuse_actors": True,
-            "fail_fast": True,
+            "fail_fast": True,  # TODO change to False when ready
+            "resources_per_trial": {"cpu": 1}
         }
         super().__init__(
             problem_type=problem_type,
@@ -171,6 +173,7 @@ class RayTuneTuner(Tuner):
 
     @property
     def scoring_dict(self):
+        # TODO fault tolerant metrics
         if self.problem_type == ProblemType.BINARY:
             return {
                 "accuracy": "accuracy",
@@ -191,8 +194,9 @@ class RayTuneTuner(Tuner):
                 "recall_macro": "recall_macro",
                 "recall_weighted": "recall_weighted",
                 "f1_macro": "f1_macro",
-                "f1_weighted": "f1_weighted"
+                "f1_weighted": "f1_weighted",
             }
+        # TODO regression
 
     @property
     def total_num_samples(self):
@@ -210,19 +214,8 @@ class RayTuneTuner(Tuner):
         if self._cache:
             logger.info(f"Cache dir set as '{self._cache}'")
 
-    def _treat_config(self, config):
-        config = {k: self._component_strings_.get(v, v) for k, v in config.items()}
-        return {
-            remove_component_suffix(k): call_component_if_needed(
-                v, random_state=self.random_state
-            )
-            for k, v in config.items()
-        }
-
     def _trial_with_cv(self, config, checkpoint_dir=None):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
-
-        config_called = self._treat_config(config)
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self._cache)
@@ -252,19 +245,24 @@ class RayTuneTuner(Tuner):
                 # return_train_score=self.return_train_score,
                 # scoring=self.scoring,
             )
-            metrics = {metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring_dict.keys()}
+            metrics = {
+                metric: np.mean(scores[f"test_{metric}"])
+                for metric in self.scoring_dict.keys()
+            }
             gc.collect()
 
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
                 mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
-                #dataset_fraction=fraction, # TODO reenable
+                # dataset_fraction=fraction, # TODO reenable
                 **metrics,
             )
 
     def _pre_search(self, X, y, groups=None):
         super()._pre_search(X, y, groups=groups)
-        _, self._component_strings_ = get_all_tunable_params(self.pipeline_blueprint, use_extended=self.use_extended)
+        _, self._component_strings_ = get_all_tunable_params(
+            self.pipeline_blueprint, use_extended=self.use_extended
+        )
         for conf in self.default_grid_:
             for k, v in conf.items():
                 if str(v) in self._component_strings_:
@@ -273,6 +271,23 @@ class RayTuneTuner(Tuner):
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         tune_kwargs["num_samples"] = self.total_num_samples
+        params = {
+            "X_": self.X_,
+            "y_": self.y_,
+            "pipeline_blueprint": self.pipeline_blueprint,
+            "_component_strings_": self._component_strings_,
+            "groups_": self.groups_,
+            "fit_params": None,
+            "scoring": self.scoring_dict,
+            "metric_name": self.target_metric,
+            "cv": self.cv,
+            "n_jobs": None,
+            "random_state": self.random_state,
+            "prune_attr": self._searcher_kwargs.get("prune_attr", None),
+        }
+        tune_kwargs["run_or_experiment"] = tune.with_parameters(
+            tune_kwargs["run_or_experiment"], **params
+        )
         gc.collect()
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)

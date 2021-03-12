@@ -26,6 +26,7 @@ from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
 from ..tuners.BOHBTuner import BOHBTuner
 from ..tuners.HEBOTuner import HEBOTuner
+from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..stage import AutoMLStage
 from ..cv import get_cv_for_problem_type
@@ -259,7 +260,7 @@ class Trainer:
         config = {**default_config, **config}
         config.pop("dataset_fraction", None)
         estimator = pipeline_blueprint(random_state=self.random_state)
-        config_called = self.last_tuner_._treat_config(config)
+        config_called = treat_config(config, self.last_tuner_._component_strings_, self.random_state)
         estimator.set_params(**config_called)
         estimator.memory = dynamic_memory_factory(True)  # TODO make dynamic
         return estimator

@@ -62,7 +62,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         space = {k: v for k, v in space.items() if k not in const_values}
         self._space = get_optuna_trial_suggestions(space)
 
-        self._points_to_evaluate = points_to_evaluate
+        self._points_to_evaluate = points_to_evaluate or []
         assert n_startup_trials is None or isinstance(n_startup_trials, int)
         if n_startup_trials is None:
             n_startup_trials = 10
@@ -80,9 +80,6 @@ class ConditionalOptunaSearch(OptunaSearch):
             "You can only pass an instance of `optuna.samplers.BaseSampler` "
             "as a sampler to `OptunaSearcher`."
         )
-
-        self._pruner = ot.pruners.NopPruner()
-        self._storage = ot.storages.InMemoryStorage()
 
         self._ot_trials = {}
         self._ot_study = None
@@ -271,15 +268,10 @@ class ConditionalOptunaSearch(OptunaSearch):
             )
 
         if trial_id not in self._ot_trials:
-            ot_trial_id = self._storage.create_new_trial(self._ot_study._study_id)
-            self._ot_trials[trial_id] = ot.trial.Trial(self._ot_study, ot_trial_id)
+            self._ot_trials[trial_id] = self._ot_study.ask()
         ot_trial = self._ot_trials[trial_id]
 
-        if self._points_to_evaluate:
-            params = self._get_params(ot_trial, self._points_to_evaluate.pop(0))
-        else:
-            # getattr will fetch the trial.suggest_ function on Optuna trials
-            params = self._get_params(ot_trial)
+        params = self._get_params(ot_trial)
         print(params)
         return unflatten_dict(params)
 

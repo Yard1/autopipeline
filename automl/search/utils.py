@@ -21,7 +21,7 @@ class ray_context:
         "configure_logging": False,
         "include_dashboard": True,
         # "local_mode": True,
-        # "num_cpus": 1,
+        "num_cpus": 8,
     }
 
     def __init__(self, global_checkpoint_s=10, **ray_config):

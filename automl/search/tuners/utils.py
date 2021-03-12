@@ -3,10 +3,16 @@ from collections import defaultdict
 
 from copy import copy
 
-from ...components.component import ComponentConfig
+from ...components.component import ComponentConfig, Component
 from ...search.stage import AutoMLStage
 from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
+
+from ..utils import call_component_if_needed
+
+def remove_component_suffix(key: str):
+    split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
+    return "__".join(split_key)
 
 
 def split_list_into_chunks(lst: list, chunk_size: int):
@@ -15,6 +21,15 @@ def split_list_into_chunks(lst: list, chunk_size: int):
         for i in range((len(lst) + chunk_size - 1) // chunk_size)
     ]
 
+
+def treat_config(config, component_strings, random_state=None):
+    config = {k: component_strings.get(v, v) for k, v in config.items()}
+    return {
+        remove_component_suffix(k): call_component_if_needed(
+            v, random_state=random_state
+        )
+        for k, v in config.items()
+    }
 
 def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
     spec = copy(spec)
