@@ -73,7 +73,7 @@ class PandasLabelEncoder(PandasSeriesTransformerMixin, _LabelEncoder):
         if isinstance(y, pd.DataFrame) and y.shape[1] == 1:
             y = y.squeeze()
         if isinstance(y, pd.Series):
-            yt = pd.Series(pd.Categorical(y, categories=self.classes_))
+            yt = y.astype(pd.CategoricalDtype(categories=self.classes_))
             if yt.isnull().any():
                 diff = set(y.unique()) - set(self.classes_)
                 raise ValueError(f"y contains previously unseen labels: {list(diff)}")
