@@ -15,6 +15,7 @@ from ray.tune import Trainable
 import ray.cloudpickle as cpickle
 
 from .utils import treat_config
+from ...utils.memory import dynamic_memory_factory
 
 
 class SklearnTrainable(Trainable):
@@ -55,6 +56,7 @@ class SklearnTrainable(Trainable):
             self.random_state = params.pop("random_state", None)
             self.prune_attr = params.pop("prune_attr", None)
             self.const_values = params.pop("const_values", {})
+            self.cache = params.pop("cache", None)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -75,8 +77,8 @@ class SklearnTrainable(Trainable):
         print(f"trial prune_attr: {prune_attr}")
 
         estimator.set_params(**config_called)
-        # memory = dynamic_memory_factory(self._cache)
-        # estimator.set_params(memory=memory)
+        memory = dynamic_memory_factory(self.cache)
+        estimator.set_params(memory=memory)
 
         if prune_attr and prune_attr < 1.0:
             subsample_cv = _SubsampleMetaSplitter(

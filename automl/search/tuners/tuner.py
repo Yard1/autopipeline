@@ -284,6 +284,7 @@ class RayTuneTuner(Tuner):
             "n_jobs": None,
             "random_state": self.random_state,
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
+            "cache": self._cache,
         }
         tune_kwargs["run_or_experiment"] = tune.with_parameters(
             tune_kwargs["run_or_experiment"], **params

@@ -252,7 +252,7 @@ class AutoML(BaseEstimator):
             cv=self.cv_,
             categorical_columns=categorical_columns,
             numeric_columns=numeric_columns,
-            cache=True,
+            cache=False,
             early_stopping=True,
             #cache="/home/baum/Documents/Coding/Python/automl",
         )
