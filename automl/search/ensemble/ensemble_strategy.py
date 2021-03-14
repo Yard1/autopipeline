@@ -32,7 +32,7 @@ class RoundRobin(EnsembleStrategy):
             by="mean_test_score", ascending=False
         ).groupby(by=groupby_list)
         group_dfs = [
-            group
+            group.sort_values(by="mean_test_score", ascending=False)
             for name, group in grouped_results_df
             if group["mean_test_score"].max() >= percentile
         ]
@@ -69,7 +69,7 @@ class RoundRobinEstimator(EnsembleStrategy):
             by="mean_test_score", ascending=False
         ).groupby(by=groupby_list)
         group_dfs = [
-            group
+            group.sort_values(by="mean_test_score", ascending=False)
             for name, group in grouped_results_df
             if group["mean_test_score"].max() >= percentile
         ]

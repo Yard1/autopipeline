@@ -1,3 +1,8 @@
+from automl.components.transformers.encoder.bayesian_target_encoder import (
+    BayesianTargetEncoderBinary,
+    BayesianTargetEncoderMulticlass,
+    BayesianTargetEncoderRegression,
+)
 from automl.components.estimators.knn.knn import (
     KNeighborsClassifier,
     KNeighborsRegressor,
@@ -76,6 +81,9 @@ def create_pipeline_blueprint(
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
         "CatBoostEncoder": CatBoostEncoder(),
+        "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
+        "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
+        "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {

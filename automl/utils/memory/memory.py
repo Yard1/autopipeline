@@ -226,7 +226,7 @@ class DynamicMemory(Memory):
         verbose=0,
         bytes_limit=None,
         backend_options=None,
-        min_time_to_cache=6,
+        min_time_to_cache=4,
     ):
         super().__init__(
             location=location,

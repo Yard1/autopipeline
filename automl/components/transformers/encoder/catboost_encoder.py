@@ -10,17 +10,21 @@ from ...component import ComponentLevel, ComponentConfig
 from ....search.stage import AutoMLStage
 
 
+# TODO: consider K-fold inside? something like cross_val_predict
 class FixedCatBoostEncoder(_CatBoostEncoder):
     def fit_transform(self, X, y):
         return super().fit(X, y).transform(X)
 
     def fit(self, X, y, **kwargs):
-        X = X.apply(categorical_column_to_int_categories)
+        X = X.apply(categorical_column_to_int_categories).reset_index(drop=True)
         return super().fit(X, y, **kwargs)
 
     def transform(self, X, y=None, override_return_df=False):
-        X = X.apply(categorical_column_to_int_categories)
-        return super().transform(X, y=y, override_return_df=override_return_df)
+        X_index = X.index
+        X = X.apply(categorical_column_to_int_categories).reset_index(drop=True)
+        Xt = super().transform(X, y=y, override_return_df=override_return_df)
+        Xt.index = X_index
+        return Xt
 
 
 class CatBoostEncoder(Encoder):
@@ -33,9 +37,11 @@ class CatBoostEncoder(Encoder):
         "handle_unknown": "value",
         "handle_missing": "value",
         "random_state": None,
+        "sigma": None,
+        "a": 1,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

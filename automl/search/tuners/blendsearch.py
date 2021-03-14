@@ -1137,7 +1137,7 @@ class BlendSearchTuner(RayTuneTuner):
         cv,
         random_state,
         use_extended: bool = True,
-        num_samples: int = 10,
+        num_samples: int = -1,
         early_stopping=True,
         cache=False,
         **tune_kwargs,
@@ -1154,7 +1154,7 @@ class BlendSearchTuner(RayTuneTuner):
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
-        self._tune_kwargs["time_budget_s"] = 60
+        self._tune_kwargs["time_budget_s"] = 180
         self._tune_kwargs["run_or_experiment"] = SklearnTrainable
         self._tune_kwargs["stop"] = {"training_iteration": 1}
 
