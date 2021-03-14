@@ -5,13 +5,10 @@ import numpy as np
 import pandas as pd
 import gc
 
-from copy import deepcopy, copy
+from copy import deepcopy
 from collections import defaultdict
-from enum import Enum, auto
 
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
-from sklearn.feature_selection import RFECV
-from sklearn.base import clone
 
 import joblib
 from ray.util.joblib import register_ray
@@ -28,10 +25,10 @@ from ..tuners.BOHBTuner import BOHBTuner
 from ..tuners.HEBOTuner import HEBOTuner
 from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
-from ..stage import AutoMLStage
 from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
 from ...components.estimators.ensemble.stack import PandasStackingClassifier
+from ...components.estimators.ensemble.des import DESSplitter, METADES, KNORAE
 from ...components.estimators.linear_model import LogisticRegression
 from ...problems.problem_type import ProblemType
 from ...utils import validate_type
@@ -52,7 +49,7 @@ class Trainer:
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
         best_percentile: int = 1,
-        max_ensemble_size: int = 10,
+        max_ensemble_size: int = 30,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 0,
         early_stopping: bool = False,
@@ -148,17 +145,18 @@ class Trainer:
         print("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         with joblib.parallel_backend("ray"):
-            ensemble.fit(
-                X,
-                y,
-                fit_final_estimator=self.current_stacking_level >= self.stacking_level,
-            )
-        ensemble.n_jobs = None
-        self.ensembles_.append(ensemble)
-        if self.current_stacking_level >= self.stacking_level:
-            print("fitting final ensemble", flush=True)
-            self.final_ensemble_ = self._create_final_ensemble()
-            return
+            #ensemble.fit(
+            #    X,
+            #    y,
+            #    fit_final_estimator=self.current_stacking_level >= self.stacking_level,
+            #)
+            ensemble.n_jobs = None
+            self.ensembles_.append(ensemble)
+            if self.current_stacking_level >= self.stacking_level:
+                print("fitting final ensemble", flush=True)
+                #self.final_ensemble_ = self._create_final_ensemble()
+                self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
+                return
         X_stack = ensemble.stacked_predictions_
         self.meta_columns_.extend(X_stack.columns)
         return self._fit_one_layer(pd.concat((X, X_stack), axis=1), y, groups=groups)
@@ -190,6 +188,11 @@ class Trainer:
         return PandasStackingClassifier(
             estimators=estimators, final_estimator=final_estimator, n_jobs=None
         )
+
+    def _create_dynamic_ensemble(self, X, y):
+        des = DESSplitter([est for name, est in self.ensembles_[-1].estimators], METADES(DFP=True), random_state=self.random_state, n_jobs=-1)
+        des.fit(X, y)
+        return des
 
     def _create_final_ensemble(self):
         if len(self.ensembles_) <= 1:

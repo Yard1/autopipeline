@@ -623,7 +623,7 @@ class BayesianTargetEncoderBinary(Encoder):
         "task": TaskType.BINARY_CLASSIFICATION,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
     _problem_types = {
         ProblemType.BINARY,
@@ -655,7 +655,7 @@ class BayesianTargetEncoderMulticlass(Encoder):
         "task": TaskType.MULTICLASS_CLASSIFICATION,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
     _problem_types = {
         ProblemType.MULTICLASS,
@@ -688,7 +688,7 @@ class BayesianTargetEncoderRegression(Encoder):
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
     _problem_types = {
         ProblemType.REGRESSION,

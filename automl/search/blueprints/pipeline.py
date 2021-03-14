@@ -1,18 +1,6 @@
-from automl.components.transformers.encoder.bayesian_target_encoder import (
-    BayesianTargetEncoderBinary,
-    BayesianTargetEncoderMulticlass,
-    BayesianTargetEncoderRegression,
-)
-from automl.components.estimators.knn.knn import (
-    KNeighborsClassifier,
-    KNeighborsRegressor,
-)
-from automl.components.transformers.scaler.min_max_scaler import MinMaxScaler
 import numpy as np
 
 from typing import Optional
-
-from automl import components
 
 from ...components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..stage import AutoMLStage
@@ -80,7 +68,8 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
-        "CatBoostEncoder": CatBoostEncoder(),
+        "CatBoostEncoderCategorical": CatBoostEncoderCategorical(),
+        "CatBoostEncoderRegression": CatBoostEncoderRegression(),
         "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
         "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
         "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
