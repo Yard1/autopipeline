@@ -87,7 +87,7 @@ class HEBOTuner(RayTuneTuner):
         print(self.early_stopping_fractions_)
         self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
-                metric="mean_test_score",
+                metric="mean_validation_score",
                 mode="max",
                 reduction_factor=reduction_factor,
                 max_t=self.early_stopping_splits_,
@@ -97,12 +97,12 @@ class HEBOTuner(RayTuneTuner):
             else None
         )
 
-    def _pre_search(self, X, y, groups=None):
+    def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         print("_pre_search")
         points_to_evaluate, evaluated_rewards = zip(*self.known_points)
         print(points_to_evaluate[0])
         self.pipeline_blueprint = copy(self.pipeline_blueprint)
-        super()._pre_search(X, y, groups=groups)
+        super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         space = {}
         for k, v in self.pipeline_blueprint.get_all_distributions(
             use_extended=self.use_extended
@@ -161,7 +161,7 @@ class HEBOTuner(RayTuneTuner):
         self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
             HEBOSearch(
                 space=space,
-                metric="mean_test_score",
+                metric="mean_validation_score",
                 mode="max",
                 points_to_evaluate=points_to_evaluate,
                 evaluated_rewards=list(evaluated_rewards),
@@ -171,13 +171,3 @@ class HEBOTuner(RayTuneTuner):
             max_concurrent=8,
             batch=True,
         )
-
-    def _search(self, X, y, groups=None):
-        self._pre_search(X, y, groups=groups)
-
-        self._run_search()
-
-        return self
-
-    def fit(self, X, y, groups=None):
-        return self._search(X, y, groups=groups)

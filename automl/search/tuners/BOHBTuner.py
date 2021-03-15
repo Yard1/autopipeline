@@ -229,7 +229,7 @@ class BOHBTuner(RayTuneTuner):
 
         self._tune_kwargs["scheduler"] = (
             HyperBandForBOHB(
-                metric="mean_test_score",
+                metric="mean_validation_score",
                 mode="max",
                 reduction_factor=reduction_factor,
                 max_t=self.early_stopping_splits_,
@@ -240,7 +240,7 @@ class BOHBTuner(RayTuneTuner):
         super()._pre_search(X, y, groups=groups)
         self._tune_kwargs["search_alg"] = ConditionalTuneBOHB(
             space=self.pipeline_blueprint,
-            metric="mean_test_score",
+            metric="mean_validation_score",
             mode="max",
             points_to_evaluate=self.default_grid_,
             seed=self.random_state,

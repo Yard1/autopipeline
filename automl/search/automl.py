@@ -27,7 +27,7 @@ class AutoML(BaseEstimator):
     def __init__(
         self,
         problem_type: Optional[Union[str, ProblemType]] = None,
-        validation_size: float = 0.2,
+        test_size: float = 0.2,
         cv: Union[int, BaseCrossValidator] = 5,
         level: Union[str, int, ComponentLevel] = ComponentLevel.COMMON,
         random_state: Optional[int] = None,  # TODO: support other random states
@@ -35,7 +35,7 @@ class AutoML(BaseEstimator):
         int_dtype: Optional[type] = None,
     ) -> None:
         self.problem_type = problem_type
-        self.validation_size = validation_size
+        self.test_size = test_size
         self.level = level
         self.cv = cv
         self.random_state = random_state
@@ -49,11 +49,11 @@ class AutoML(BaseEstimator):
         validate_type(self.level, "level", (str, int, ComponentLevel))
         validate_type(self.problem_type, "problem_type", (str, ProblemType, type(None)))
         validate_type(self.cv, "cv", (int, BaseCrossValidator))
-        validate_type(self.validation_size, "validation_size", float)
+        validate_type(self.test_size, "test_size", float)
         if isinstance(self.cv, int) and self.cv < 2:
             raise ValueError(f"If cv is an int, it must be bigger than 2. Got {self.cv}.")
-        if self.validation_size < 0 or self.validation_size > 0.9:
-            raise ValueError(f"validation_size must be in range (0.0, 0.9)")
+        if self.test_size < 0 or self.test_size > 0.9:
+            raise ValueError(f"test_size must be in range (0.0, 0.9)")
         if not is_float_dtype(self.float_dtype):
             raise TypeError(
                 f"Expected float_dtype to be a float dtype, got {type(self.float_dtype)}"
@@ -134,11 +134,11 @@ class AutoML(BaseEstimator):
 
         return determined_problem_type, y
 
-    def _make_validation_split(self, X, y):
+    def _make_test_split(self, X, y):
         return train_test_split(
             X,
             y,
-            test_size=self.validation_size,
+            test_size=self.test_size,
             random_state=self.random_seed_,
             stratify=y if self.problem_type_.is_classification() else None,
         )
@@ -157,8 +157,8 @@ class AutoML(BaseEstimator):
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        X_validation: Optional[pd.DataFrame] = None,
-        y_validation: Optional[pd.Series] = None,
+        X_test: Optional[pd.DataFrame] = None,
+        y_test: Optional[pd.Series] = None,
         ordinal_columns: Optional[Dict[str, list]] = None,
     ):
         logger.info(make_header("AutoML Fit"))
@@ -219,25 +219,25 @@ class AutoML(BaseEstimator):
             y = y_encoder.fit_transform(y)
             self.y_steps_.append(y_encoder)
 
-        if X_validation is not None and y_validation is not None:
-            logger.info("Using predefined validation sets")
-            self.X_validation_ = X_validator.transform(X_validation)
-            self.y_validation_ = y_validator.transform(y_validation)
+        if X_test is not None and y_test is not None:
+            logger.info("Using predefined test sets")
+            self.X_test_ = X_validator.transform(X_test)
+            self.y_test_ = y_validator.transform(y_test)
             X, y = self._shuffle_data(X, y)
-        elif X_validation is not None or y_validation is not None:
+        elif X_test is not None or y_test is not None:
             raise ValueError(
-                f"When passing either X_validation or y_validation, the other parameter must not be None as well, got X_validation: {type(X_validation)}, y_validation: {type(y_validation)}"
+                f"When passing either X_test or y_test, the other parameter must not be None as well, got X_test: {type(X_test)}, y_test: {type(y_test)}"
             )
-        elif self.validation_size <= 0:
-            logger.info("validation_size <= 0, no validation will be performed")
-            self.X_validation_ = None
-            self.y_validation_ = None
+        elif self.test_size <= 0:
+            logger.info("test_size <= 0, no holdout testing will be performed")
+            self.X_test_ = None
+            self.y_test_ = None
             X, y = self._shuffle_data(X, y)
         else:
             logger.info(
-                f"Splitting data into training and validation sets ({1-(self.validation_size*100)}-{(self.validation_size*100)})"
+                f"Splitting data into training and test sets ({1-(self.test_size*100)}-{(self.test_size*100)})"
             )
-            X, self.X_validation_, y, self.y_validation_ = self._make_validation_split(
+            X, self.X_test_, y, self.y_test_ = self._make_test_split(
                 X, y
             )
 
@@ -260,6 +260,6 @@ class AutoML(BaseEstimator):
         self.X_ = X
         self.y_ = y
 
-        return self.trainer_.fit(X, y)
+        return self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
 
         #return X, y

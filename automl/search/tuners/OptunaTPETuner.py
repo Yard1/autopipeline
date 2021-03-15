@@ -331,7 +331,7 @@ class OptunaTPETuner(RayTuneTuner):
         print(self.early_stopping_fractions_)
         self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
-                metric="mean_test_score",
+                metric="mean_validation_score",
                 mode="max",
                 reduction_factor=reduction_factor,
                 max_t=self.early_stopping_splits_,
@@ -341,23 +341,13 @@ class OptunaTPETuner(RayTuneTuner):
             else None
         )
 
-    def _pre_search(self, X, y, groups=None):
-        super()._pre_search(X, y, groups=groups)
+    def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
+        super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         self._tune_kwargs["search_alg"] = ConditionalOptunaSearch(
             space=self.pipeline_blueprint,
-            metric="mean_test_score",
+            metric="mean_validation_score",
             mode="max",
             points_to_evaluate=self.default_grid_,
             seed=self.random_state,
         )
         print(f"cache: {self._cache}")
-
-    def _search(self, X, y, groups=None):
-        self._pre_search(X, y, groups=groups)
-
-        self._run_search()
-
-        return self
-
-    def fit(self, X, y, groups=None):
-        return self._search(X, y, groups=groups)

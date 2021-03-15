@@ -159,7 +159,7 @@ class PandasStackingClassifier(StackingClassifier):
                         [f"{estimator_name}_{i}" for i in range(preds.ndim)]
                     )
         X_meta = [
-            pd.DataFrame(x, columns=X_meta_names[i])  # TODO: Better name
+            pd.DataFrame(x, columns=X_meta_names[i], index=X.index)  # TODO: Better name
             for i, x in enumerate(X_meta)
         ]
         meta_df = pd.concat(X_meta, axis=1)

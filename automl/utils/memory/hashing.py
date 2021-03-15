@@ -146,14 +146,18 @@ class xxPandasHasher(xxNumpyHasher):
             return obj
 
     def hash(self, obj, return_digest=True):
-        if isinstance(obj, dict):
-            obj = (obj.__class__, {k: self._hash_pandas(v) for k, v in obj.items()})
-        elif isinstance(obj, list):
-            obj = (obj.__class__, [self._hash_pandas(v) for v in obj])
-        elif isinstance(obj, tuple):
-            obj = (obj.__class__, tuple([self._hash_pandas(v) for v in obj]))
-        else:
-            obj = self._hash_pandas(obj)
+        try:
+            if isinstance(obj, dict):
+                n_obj = (obj.__class__, {k: self._hash_pandas(v) for k, v in obj.items()})
+            elif isinstance(obj, list):
+                n_obj = (obj.__class__, [self._hash_pandas(v) for v in obj])
+            elif isinstance(obj, tuple):
+                n_obj = (obj.__class__, tuple([self._hash_pandas(v) for v in obj]))
+            else:
+                n_obj = self._hash_pandas(obj)
+            obj = n_obj
+        except:
+            pass
         try:
             self.dump(obj)
         except pickle.PicklingError as e:

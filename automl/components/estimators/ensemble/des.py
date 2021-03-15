@@ -8,7 +8,6 @@ from joblib import Parallel, delayed
 
 from ...compatibility.pandas import categorical_columns_to_int_categories
 from ....search.utils import call_component_if_needed
-from ....search.blueprints.pipeline import create_basic_preprocessing_pipeline_blueprint
 
 class DESSplitter(ClassifierMixin, TransformerMixin, BaseEstimator):
     def __init__(
@@ -25,7 +24,6 @@ class DESSplitter(ClassifierMixin, TransformerMixin, BaseEstimator):
         self.DSEL_perc = DSEL_perc
         self.random_state = random_state
         self.n_jobs = n_jobs
-        #self._preprocessor = create_basic_preprocessing_pipeline_blueprint()()
 
     def fit(self, X, y, sample_weight=None):
         X = categorical_columns_to_int_categories(X)
@@ -36,8 +34,6 @@ class DESSplitter(ClassifierMixin, TransformerMixin, BaseEstimator):
             test_size=self.DSEL_perc,
             stratify=y,
         )
-        #self.preprocessor_ = clone(self._preprocessor)
-        #self.preprocessor_.set_params(**{k: self.random_state for k, v in self.preprocessor_.get_params(deep=True).items() if k.endswith("__random_state")})
         self.pool_classifiers_ = Parallel(n_jobs=self.n_jobs)(
             delayed(_fit_single_estimator)(clone(est), X_train, y_train, sample_weight)
             for est in self.pool_classifiers

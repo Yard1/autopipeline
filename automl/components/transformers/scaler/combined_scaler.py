@@ -5,6 +5,7 @@ from ...component import ComponentLevel
 from ...flow._column_transformer import PandasColumnTransformer, make_column_selector
 from .quantile_transformer import QuantileTransformer
 from .standard_scaler import StandardScaler
+from .robust_scaler import RobustScaler
 
 from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
@@ -28,7 +29,7 @@ class PandasCombinedScalerTransformer(PandasColumnTransformer):
         self.transformers = [
             (
                 "Scaler",
-                StandardScaler()(),
+                RobustScaler()(),
                 make_column_selector(
                     _scaler_skewness_condition,
                     negate_condition=True,

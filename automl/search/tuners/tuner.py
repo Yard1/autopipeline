@@ -104,9 +104,11 @@ class Tuner(ABC):
         ]
         return default_grid_list
 
-    def _pre_search(self, X, y, groups=None):
+    def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         self.X_ = X
         self.y_ = y
+        self.X_test_ = X_test
+        self.y_test_ = y_test
         self.groups_ = groups
         self.default_grid_ = self._get_default_components(self.pipeline_blueprint)
         preset_configurations = [
@@ -135,6 +137,9 @@ class Tuner(ABC):
     def _run_search(self):
         raise NotImplementedError()
 
+    def fit(self, X, y, groups=None):
+        raise NotImplementedError()
+
 
 class RayTuneTuner(Tuner):
     def __init__(
@@ -161,7 +166,7 @@ class RayTuneTuner(Tuner):
             "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
-            "resources_per_trial": {"cpu": 1}
+            "resources_per_trial": {"cpu": 1},
         }
         super().__init__(
             problem_type=problem_type,
@@ -253,13 +258,13 @@ class RayTuneTuner(Tuner):
 
             tune.report(
                 done=idx + 1 >= len(self.early_stopping_fractions_),
-                mean_test_score=np.mean(scores[f"test_{self.target_metric}"]),
+                mean_validation_score=np.mean(scores[f"test_{self.target_metric}"]),
                 # dataset_fraction=fraction, # TODO reenable
                 **metrics,
             )
 
-    def _pre_search(self, X, y, groups=None):
-        super()._pre_search(X, y, groups=groups)
+    def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
+        super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         _, self._component_strings_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )
@@ -274,6 +279,8 @@ class RayTuneTuner(Tuner):
         params = {
             "X_": self.X_,
             "y_": self.y_,
+            "X_test_": self.X_test_,
+            "y_test_": self.y_test_,
             "pipeline_blueprint": self.pipeline_blueprint,
             "_component_strings_": self._component_strings_,
             "groups_": self.groups_,
@@ -294,3 +301,13 @@ class RayTuneTuner(Tuner):
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
             self.analysis_ = tune.run(**tune_kwargs)
+
+    def _search(self, X, y, X_test=None, y_test=None, groups=None):
+        self._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
+
+        self._run_search()
+
+        return self
+
+    def fit(self, X, y, X_test=None, y_test=None, groups=None):
+        return self._search(X, y, X_test=X_test, y_test=y_test, groups=groups)

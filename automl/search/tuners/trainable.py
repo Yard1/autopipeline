@@ -1,9 +1,10 @@
 from sklearn.base import clone
 from sklearn.model_selection import cross_validate
+from sklearn.model_selection._validation import _score, _check_multimetric_scoring
 from sklearn.utils.metaestimators import _safe_split
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 import numpy as np
-import os
+import gc
 from pickle import PicklingError
 import warnings
 import inspect
@@ -47,16 +48,19 @@ class SklearnTrainable(Trainable):
             self.y_ = params["y_"]
             self.pipeline_blueprint = params["pipeline_blueprint"]
             self._component_strings_ = params["_component_strings_"]
-            self.groups_ = params.pop("groups_", None)
-            self.fit_params = params.pop("fit_params", None)
-            self.scoring = params.pop("scoring", None)
-            self.metric_name = params.pop("metric_name", "roc_auc")
-            self.cv = deepcopy(params.pop("cv", 5))
-            self.n_jobs = params.pop("n_jobs", None)
-            self.random_state = params.pop("random_state", None)
-            self.prune_attr = params.pop("prune_attr", None)
-            self.const_values = params.pop("const_values", {})
-            self.cache = params.pop("cache", None)
+            self.groups_ = params.get("groups_", None)
+            self.fit_params = params.get("fit_params", None)
+            self.scoring = params.get("scoring", None)
+            self.metric_name = params.get("metric_name", "roc_auc")
+            self.cv = deepcopy(params.get("cv", 5))
+            self.n_jobs = params.get("n_jobs", None)
+            self.random_state = params.get("random_state", None)
+            self.prune_attr = params.get("prune_attr", None)
+            self.const_values = params.get("const_values", {})
+            self.cache = params.get("cache", None)
+            self.X_test_ = params.get("X_test_", None)
+            self.y_test_ = params.get("y_test_", None)
+            self.fit_params = params.get("fit_params", {})
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -69,7 +73,9 @@ class SklearnTrainable(Trainable):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
         config = {**self.const_values, **self.estimator_config}
-        config_called = treat_config(config, self._component_strings_, self.random_state)
+        config_called = treat_config(
+            config, self._component_strings_, self.random_state
+        )
         if self.prune_attr:
             prune_attr = config_called.pop(self.prune_attr, None)
         else:
@@ -90,6 +96,8 @@ class SklearnTrainable(Trainable):
         else:
             subsample_cv = self.cv
 
+        gc.collect()
+
         scores = cross_validate(
             estimator,
             self.X_,
@@ -100,8 +108,7 @@ class SklearnTrainable(Trainable):
             return_estimator=True,
             verbose=0,
             scoring=self.scoring,
-            # fit_params=self.fit_params,
-            # groups=self.groups,
+            fit_params=self.fit_params,
             # return_train_score=self.return_train_score,
         )
 
@@ -112,11 +119,26 @@ class SklearnTrainable(Trainable):
             metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring.keys()
         }
 
+        gc.collect()
+
         ret = {}
 
-        ret["mean_test_score"] = np.mean(scores[f"test_{self.metric_name}"])
+        test_metrics = None
+        if self.X_test_ is not None:
+            estimator.fit(self.X_, self.y_)
+            test_metrics = _score(
+                estimator,
+                self.X_test_,
+                self.y_test_,
+                _check_multimetric_scoring(estimator, self.scoring),
+                error_score=np.nan,
+            )
+
+        ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
         ret["estimator_fit_time"] = estimator_fit_time
         ret["metrics"] = metrics
+        if test_metrics:
+            ret["test_metrics"] = test_metrics
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
 
@@ -125,4 +147,5 @@ class SklearnTrainable(Trainable):
     def reset_config(self, new_config):
         print("reset_config")
         self.estimator_config = new_config
+        gc.collect()
         return True

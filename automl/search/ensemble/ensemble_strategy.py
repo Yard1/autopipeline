@@ -29,12 +29,12 @@ class RoundRobin(EnsembleStrategy):
         ]
         groupby_list.reverse()
         grouped_results_df = results_df.sort_values(
-            by="mean_test_score", ascending=False
+            by="mean_validation_score", ascending=False
         ).groupby(by=groupby_list)
         group_dfs = [
-            group.sort_values(by="mean_test_score", ascending=False)
+            group.sort_values(by="mean_validation_score", ascending=False)
             for name, group in grouped_results_df
-            if group["mean_test_score"].max() >= percentile
+            if group["mean_validation_score"].max() >= percentile
         ]
         idx = 0
         iter = True
@@ -66,12 +66,12 @@ class RoundRobinEstimator(EnsembleStrategy):
         selected_configurations = []
         groupby_list = ["config.Estimator"]
         grouped_results_df = results_df.sort_values(
-            by="mean_test_score", ascending=False
+            by="mean_validation_score", ascending=False
         ).groupby(by=groupby_list)
         group_dfs = [
-            group.sort_values(by="mean_test_score", ascending=False)
+            group.sort_values(by="mean_validation_score", ascending=False)
             for name, group in grouped_results_df
-            if group["mean_test_score"].max() >= percentile
+            if group["mean_validation_score"].max() >= percentile
         ]
         idx = 0
         iter = True

@@ -1,3 +1,4 @@
+from sklearn.base import clone
 from automl.components.estimators import estimator
 from typing import Optional, Union, Tuple
 
@@ -48,8 +49,8 @@ class Trainer:
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
-        best_percentile: int = 1,
-        max_ensemble_size: int = 30,
+        best_percentile: int = 25,
+        max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 0,
         early_stopping: bool = False,
@@ -72,7 +73,6 @@ class Trainer:
         self.stacking_level = stacking_level
         self.tune_kwargs = tune_kwargs or {}
 
-        # self.secondary_tuner = HEBOTuner
         self.secondary_tuner = None
 
     @property
@@ -87,10 +87,7 @@ class Trainer:
         validate_type(cv, "cv", (BaseCrossValidator, int, None))
         return get_cv_for_problem_type(problem_type, n_splits=cv)
 
-    def _fit_one_layer(self, X, y, groups=None):
-        self.current_stacking_level += 1
-        print(f"current_stacking_level: {self.current_stacking_level}")
-        print(X.columns)
+    def _tune(self, X, y, X_test=None, y_test=None, groups=None):
         categorical_columns = X.select_dtypes(include="category")
         numeric_columns = X.select_dtypes(exclude="category")
         pipeline_blueprint = create_pipeline_blueprint(
@@ -113,8 +110,8 @@ class Trainer:
         self.tuners_.append(tuner)
         gc.collect()
 
-        print("starting tuning")
-        self.last_tuner_.fit(X, y, groups=groups)
+        print("starting tuning", flush=True)
+        self.last_tuner_.fit(X, y, X_test=X_test, y_test=y_test, groups=groups)
 
         results = self.last_tuner_.analysis_.results
         results_df = self.last_tuner_.analysis_.results_df
@@ -122,18 +119,30 @@ class Trainer:
         results_df = results_df[results_df["done"]]
         self.all_results_.append(results)
         self.all_results_df_.append(results_df)
+        return results, results_df, pipeline_blueprint
+
+    def _fit_one_layer(self, X, y, X_test=None, y_test=None, groups=None):
+        self.current_stacking_level += 1
+        print(f"current_stacking_level: {self.current_stacking_level}")
+        print(X.columns)
+
+        results, results_df, pipeline_blueprint = self._tune(
+            X, y, X_test=X_test, y_test=y_test, groups=groups
+        )
 
         if "dataset_fraction" in results_df.columns:
             results_df = results_df[
                 results_df["dataset_fraction"] >= 1.0
             ]  # TODO make dynamic
-        percentile = np.percentile(results_df["mean_test_score"], self.best_percentile)
+        percentile = np.percentile(
+            results_df["mean_validation_score"], self.best_percentile
+        )
 
         if self.secondary_tuner is not None:
             self._run_secondary_tuning(
                 X, y, pipeline_blueprint, percentile, groups=groups
             )
-        print("tuning complete")
+        print("tuning complete", flush=True)
         configurations_for_ensembling = self._select_configurations_for_ensembling(
             results, results_df, pipeline_blueprint, percentile
         )
@@ -145,21 +154,28 @@ class Trainer:
         print("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         with joblib.parallel_backend("ray"):
-            #ensemble.fit(
-            #    X,
-            #    y,
-            #    fit_final_estimator=self.current_stacking_level >= self.stacking_level,
-            #)
+            ensemble.fit(
+                X,
+                y,
+                fit_final_estimator=self.current_stacking_level >= self.stacking_level,
+            )
+            X_stack = ensemble.stacked_predictions_
+            X_test_stack = ensemble.transform(X_test)
             ensemble.n_jobs = None
             self.ensembles_.append(ensemble)
             if self.current_stacking_level >= self.stacking_level:
                 print("fitting final ensemble", flush=True)
-                #self.final_ensemble_ = self._create_final_ensemble()
-                self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
+                self.final_ensemble_ = self._create_final_ensemble()
+                # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
                 return
-        X_stack = ensemble.stacked_predictions_
         self.meta_columns_.extend(X_stack.columns)
-        return self._fit_one_layer(pd.concat((X, X_stack), axis=1), y, groups=groups)
+        return self._fit_one_layer(
+            pd.concat((X, X_stack), axis=1),
+            y,
+            X_test=pd.concat((X_test, X_test_stack), axis=1),
+            y_test=y_test,
+            groups=groups,
+        )
 
     def _create_ensemble(
         self, configurations_for_ensembling, pipeline_blueprint, final_estimator=None
@@ -190,7 +206,12 @@ class Trainer:
         )
 
     def _create_dynamic_ensemble(self, X, y):
-        des = DESSplitter([est for name, est in self.ensembles_[-1].estimators], METADES(DFP=True), random_state=self.random_state, n_jobs=-1)
+        des = DESSplitter(
+            [est for name, est in self.ensembles_[-1].estimators],
+            METADES(DFP=True),
+            random_state=self.random_state,
+            n_jobs=-1,
+        )
         des.fit(X, y)
         return des
 
@@ -211,7 +232,7 @@ class Trainer:
         groupby_list.reverse()
         grouped_results_df = self.all_results_df_[-1].groupby(by=groupby_list)
         for name, group in grouped_results_df:
-            if group["mean_test_score"].max() >= percentile:
+            if group["mean_validation_score"].max() >= percentile:
                 group_trial_ids = set(group.index)
                 known_points = [
                     (
@@ -220,7 +241,7 @@ class Trainer:
                             for config_key, config_value in v["config"].items()
                             if config_value != "passthrough"
                         },
-                        v["mean_test_score"],
+                        v["mean_validation_score"],
                     )
                     for k, v in self.all_results_[-1].items()
                     if k in group_trial_ids
@@ -243,8 +264,12 @@ class Trainer:
                 secondary_results_df = self.secondary_tuners_[
                     self.current_stacking_level
                 ][-1].analysis_.results_df
-                secondary_results_df = secondary_results_df.dropna(subset=["done"], how="any")
-                secondary_results_df = secondary_results_df[secondary_results_df["done"]]
+                secondary_results_df = secondary_results_df.dropna(
+                    subset=["done"], how="any"
+                )
+                secondary_results_df = secondary_results_df[
+                    secondary_results_df["done"]
+                ]
                 if "dataset_fraction" in secondary_results_df.columns:
                     secondary_results_df = secondary_results_df[
                         secondary_results_df["dataset_fraction"]
@@ -263,7 +288,9 @@ class Trainer:
         config = {**default_config, **config}
         config.pop("dataset_fraction", None)
         estimator = pipeline_blueprint(random_state=self.random_state)
-        config_called = treat_config(config, self.last_tuner_._component_strings_, self.random_state)
+        config_called = treat_config(
+            config, self.last_tuner_._component_strings_, self.random_state
+        )
         estimator.set_params(**config_called)
         estimator.memory = dynamic_memory_factory(True)  # TODO make dynamic
         return estimator
@@ -279,7 +306,7 @@ class Trainer:
             percentile=percentile,
         )
 
-    def fit(self, X, y, groups=None):
+    def fit(self, X, y, X_test=None, y_test=None, groups=None):
         self.current_stacking_level = -1
 
         self.cv_ = self._get_cv(self.problem_type, self.cv)
@@ -294,6 +321,8 @@ class Trainer:
         with ray_context(
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
-            return self._fit_one_layer(X, y, groups=groups)
+            return self._fit_one_layer(
+                X, y, X_test=X_test, y_test=y_test, groups=groups
+            )
 
         return self
