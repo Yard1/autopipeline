@@ -75,6 +75,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._sampler = sampler or ot.samplers.TPESampler(
             n_startup_trials=n_startup_trials,
             seed=seed,
+            multivariate=True,
         )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "

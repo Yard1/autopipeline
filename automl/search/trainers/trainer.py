@@ -53,6 +53,7 @@ class Trainer:
         max_ensemble_size: int = 10,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 0,
+        return_test_scores_during_tuning: bool = True,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,
@@ -74,6 +75,7 @@ class Trainer:
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None
+        self.return_test_scores_during_tuning = return_test_scores_during_tuning
 
     @property
     def last_tuner_(self):
@@ -112,6 +114,7 @@ class Trainer:
 
         print("starting tuning", flush=True)
         self.last_tuner_.fit(X, y, X_test=X_test, y_test=y_test, groups=groups)
+        print("tuning complete", flush=True)
 
         results = self.last_tuner_.analysis_.results
         results_df = self.last_tuner_.analysis_.results_df
@@ -126,13 +129,19 @@ class Trainer:
         print(f"current_stacking_level: {self.current_stacking_level}")
         print(X.columns)
 
+        if self.return_test_scores_during_tuning:
+            X_test_tuning = X_test
+            y_test_tuning = y_test
+        else:
+            X_test_tuning = None
+            y_test_tuning = None
         results, results_df, pipeline_blueprint = self._tune(
-            X, y, X_test=X_test, y_test=y_test, groups=groups
+            X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
         )
 
         if "dataset_fraction" in results_df.columns:
             results_df = results_df[
-                results_df["dataset_fraction"] >= 1.0
+                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
             ]  # TODO make dynamic
         percentile = np.percentile(
             results_df["mean_validation_score"], self.best_percentile
@@ -142,7 +151,6 @@ class Trainer:
             self._run_secondary_tuning(
                 X, y, pipeline_blueprint, percentile, groups=groups
             )
-        print("tuning complete", flush=True)
         configurations_for_ensembling = self._select_configurations_for_ensembling(
             results, results_df, pipeline_blueprint, percentile
         )
@@ -152,7 +160,7 @@ class Trainer:
         print("ensemble created")
         gc.collect()
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 4  # TODO make dynamic
         with joblib.parallel_backend("ray"):
             ensemble.fit(
                 X,

@@ -68,7 +68,7 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
-        "CatBoostEncoderCategorical": CatBoostEncoderCategorical(),
+        "CatBoostEncoderClassification": CatBoostEncoderClassification(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),
         "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
         "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
@@ -76,8 +76,8 @@ def create_pipeline_blueprint(
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
-        "BorutaSHAPClassification": BorutaSHAPClassification(),
-        "BorutaSHAPRegression": BorutaSHAPRegression(),
+        #"BorutaSHAPClassification": BorutaSHAPClassification(),
+        #"BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
         "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
     }

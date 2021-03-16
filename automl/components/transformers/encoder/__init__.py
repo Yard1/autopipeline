@@ -1,5 +1,5 @@
 from .label_encoder import LabelEncoder
 from .one_hot_encoder import OneHotEncoder
 from .ordinal_encoder import OrdinalEncoder
-from .catboost_encoder import CatBoostEncoderCategorical, CatBoostEncoderRegression
+from .catboost_encoder import CatBoostEncoderClassification, CatBoostEncoderRegression
 from .bayesian_target_encoder import BayesianTargetEncoderBinary, BayesianTargetEncoderMulticlass, BayesianTargetEncoderRegression

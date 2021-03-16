@@ -67,6 +67,7 @@ from ...utils.memory import dynamic_memory_factory
 GlobalSearch = ConditionalOptunaSearch
 
 
+# TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
     def __init__(
         self,
@@ -82,6 +83,7 @@ class PatchedFLOW2(FLOW2):
         seed: Optional[int] = 20,
         limit_space_to_init_config: bool = False,
         conditional_space=None,
+        cost_attr="time_total_s",
     ):
         """Constructor
 
@@ -160,6 +162,7 @@ class PatchedFLOW2(FLOW2):
         self._resource = None
         self._step_lb = np.Inf
         self.saved_resource = None
+        self.cost_attr = cost_attr
         if space:
             self._init_search()
         if self.prune_attr and self.prune_attr not in self.space and self.max_resource:
@@ -257,6 +260,7 @@ class PatchedFLOW2(FLOW2):
             self._seed + 1,
             conditional_space=conditional_space,
             limit_space_to_init_config=limit_space_to_init_config,
+            cost_attr=self.cost_attr,
         )
         flow2.best_obj = obj * self.metric_op  # minimize internally
         flow2.cost_incumbent = cost
@@ -572,7 +576,7 @@ class ConditionalBlendSearch(BlendSearch):
         reduction_factor: Optional[float] = None,
         resources_per_trial: Optional[dict] = None,
         global_search_alg: Optional[Searcher] = None,
-        time_attr: Optional[str] = None,
+        time_attr: str = "time_total_s",
         seed: Optional[int] = None,
         use_extended: bool = False,
         mem_size=None,
@@ -629,9 +633,8 @@ class ConditionalBlendSearch(BlendSearch):
         self._conditional_space = get_conditions(
             space, to_str=True, use_extended=use_extended
         )
-        self._time_attr = "time_total_s" or time_attr
+        self._time_attr = time_attr
 
-        LocalSearch.cost_attr = self._time_attr
         self._seed = seed
 
         if global_search_alg is not None:
@@ -676,8 +679,8 @@ class ConditionalBlendSearch(BlendSearch):
             max_resource,
             reduction_factor,
             seed,
+            cost_attr=self._time_attr,
         )
-        self._ls.cost_attr = self._time_attr
         self._resources_per_trial = resources_per_trial
         self._mem_size = mem_size
         self._mem_threshold = (
@@ -1154,7 +1157,7 @@ class BlendSearchTuner(RayTuneTuner):
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
-        self._tune_kwargs["time_budget_s"] = 180
+        self._tune_kwargs["time_budget_s"] = 600
         self._tune_kwargs["run_or_experiment"] = SklearnTrainable
         self._tune_kwargs["stop"] = {"training_iteration": 1}
 

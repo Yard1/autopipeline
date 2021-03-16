@@ -254,6 +254,7 @@ class AutoML(BaseEstimator):
             numeric_columns=numeric_columns,
             cache=True,
             early_stopping=True,
+            return_test_scores_during_tuning=True,
             #cache="/home/baum/Documents/Coding/Python/automl",
         )
 

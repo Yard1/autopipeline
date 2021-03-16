@@ -187,7 +187,7 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         return X_ if self.return_same_type and is_pandas else X_.values
 
 
-class CatBoostEncoderCategorical(Encoder):
+class CatBoostEncoderClassification(Encoder):
     _component_class = KFoldEncoderWrapper
     _default_parameters = {
         "base_transformer": _CatBoostEncoder(

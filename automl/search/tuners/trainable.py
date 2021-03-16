@@ -54,7 +54,7 @@ class SklearnTrainable(Trainable):
             self.metric_name = params.get("metric_name", "roc_auc")
             self.cv = deepcopy(params.get("cv", 5))
             self.n_jobs = params.get("n_jobs", None)
-            self.random_state = params.get("random_state", None)
+            self.random_state = deepcopy(params.get("random_state", None))
             self.prune_attr = params.get("prune_attr", None)
             self.const_values = params.get("const_values", {})
             self.cache = params.get("cache", None)
@@ -96,8 +96,6 @@ class SklearnTrainable(Trainable):
         else:
             subsample_cv = self.cv
 
-        gc.collect()
-
         scores = cross_validate(
             estimator,
             self.X_,
@@ -124,17 +122,21 @@ class SklearnTrainable(Trainable):
         ret = {}
 
         test_metrics = None
-        if self.X_test_ is not None:
-            estimator.fit(self.X_, self.y_)
+        if self.X_test_ is not None and not (prune_attr and prune_attr < 1.0):
+            test_estimator = clone(estimator)
+            test_estimator.fit(self.X_, self.y_)
             test_metrics = _score(
-                estimator,
+                test_estimator,
                 self.X_test_,
                 self.y_test_,
-                _check_multimetric_scoring(estimator, self.scoring),
+                _check_multimetric_scoring(test_estimator, self.scoring),
                 error_score=np.nan,
             )
 
-        ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
+        # ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
+        ret["mean_validation_score"] = self._mean_validation_score(
+            metrics["matthews_corrcoef"], metrics["roc_auc"]
+        )
         ret["estimator_fit_time"] = estimator_fit_time
         ret["metrics"] = metrics
         if test_metrics:
@@ -149,3 +151,8 @@ class SklearnTrainable(Trainable):
         self.estimator_config = new_config
         gc.collect()
         return True
+
+    # TODO move this outside
+    def _mean_validation_score(self, mcc, roc_auc, beta=2):
+        roc_auc = (roc_auc * 2) - 1
+        return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)

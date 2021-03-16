@@ -9,6 +9,9 @@ from ray import tune
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
+from sklearn.metrics import matthews_corrcoef, roc_auc_score, make_scorer
+
+matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 
 from .utils import get_all_tunable_params
 from ..utils import ray_context
@@ -157,7 +160,7 @@ class RayTuneTuner(Tuner):
         self._set_cache()
         self.tune_kwargs = tune_kwargs
         self.num_samples = num_samples
-        self.target_metric = "roc_auc"
+        self.target_metric = "matthews_corrcoef"
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
@@ -187,6 +190,7 @@ class RayTuneTuner(Tuner):
                 "precision": "precision",
                 "recall": "recall",
                 "f1": "f1",
+                "matthews_corrcoef": matthews_corrcoef_scorer,
             }
         elif self.problem_type == ProblemType.MULTICLASS:
             return {
@@ -200,6 +204,7 @@ class RayTuneTuner(Tuner):
                 "recall_weighted": "recall_weighted",
                 "f1_macro": "f1_macro",
                 "f1_weighted": "f1_weighted",
+                "matthews_corrcoef": matthews_corrcoef_scorer,
             }
         # TODO regression
 
@@ -265,6 +270,8 @@ class RayTuneTuner(Tuner):
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
+        if self._cache:
+            np.random.shuffle(self.default_grid_)
         _, self._component_strings_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )
