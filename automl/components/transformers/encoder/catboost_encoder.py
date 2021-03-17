@@ -208,7 +208,7 @@ class CatBoostEncoderClassification(Encoder):
         "is_classification": True,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {
         ProblemType.BINARY,
         ProblemType.MULTICLASS,
@@ -245,7 +245,7 @@ class CatBoostEncoderRegression(Encoder):
         "is_classification": False,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {
         ProblemType.REGRESSION,
     }

@@ -23,6 +23,7 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
 """
+from copy import deepcopy
 from typing import Dict, Optional, List, Tuple
 import numpy as np
 import traceback
@@ -135,6 +136,7 @@ class PatchedFLOW2(FLOW2):
         self.signature_space = list(space.keys())
         self._random = np.random.RandomState(seed)
         self._seed = seed
+        # TODO only consider cost-related HPOs
         if not init_config:
             logger.warning(
                 "No init config given to FLOW2. Using random initial config."
@@ -869,29 +871,20 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _valid(self, config: Dict) -> bool:
         """config validator"""
-        try:
-            for key in self._gs_admissible_min:
-                if key in config:
-                    value = config[key]
-                    # logger.info(
-                    #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
-                    if (
-                        value + self._ls.STEPSIZE < self._gs_admissible_min[key]
-                        or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
-                    ):
-                        return False
-        except TypeError:
-            normalized_config = self._ls.normalize(config)
-            for key in self._gs_admissible_min:
-                if key in config:
-                    value = normalized_config[key]
-                    # logger.info(
-                    #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
-                    if (
-                        value + self._ls.STEPSIZE < self._gs_admissible_min[key]
-                        or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
-                    ):
-                        return False
+        normalized_config = self._ls.normalize(config)
+        for key in self._gs_admissible_min:
+            if key in config:
+                value = normalized_config[key]
+                # logger.info(
+                #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
+                if (
+                    value + self._ls.STEPSIZE < self._gs_admissible_min[key]
+                    or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
+                ):
+                    print(
+                        f"normalized key {key} is invalid due to {value+ self._ls.STEPSIZE} < {self._gs_admissible_min[key]} or {value} > {self._gs_admissible_max[key] + self._ls.STEPSIZE}"
+                    )
+                    return False
         return True
 
     def suggest(self, trial_id: str) -> Optional[Dict]:
@@ -916,16 +909,17 @@ class ConditionalBlendSearch(BlendSearch):
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
             prune_attr = config.get(self._ls.prune_attr, None)
-            print(f"main choice suggestion: {config}")
+            print(f"{trial_id} main choice suggestion: {config}")
             skip = self._should_skip(choice, trial_id, config)
             if skip:
                 if choice:
-                    print(f"skipping choice={choice}, config={config}")
+                    print(f"{trial_id} skipping choice={choice}, config={config}")
                     return None
                 # use rs
+                print(f"{trial_id} using rs")
                 self._use_rs = True
                 for _, generated in generate_variants({"config": self._ls.space}):
-                    config = {**config, **generated["config"]}
+                    config = generated["config"]
                     break
                 # logger.debug(f"random config {config}")
                 skip = self._should_skip(choice, trial_id, config)
@@ -951,10 +945,11 @@ class ConditionalBlendSearch(BlendSearch):
                     self._trial_proposed_by[trial_id] = choice
                 else:
                     config = self._search_thread_pool[backup].suggest(trial_id)
+                    print(f"{trial_id} backup choice suggestion: {config}")
                     prune_attr = config.get(self._ls.prune_attr, None)
                     skip = self._should_skip(backup, trial_id, config)
                     if skip:
-                        print(f"skipping choice={choice}, config={config}")
+                        print(f"{trial_id} skipping choice={choice}, config={config}")
                         return None
                     self._trial_proposed_by[trial_id] = backup
                     choice = backup
@@ -1001,7 +996,7 @@ class ConditionalBlendSearch(BlendSearch):
                 self._result[config_signature] = {}
                 self._result[enforced_config_signature] = {}
             else:
-                print("result is not None")
+                print(f"{trial_id} result is not None")
                 print(config)
                 print(result)
                 print(config_signature)
@@ -1014,9 +1009,10 @@ class ConditionalBlendSearch(BlendSearch):
             config[self._ls.prune_attr] = prune_attr
         self._suggested_configs[trial_id] = config
         if prune_attr:
-            print(f"suggest prune_attr: {prune_attr}")
+            print(f"{trial_id} suggest prune_attr: {prune_attr}")
             assert prune_attr
         clean_config = {}
+        print(f"{trial_id} suggestion before enforcement: {config}")
         try:
             clean_config = enforce_conditions_on_config(
                 config, self._conditional_space_estimators
@@ -1029,14 +1025,16 @@ class ConditionalBlendSearch(BlendSearch):
                 len(new_clean_config) >= clean_config_len
             ), f"{clean_config}, {new_clean_config}"
             clean_config = new_clean_config
+            assert clean_config["Estimator"] == config["Estimator"]
         except:
-            print("Bad configuration suggested, trying again")
+            print(f"{trial_id} Bad configuration suggested, trying again")
             traceback.print_exc()
             print(self._conditional_space)
             print("")
             return None
         if prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr
+        print(f"{trial_id} final suggestion: {clean_config}")
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:

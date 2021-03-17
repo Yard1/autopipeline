@@ -117,6 +117,13 @@ class Trainer:
         print("tuning complete", flush=True)
 
         results = self.last_tuner_.analysis_.results
+        for key, result in results.items():
+            if "config" in result:
+                result["estimator"] = self._create_estimator(
+                    result["config"],
+                    pipeline_blueprint=pipeline_blueprint,
+                    cache=False,  # TODO make dynamic
+                )
         results_df = self.last_tuner_.analysis_.results_df
         results_df = results_df.dropna(subset=["done"], how="any")
         results_df = results_df[results_df["done"]]
@@ -160,7 +167,7 @@ class Trainer:
         print("ensemble created")
         gc.collect()
         print("fitting ensemble")
-        ensemble.n_jobs = 4  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         with joblib.parallel_backend("ray"):
             ensemble.fit(
                 X,
@@ -188,19 +195,13 @@ class Trainer:
     def _create_ensemble(
         self, configurations_for_ensembling, pipeline_blueprint, final_estimator=None
     ):
-        default_config = {
-            k: "passthrough"
-            for k, v in pipeline_blueprint.get_all_distributions(
-                use_extended=True
-            ).items()
-        }
         estimators = [
             (
                 f"meta-{self.current_stacking_level}_{idx}",
                 self._create_estimator(
                     config,
-                    default_config=default_config,
                     pipeline_blueprint=pipeline_blueprint,
+                    cache=True,  # TODO make dynamic
                 ),
             )
             for idx, config in enumerate(configurations_for_ensembling)
@@ -292,7 +293,13 @@ class Trainer:
                     secondary_results_df
                 )
 
-    def _create_estimator(self, config, default_config, pipeline_blueprint):
+    def _create_estimator(self, config, pipeline_blueprint, cache=False):
+        default_config = {
+            k: "passthrough"
+            for k, v in pipeline_blueprint.get_all_distributions(
+                use_extended=True
+            ).items()
+        }
         config = {**default_config, **config}
         config.pop("dataset_fraction", None)
         estimator = pipeline_blueprint(random_state=self.random_state)
@@ -300,7 +307,8 @@ class Trainer:
             config, self.last_tuner_._component_strings_, self.random_state
         )
         estimator.set_params(**config_called)
-        estimator.memory = dynamic_memory_factory(True)  # TODO make dynamic
+        if cache:
+            estimator.memory = dynamic_memory_factory(cache)  # TODO make dynamic
         return estimator
 
     def _select_configurations_for_ensembling(

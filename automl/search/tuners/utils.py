@@ -1,7 +1,7 @@
 from typing import Optional, Union, Dict, List, Tuple
 from collections import defaultdict
 
-from copy import copy
+from copy import copy, deepcopy
 
 from ...components.component import ComponentConfig, Component
 from ...search.stage import AutoMLStage
