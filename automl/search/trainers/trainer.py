@@ -12,6 +12,7 @@ from collections import defaultdict
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
 
 import joblib
+import ray
 from ray.util.joblib import register_ray
 
 register_ray()
@@ -50,7 +51,7 @@ class Trainer:
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
         best_percentile: int = 25,
-        max_ensemble_size: int = 10,
+        max_ensemble_size: int = 1,
         ensemble_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 0,
         return_test_scores_during_tuning: bool = True,
@@ -158,11 +159,12 @@ class Trainer:
             self._run_secondary_tuning(
                 X, y, pipeline_blueprint, percentile, groups=groups
             )
-        configurations_for_ensembling = self._select_configurations_for_ensembling(
+        trial_ids_for_ensembling = self._select_trial_ids_for_ensembling(
             results, results_df, pipeline_blueprint, percentile
         )
+        trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
         ensemble = self._create_ensemble(
-            configurations_for_ensembling, pipeline_blueprint
+            trials_for_ensembling, pipeline_blueprint
         )
         print("ensemble created")
         gc.collect()
@@ -173,7 +175,9 @@ class Trainer:
                 X,
                 y,
                 fit_final_estimator=self.current_stacking_level >= self.stacking_level,
+                predictions=[self.last_tuner_.fold_predictions_[k] for k in trial_ids_for_ensembling]
             )
+            del self.last_tuner_.fold_predictions_
             X_stack = ensemble.stacked_predictions_
             X_test_stack = ensemble.transform(X_test)
             ensemble.n_jobs = None
@@ -193,18 +197,14 @@ class Trainer:
         )
 
     def _create_ensemble(
-        self, configurations_for_ensembling, pipeline_blueprint, final_estimator=None
+        self, estimators_for_ensembling, pipeline_blueprint, final_estimator=None
     ):
         estimators = [
             (
                 f"meta-{self.current_stacking_level}_{idx}",
-                self._create_estimator(
-                    config,
-                    pipeline_blueprint=pipeline_blueprint,
-                    cache=True,  # TODO make dynamic
-                ),
+                trial_result["estimator"]
             )
-            for idx, config in enumerate(configurations_for_ensembling)
+            for idx, trial_result in enumerate(estimators_for_ensembling)
         ]
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
@@ -311,10 +311,10 @@ class Trainer:
             estimator.memory = dynamic_memory_factory(cache)  # TODO make dynamic
         return estimator
 
-    def _select_configurations_for_ensembling(
+    def _select_trial_ids_for_ensembling(
         self, results: dict, results_df: pd.DataFrame, pipeline_blueprint, percentile
     ) -> list:
-        return self.ensemble_strategy.select_configurations(
+        return self.ensemble_strategy.select_trial_ids(
             results=results,
             results_df=results_df,
             configurations_to_select=self.max_ensemble_size,

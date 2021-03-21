@@ -1138,8 +1138,8 @@ class BlendSearchTuner(RayTuneTuner):
         cv,
         random_state,
         use_extended: bool = True,
-        num_samples: int = -1,
-        early_stopping=True,
+        num_samples: int = 1,
+        early_stopping: bool = True,
         cache=False,
         **tune_kwargs,
     ) -> None:
@@ -1156,8 +1156,6 @@ class BlendSearchTuner(RayTuneTuner):
         )
         self._searcher_kwargs = {}
         self._tune_kwargs["time_budget_s"] = 600
-        self._tune_kwargs["run_or_experiment"] = SklearnTrainable
-        self._tune_kwargs["stop"] = {"training_iteration": 1}
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping and self.X_.shape[0] > 2000:

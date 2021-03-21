@@ -3,7 +3,7 @@ from abc import ABC
 
 
 class EnsembleStrategy(ABC):
-    def select_configurations(
+    def select_trial_ids(
         self,
         results: dict,
         results_df: pd.DataFrame,
@@ -15,7 +15,7 @@ class EnsembleStrategy(ABC):
 
 
 class RoundRobin(EnsembleStrategy):
-    def select_configurations(
+    def select_trial_ids(
         self,
         results: dict,
         results_df: pd.DataFrame,
@@ -23,7 +23,7 @@ class RoundRobin(EnsembleStrategy):
         pipeline_blueprint,
         percentile,
     ) -> list:
-        selected_configurations = []
+        selected_trial_ids = []
         groupby_list = [
             f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
         ]
@@ -40,22 +40,22 @@ class RoundRobin(EnsembleStrategy):
         iter = True
         while iter and any(len(group) > idx for group in group_dfs):
             for group in group_dfs:
-                if len(selected_configurations) >= configurations_to_select:
+                if len(selected_trial_ids) >= configurations_to_select:
                     iter = False
                     break
                 if len(group) <= idx:
                     continue
-                print(selected_configurations)
+                print(selected_trial_ids)
                 print(idx)
                 print(len(group))
                 print(group.iloc[idx].name)
-                selected_configurations.append(results[group.iloc[idx].name]["config"])
+                selected_trial_ids.append(results[group.iloc[idx].name]["config"])
             idx += 1
-        return selected_configurations
+        return selected_trial_ids
 
 
 class RoundRobinEstimator(EnsembleStrategy):
-    def select_configurations(
+    def select_trial_ids(
         self,
         results: dict,
         results_df: pd.DataFrame,
@@ -63,7 +63,7 @@ class RoundRobinEstimator(EnsembleStrategy):
         pipeline_blueprint,
         percentile,
     ) -> list:
-        selected_configurations = []
+        selected_trial_ids = []
         groupby_list = ["config.Estimator"]
         grouped_results_df = results_df.sort_values(
             by="mean_validation_score", ascending=False
@@ -77,23 +77,18 @@ class RoundRobinEstimator(EnsembleStrategy):
         iter = True
         while iter and any(len(group) > idx for group in group_dfs):  # TODO optimize
             for group in group_dfs:
-                if len(selected_configurations) >= configurations_to_select:
+                if len(selected_trial_ids) >= configurations_to_select:
                     iter = False
                     break
                 if len(group) <= idx:
                     continue
-                print(selected_configurations)
-                print(idx)
-                print(len(group))
-                print(group.iloc[idx].name)
-                print(group.iloc[idx]["config.Estimator"])
-                selected_configurations.append(results[group.iloc[idx].name]["config"])
+                selected_trial_ids.append(group.iloc[idx].name)
             idx += 1
-        return selected_configurations
+        return selected_trial_ids
 
 
 class EnsembleBest(EnsembleStrategy):
-    def select_configurations(
+    def select_trial_ids(
         self,
         results: dict,
         results_df: pd.DataFrame,
@@ -105,7 +100,7 @@ class EnsembleBest(EnsembleStrategy):
 
 
 class OneRoundRobinThenEnsembleBest(EnsembleStrategy):
-    def select_configurations(
+    def select_trial_ids(
         self,
         results: dict,
         results_df: pd.DataFrame,

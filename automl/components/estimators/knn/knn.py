@@ -13,7 +13,7 @@ class KNeighborsClassifier(KNNEstimator):
 
     _default_parameters = {
         "n_neighbors": 5,
-        "weights": "uniform",
+        "weights": "distance",
         "p": 2,
         "metric": "minkowski",
         "metric_params": None,

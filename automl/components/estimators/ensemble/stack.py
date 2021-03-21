@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 
 from joblib import Parallel
-from copy import deepcopy
 
 from sklearn.ensemble import StackingClassifier
 from sklearn.preprocessing import LabelEncoder
@@ -14,11 +13,11 @@ from sklearn.base import is_classifier, clone
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
+from .utils import get_cv_predictions
 from ...preprocessing import PrepareDataFrame
 
-
 class PandasStackingClassifier(StackingClassifier):
-    def fit(self, X, y, sample_weight=None, fit_final_estimator=True):
+    def fit(self, X, y, sample_weight=None, fit_final_estimator=True, predictions=None):
         """Fit the estimators.
 
         Parameters
@@ -45,16 +44,16 @@ class PandasStackingClassifier(StackingClassifier):
         self._le = LabelEncoder().fit(y)
         self.classes_ = self._le.classes_
         names, all_estimators = self._validate_estimators()
-        #if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
+        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
         self._validate_final_estimator()
-        #else:
+        # else:
         #    self.final_estimator_ = self.final_estimator
         stack_method = [self.stack_method] * len(all_estimators)
 
         # Fit the base estimators on the whole training data. Those
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
-        #if not hasattr(self, "estimators_"):
+        # if not hasattr(self, "estimators_"):
         self.estimators_ = Parallel(n_jobs=self.n_jobs)(
             delayed(_fit_single_estimator)(clone(est), X, y, sample_weight)
             for est in all_estimators
@@ -87,25 +86,21 @@ class PandasStackingClassifier(StackingClassifier):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        #if not any(self.estimators[0][0] in col for col in X.columns):
-        print("doing CV", flush=True)
-        predictions = [
-            cross_val_predict(
-                clone(est),
-                X,
-                y,
-                cv=deepcopy(cv),
-                method=meth,
-                n_jobs=self.n_jobs,
-                fit_params=fit_params,
-                verbose=self.verbose,
-            )
-            for est, meth in zip(all_estimators, self.stack_method_)
-            if est != "drop"
-        ]
+        # if not any(self.estimators[0][0] in col for col in X.columns):
 
+        predictions = get_cv_predictions(
+            X,
+            y,
+            all_estimators,
+            self.stack_method_,
+            cv,
+            predictions=predictions,
+            n_jobs=self.n_jobs,
+            fit_params=fit_params,
+            verbose=self.verbose,
+        )
         X_meta = self._concatenate_predictions(X, predictions)
-        #else:
+        # else:
         #    X_meta = X
         # Only not None or not 'drop' estimators will be used in transform.
         # Remove the None from the method as well.

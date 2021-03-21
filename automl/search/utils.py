@@ -3,8 +3,6 @@ import os
 from unittest.mock import patch
 import contextlib
 
-from typing import Optional, Union, Dict, List, Tuple
-
 from ..components.component import Component
 
 
@@ -44,3 +42,4 @@ class ray_context:
     def __exit__(self, type, value, traceback):
         if not self.ray_init and ray.is_initialized():
             ray.shutdown()
+

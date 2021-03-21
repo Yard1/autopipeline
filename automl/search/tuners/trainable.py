@@ -3,6 +3,7 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._validation import _score, _check_multimetric_scoring
 from sklearn.utils.metaestimators import _safe_split
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+from sklearn.metrics import make_scorer
 import numpy as np
 import gc
 from pickle import PicklingError
@@ -17,7 +18,23 @@ import ray.cloudpickle as cpickle
 
 from .utils import treat_config
 from ...utils.memory import dynamic_memory_factory
+from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 
+
+@ray.remote
+class RayStore(object):
+    def __init__(self) -> None:
+        self.values = {}
+
+    def get(self, key):
+        v = ray.put(self.values[key])
+        return v
+
+    def put(self, key, value):
+        self.values[key] = value
+
+    def get_all_refs(self) -> list:
+        return list(self.values.values())
 
 class SklearnTrainable(Trainable):
     """Class to be passed in as the first argument of tune.run to train models.
@@ -69,6 +86,18 @@ class SklearnTrainable(Trainable):
         print("training")
         return self._train()
 
+    def _make_scoring_dict(self):
+        scoring = self.scoring.copy()
+        def dummy_score(y_true, y_pred):
+            return 0
+        dummy_pred_scorer = make_scorer(dummy_score, greater_is_better=True)
+        dummy_pred_proba_scorer = make_scorer(dummy_score, greater_is_better=True, needs_proba=True)
+        dummy_thereshold_scorer = make_scorer(dummy_score, greater_is_better=True, needs_threshold=True)
+        scoring["dummy_pred_scorer"] = dummy_pred_scorer
+        scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
+        scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
+        return scoring
+
     def _train(self):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
@@ -96,8 +125,10 @@ class SklearnTrainable(Trainable):
         else:
             subsample_cv = self.cv
 
+        estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
+        scoring_with_dummies = self._make_scoring_dict()
         scores = cross_validate(
-            estimator,
+            estimator_subclassed,
             self.X_,
             self.y_,
             cv=subsample_cv,
@@ -105,7 +136,7 @@ class SklearnTrainable(Trainable):
             error_score="raise",
             return_estimator=True,
             verbose=0,
-            scoring=self.scoring,
+            scoring=scoring_with_dummies,
             fit_params=self.fit_params,
             # return_train_score=self.return_train_score,
         )
@@ -113,6 +144,10 @@ class SklearnTrainable(Trainable):
         estimator_fit_time = np.sum(
             [x.final_estimator_fit_time_ for x in scores["estimator"]]
         )
+        combined_predictions = {
+            k: np.concatenate([x._saved_preds[k] for x in scores["estimator"]])
+            for k in scores["estimator"][0]._saved_preds.keys()
+        }
         metrics = {
             metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring.keys()
         }
@@ -120,6 +155,8 @@ class SklearnTrainable(Trainable):
         gc.collect()
 
         ret = {}
+        store = ray.get_actor("fold_predictions_store")
+        store.put.remote(self.trial_id, combined_predictions)
 
         test_metrics = None
         if self.X_test_ is not None and not (prune_attr and prune_attr < 1.0):

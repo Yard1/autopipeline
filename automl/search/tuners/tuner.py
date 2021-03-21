@@ -1,9 +1,11 @@
+from time import sleep
 import numpy as np
 import pandas as pd
 
 import gc
 from abc import ABC
 
+import ray
 from ray import tune
 
 from sklearn.model_selection import cross_validate
@@ -13,6 +15,7 @@ from sklearn.metrics import matthews_corrcoef, roc_auc_score, make_scorer
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 
+from .trainable import SklearnTrainable, RayStore
 from .utils import get_all_tunable_params
 from ..utils import ray_context
 from ...components import Component, ComponentConfig
@@ -170,6 +173,8 @@ class RayTuneTuner(Tuner):
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
             "resources_per_trial": {"cpu": 1},
+            "run_or_experiment": SklearnTrainable,
+            "stop":  {"training_iteration": 1}
         }
         super().__init__(
             problem_type=problem_type,
@@ -224,50 +229,6 @@ class RayTuneTuner(Tuner):
         if self._cache:
             logger.info(f"Cache dir set as '{self._cache}'")
 
-    def _trial_with_cv(self, config, checkpoint_dir=None):
-        estimator = self.pipeline_blueprint(random_state=self.random_state)
-
-        estimator.set_params(**config_called)
-        memory = dynamic_memory_factory(self._cache)
-        estimator.set_params(memory=memory)
-
-        for idx, fraction in enumerate(self.early_stopping_fractions_):
-            if len(self.early_stopping_fractions_) > 1 and fraction < 1.0:
-                subsample_cv = _SubsampleMetaSplitter(
-                    base_cv=self.cv,
-                    fraction=fraction,
-                    subsample_test=True,
-                    random_state=self.random_state,
-                )
-            else:
-                subsample_cv = self.cv
-
-            scores = cross_validate(
-                estimator,
-                self.X_,
-                self.y_,
-                cv=subsample_cv,
-                groups=self.groups_,
-                error_score="raise",
-                scoring=self.scoring_dict,
-                # fit_params=self.fit_params,
-                # groups=self.groups,
-                # return_train_score=self.return_train_score,
-                # scoring=self.scoring,
-            )
-            metrics = {
-                metric: np.mean(scores[f"test_{metric}"])
-                for metric in self.scoring_dict.keys()
-            }
-            gc.collect()
-
-            tune.report(
-                done=idx + 1 >= len(self.early_stopping_fractions_),
-                mean_validation_score=np.mean(scores[f"test_{self.target_metric}"]),
-                # dataset_fraction=fraction, # TODO reenable
-                **metrics,
-            )
-
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         if self._cache:
@@ -307,7 +268,14 @@ class RayTuneTuner(Tuner):
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
+            store = RayStore.options(name="fold_predictions_store").remote()
             self.analysis_ = tune.run(**tune_kwargs)
+            self.fold_predictions_ = {}
+            fold_predictions = ray.get(store.get_all_refs.remote())
+            for i, key in enumerate(self.analysis_.results.keys()):
+                self.fold_predictions_[key] = fold_predictions[i]
+            del store
+            gc.collect()
 
     def _search(self, X, y, X_test=None, y_test=None, groups=None):
         self._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
