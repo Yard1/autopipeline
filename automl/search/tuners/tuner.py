@@ -184,8 +184,8 @@ class RayTuneTuner(Tuner):
             "fail_fast": True,  # TODO change to False when ready
             "resources_per_trial": {"cpu": 1},
             "run_or_experiment": SklearnTrainable,
-            "stop":  {"training_iteration": 1},
-            #"max_failures": 2
+            "stop": {"training_iteration": 1},
+            # "max_failures": 2
         }
         super().__init__(
             problem_type=problem_type,
@@ -254,26 +254,45 @@ class RayTuneTuner(Tuner):
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
-            fold_predictions_store = RayStore.options(name="fold_predictions_store").remote()
-            estimator_store = RayStore.options(name="estimator_store").remote()
+            object_store = RayStore.options(
+                name="object_store"
+            ).remote()
 
             self.analysis_ = tune.run(**tune_kwargs)
 
+            gc.collect()
+
             self.fold_predictions_ = {}
             self.fitted_estimators_ = {}
-            trial_ids = ray.get(fold_predictions_store.get_all_keys.remote())
-            fold_predictions = ray.get(fold_predictions_store.get_all_refs.remote())
+
+            print("getting estimators from ray object store")
+            trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
+            fitted_estimators = [
+                RayStore.decompress(
+                    ray.get(object_store.get.remote(key, "fitted_estimators", pop=True, decompress=False))
+                )
+                for key in trial_ids
+            ]
+            self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
+
+            print("getting fold predictions from ray object store")
+            trial_ids = ray.get(object_store.get_all_keys.remote("fold_predictions"))
+            fold_predictions = [
+                RayStore.decompress(
+                    ray.get(
+                        object_store.get.remote(
+                            key, "fold_predictions", pop=True, decompress=False
+                        )
+                    )
+                )
+                for key in trial_ids
+            ]
             fold_predictions = dict(zip(trial_ids, fold_predictions))
             for key in self.analysis_.results.keys():
                 self.fold_predictions_[key] = fold_predictions.get(key, {})
 
-            del fold_predictions_store
+            del object_store
 
-            trial_ids = ray.get(estimator_store.get_all_keys.remote())
-            fitted_estimators = ray.get(estimator_store.get_all_refs.remote())
-            self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
-
-            del estimator_store
             gc.collect()
 
     def _search(self, X, y, X_test=None, y_test=None, groups=None):

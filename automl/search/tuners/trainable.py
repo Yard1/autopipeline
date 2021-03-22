@@ -6,16 +6,14 @@ from sklearn.model_selection._search_successive_halving import _SubsampleMetaSpl
 from sklearn.metrics import make_scorer
 import numpy as np
 import gc
-from pickle import PicklingError
-import warnings
-import inspect
 from copy import deepcopy
-import time
+from collections import defaultdict
 
 import ray
 import ray.exceptions
 from ray.tune import Trainable
 import ray.cloudpickle as cpickle
+import lz4.frame
 from sklearn.utils.validation import check_is_fitted
 
 from .utils import treat_config
@@ -26,20 +24,39 @@ from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 
 @ray.remote
 class RayStore(object):
+    @staticmethod
+    def compress(value, **kwargs):
+        if "compression_level" not in kwargs:
+            kwargs["compression_level"] = 9
+        return lz4.frame.compress(cpickle.dumps(value), **kwargs)
+
+    @staticmethod
+    def decompress(value):
+        return cpickle.loads(lz4.frame.decompress(value))
+
     def __init__(self) -> None:
-        self.values = {}
+        self.values = defaultdict(dict)
 
-    def get(self, key):
-        return self.values[key]
+    def get(self, key, store_name, pop=False, decompress=True):
+        if pop:
+            v = self.values[store_name].pop(key)
+        else:
+            v = self.values[store_name][key]
+        gc.collect()
+        if not decompress:
+            return v
+        return RayStore.decompress(v)
 
-    def put(self, key, value):
-        self.values[key] = value
+    def put(self, key, store_name, value):
+        self.values[store_name][key] = RayStore.compress(value)
 
-    def get_all_keys(self) -> list:
-        return list(self.values.keys())
+    def get_all_keys(self, store_name) -> list:
+        return list(self.values[store_name].keys())
 
-    def get_all_refs(self) -> list:
-        return list(self.values.values())
+    def get_all_refs(self, store_name, pop=False) -> list:
+        r = [self.get(key, store_name, pop=pop) for key in self.get_all_keys(store_name)]
+        gc.collect()
+        return r
 
 
 class SklearnTrainable(Trainable):
@@ -53,6 +70,10 @@ class SklearnTrainable(Trainable):
     def setup(self, config, **params):
         # forward-compatbility
         self._setup(config, **params)
+
+    def stop(self):
+        super().stop()
+        ray.actor.exit_actor()
 
     def _setup(self, config, **params):
         """Sets up Trainable attributes during initialization.
@@ -112,7 +133,9 @@ class SklearnTrainable(Trainable):
 
     # TODO move this outside
     @staticmethod
-    def score_test(estimator, X, y, X_test, y_test, scoring, refit=True, error_score=np.nan):
+    def score_test(
+        estimator, X, y, X_test, y_test, scoring, refit=True, error_score=np.nan
+    ):
         try:
             check_is_fitted(estimator)
         except:
@@ -164,6 +187,7 @@ class SklearnTrainable(Trainable):
 
         estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
         scoring_with_dummies = self._make_scoring_dict()
+        print(f"doing cv on {estimator_subclassed.steps[-1][1]}")
         scores = cross_validate(
             estimator_subclassed,
             self.X_,
@@ -177,6 +201,7 @@ class SklearnTrainable(Trainable):
             fit_params=self.fit_params,
             # return_train_score=self.return_train_score,
         )
+        print("cv done")
 
         estimator_fit_time = np.sum(
             [x.final_estimator_fit_time_ for x in scores["estimator"]]
@@ -196,16 +221,22 @@ class SklearnTrainable(Trainable):
 
         ret = {}
 
+        if self.cache_results:
+            store = ray.get_actor("object_store")
+        else:
+            store = None
+
         test_metrics = None
         fitted_estimator = None
         if self.X_test_ is not None and not is_early_stopping_on:
+            print("scoring test")
             test_metrics, fitted_estimator = SklearnTrainable.score_test(
                 estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
-            if self.cache_results:
-                store = ray.get_actor("estimator_store")
+            print("scoring test done")
+            if store is not None:
                 try:
-                    store.put.remote(self.trial_id, ray.put(fitted_estimator))
+                    store.put.remote(self.trial_id, "fitted_estimators", ray.put(fitted_estimator))
                 except ray.exceptions.ObjectStoreFullError:
                     pass
                 del fitted_estimator
@@ -213,6 +244,8 @@ class SklearnTrainable(Trainable):
         metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
             metrics["matthews_corrcoef"], metrics["roc_auc"]
         )
+
+        metrics["f2_mcc_roc_auc"] = metrics["f2_mcc_roc_auc"] if metrics["f2_mcc_roc_auc"] else 0
 
         if self.metric_name:
             ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
@@ -225,16 +258,15 @@ class SklearnTrainable(Trainable):
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
 
-        if self.cache_results:
-            store = ray.get_actor("fold_predictions_store")
+        if store is not None:
             try:
-                store.put.remote(self.trial_id, ray.put(combined_predictions))
+                store.put.remote(self.trial_id, "fold_predictions", ray.put(combined_predictions))
             except ray.exceptions.ObjectStoreFullError:
                 pass
             del combined_predictions
 
         gc.collect()
-
+        print("done")
         return ret
 
     def reset_config(self, new_config):

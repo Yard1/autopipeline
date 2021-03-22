@@ -516,14 +516,14 @@ class SharingSearchThread(SearchThread):
                     self.cost_best = self.cost_last
             self._update_speed()
 
-    def suggest(self, trial_id: str) -> Optional[Dict]:
+    def suggest(self, trial_id: str, **kwargs) -> Optional[Dict]:
         """use the suggest() of the underlying search algorithm"""
         if isinstance(self._search_alg, FLOW2):
-            config = self._search_alg.suggest(trial_id)
+            config = self._search_alg.suggest(trial_id, **kwargs)
         else:
             # config = self._search_alg.suggest(trial_id)
             try:
-                config = self._search_alg.suggest(trial_id)
+                config = self._search_alg.suggest(trial_id, **kwargs)
             except:
                 logger.warning(
                     "The global search method raises error. "
@@ -563,7 +563,7 @@ class SharingSearchThread(SearchThread):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _force_gs_after = 100
+    _force_gs_after = 40
 
     def __init__(
         self,
@@ -936,6 +936,7 @@ class ConditionalBlendSearch(BlendSearch):
                 #        trial_id, {}, error=True
                 #    )  # tell GS there is an error
                 self._use_rs = False
+                use_backup = False
                 if choice == backup:
                     # use CFO's init point
                     init_config = self._ls.init_config
@@ -943,7 +944,23 @@ class ConditionalBlendSearch(BlendSearch):
                         init_config, self._ls_bound_min, self._ls_bound_max
                     )
                     self._trial_proposed_by[trial_id] = choice
+                elif not choice:
+                    try:
+                        for _ in range(9):
+                            config = self._search_thread_pool[choice].suggest(trial_id, reask=True)
+                            print(f"{trial_id} another main choice suggestion: {config}")
+                            prune_attr = config.get(self._ls.prune_attr, None)
+                            skip = self._should_skip(choice, trial_id, config)
+                            if skip or not self._valid(config):
+                                use_backup = True
+                            else:
+                                use_backup = False
+                                break
+                    except TypeError:
+                        use_backup = True
                 else:
+                    use_backup = True
+                if use_backup:
                     config = self._search_thread_pool[backup].suggest(trial_id)
                     print(f"{trial_id} backup choice suggestion: {config}")
                     prune_attr = config.get(self._ls.prune_attr, None)
@@ -1163,12 +1180,12 @@ class BlendSearchTuner(RayTuneTuner):
         self._searcher_kwargs = {}
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        if self.early_stopping and self.X_.shape[0] > 2000:
+        if self.early_stopping and self.X_.shape[0] > 12000:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 1000 / self.X_.shape[0])
+            min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
             step = 4
 

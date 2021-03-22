@@ -17,7 +17,10 @@ def call_component_if_needed(possible_component, **kwargs):
 # TODO make this better
 def f2_mcc_roc_auc(mcc, roc_auc, beta=2):
     roc_auc = (roc_auc * 2) - 1
-    return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)
+    try:
+        return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)
+    except ZeroDivisionError:
+        return 0
 
 class ray_context:
     DEFAULT_CONFIG = {

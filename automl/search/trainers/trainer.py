@@ -60,7 +60,7 @@ class Trainer:
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
-        tuning_time: int = 10,
+        tuning_time: int = 600,
         best_percentile: int = 15,  # TODO: Move to EnsembleStrategy
         max_stacking_size: int = 10,  # TODO: Move to EnsembleStrategy
         stacking_strategy: Optional[EnsembleStrategy] = None,
@@ -167,8 +167,9 @@ class Trainer:
         trial_ids_to_remove = set()
         results = self.last_tuner_.analysis_.results
         for trial_id, result in results.items():
-            if not result.get("done", False):
+            if not result.get("done", False) or pd.isnull(result.get("mean_validation_score", None)):
                 trial_ids_to_remove.add(trial_id)
+                print(f"removing {trial_id}")
                 continue
             if "config" in result:
                 if trial_id in self.last_tuner_.fitted_estimators_:
@@ -205,9 +206,7 @@ class Trainer:
             results_df = results_df[
                 results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
             ]  # TODO make dynamic, add a warning if 100% of resource is not reached
-        percentile = np.percentile(
-            results_df["mean_validation_score"], self.best_percentile
-        )
+        percentile = self.best_percentile
 
         if self.secondary_tuner is not None:
             self._run_secondary_tuning(
@@ -426,10 +425,7 @@ class Trainer:
             if weights[idx] > 0
         ]
         weights = [weight for weight in weights if weight > 0]
-        estimators = [
-            estimator
-            for estimator in self._get_estimators_for_ensemble(trials_for_ensembling)
-        ]
+        estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
         print(f"final number of estimators: {len(estimators)}")
@@ -584,7 +580,7 @@ class Trainer:
             results_df=results_df,
             configurations_to_select=self.max_stacking_size,
             pipeline_blueprint=pipeline_blueprint,
-            percentile=percentile,
+            percentile_threshold=percentile,
         )
 
     def _select_trial_ids_for_voting(
@@ -595,7 +591,7 @@ class Trainer:
             results_df=results_df,
             configurations_to_select=self.max_voting_size,
             pipeline_blueprint=pipeline_blueprint,
-            percentile=percentile,
+            percentile_threshold=percentile,
         )
 
     def fit(self, X, y, X_test=None, y_test=None, groups=None):

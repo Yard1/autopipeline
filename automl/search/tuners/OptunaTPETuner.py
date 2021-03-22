@@ -254,7 +254,7 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         return True
 
-    def suggest(self, trial_id: str) -> Optional[Dict]:
+    def suggest(self, trial_id: str, reask: bool = False) -> Optional[Dict]:
         if not self._space:
             raise RuntimeError(
                 UNDEFINED_SEARCH_SPACE.format(
@@ -268,7 +268,7 @@ class ConditionalOptunaSearch(OptunaSearch):
                 )
             )
 
-        if trial_id not in self._ot_trials:
+        if reask or trial_id not in self._ot_trials:
             self._ot_trials[trial_id] = self._ot_study.ask()
         ot_trial = self._ot_trials[trial_id]
 
