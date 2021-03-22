@@ -139,6 +139,10 @@ class PandasStackingClassifier(StackingClassifier):
         ]
 
         if fit_final_estimator:
+            try:
+                self.final_estimator_.set_params(n_jobs=self.n_jobs)
+            except ValueError:
+                pass
             _fit_single_estimator(
                 self.final_estimator_, X_meta, y, sample_weight=sample_weight
             )

@@ -36,7 +36,7 @@ from ...components.estimators.ensemble.voting import (
     DummyClassifier,
 )
 from ...components.estimators.ensemble.des import DESSplitter, METADES, KNORAE
-from ...components.estimators.linear_model import LogisticRegression
+from ...components.estimators.linear_model import LogisticRegressionCV
 from ...problems.problem_type import ProblemType
 from ...search.tuners.trainable import SklearnTrainable
 from ...utils import validate_type
@@ -167,7 +167,9 @@ class Trainer:
         trial_ids_to_remove = set()
         results = self.last_tuner_.analysis_.results
         for trial_id, result in results.items():
-            if not result.get("done", False) or pd.isnull(result.get("mean_validation_score", None)):
+            if not result.get("done", False) or pd.isnull(
+                result.get("mean_validation_score", None)
+            ):
                 trial_ids_to_remove.add(trial_id)
                 print(f"removing {trial_id}")
                 continue
@@ -273,7 +275,13 @@ class Trainer:
         estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
-        final_estimator = final_estimator or LogisticRegression()()
+        final_estimator = (
+            final_estimator
+            or LogisticRegressionCV(
+                scoring=self.scoring_dict["matthews_corrcoef"],
+                random_state=self.random_state,
+            )()
+        )
         print(f"creating stacking classifier with {len(estimators)}")
         ensemble = PandasStackingClassifier(
             estimators=estimators,
@@ -462,7 +470,14 @@ class Trainer:
             return
         print("scoring ensemble")
         self.ensemble_results_[-1][str(ensemble)], _ = SklearnTrainable.score_test(
-            ensemble, X, y, X_test, y_test, self.scoring_dict, refit=False, error_score="raise"
+            ensemble,
+            X,
+            y,
+            X_test,
+            y_test,
+            self.scoring_dict,
+            refit=False,
+            error_score="raise",
         )
 
     def _create_dynamic_ensemble(self, X, y):

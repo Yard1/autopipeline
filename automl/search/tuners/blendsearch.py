@@ -878,10 +878,10 @@ class ConditionalBlendSearch(BlendSearch):
                 elif value < admissible_min[key]:
                     admissible_min[key] = value
 
-    def _valid(self, config: Dict) -> bool:
+    def _valid(self, config: Dict, step_multiplier=1) -> bool:
         """config validator"""
         normalized_config = self._ls.normalize(config)
-        step_size = self._ls.STEPSIZE  # * 4
+        step_size = self._ls.STEPSIZE * step_multiplier
         for key in self._gs_admissible_min:
             if key in config:
                 value = normalized_config[key]
@@ -956,7 +956,7 @@ class ConditionalBlendSearch(BlendSearch):
                     self._trial_proposed_by[trial_id] = choice
                 elif not choice:
                     try:
-                        for _ in range(99):
+                        for i in range(99):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
@@ -965,7 +965,7 @@ class ConditionalBlendSearch(BlendSearch):
                             )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
-                            if skip or not self._valid(config):
+                            if skip or not self._valid(config, max(i/4 if i > 4 else 1, 4)):
                                 use_backup = True
                             else:
                                 use_backup = False
