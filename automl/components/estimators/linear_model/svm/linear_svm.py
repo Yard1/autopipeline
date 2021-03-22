@@ -101,7 +101,7 @@ class LinearSVC(SVM):
         "class_weight": None,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 20000,
+        "max_iter": 1000,
     }
 
     _default_tuning_grid = {
@@ -160,7 +160,7 @@ class LinearSVR(SVM):
         "intercept_scaling": 1,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 20000,
+        "max_iter": 1000,
     }
 
     _default_tuning_grid = {

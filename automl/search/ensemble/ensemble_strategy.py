@@ -89,7 +89,6 @@ class RoundRobinEstimator(EnsembleStrategy):
         iter = True
         while iter and any(len(group) > idx for group in group_dfs):  # TODO optimize
             for group in group_dfs:
-                print(f"round robin group len: {len(group)}")
                 if len(selected_trial_ids) >= configurations_to_select:
                     iter = False
                     break
@@ -97,7 +96,6 @@ class RoundRobinEstimator(EnsembleStrategy):
                     continue
                 selected_trial_ids.append(group.iloc[idx].name)
             idx += 1
-        print(f"round robin trial_ids: {selected_trial_ids}")
         return selected_trial_ids
 
 

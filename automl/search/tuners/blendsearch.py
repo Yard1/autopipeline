@@ -23,6 +23,7 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
 """
+import pandas as pd
 from copy import deepcopy
 from typing import Dict, Optional, List, Tuple
 import numpy as np
@@ -431,6 +432,8 @@ class SharingSearchThread(SearchThread):
         print(f"on_trial_complete {trial_id} {self._search_alg}")
         if not self._search_alg:
             return
+        if pd.isnull(result["mean_validation_score"]):
+            error = True
         if not hasattr(self._search_alg, "_ot_trials"):
             # optuna doesn't handle error
             if self._is_ls or not self._init_config:
@@ -500,7 +503,7 @@ class SharingSearchThread(SearchThread):
                     f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
                 )
 
-        if result:
+        if result and not error:
             if self.cost_attr in result:
                 self.cost_last = result[self.cost_attr]
                 self.cost_total += self.cost_last
@@ -656,6 +659,12 @@ class ConditionalBlendSearch(BlendSearch):
         init_config = self._get_all_default_values(
             space, get_categorical=False, use_extended=use_extended
         )
+        # TODO make it a part of components
+        init_config = {
+            k: v
+            for k, v in init_config.items()
+            if k.endswith("leaves") or k.endswith("depth") or k.endswith("n_estimators")
+        }
         space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
         space = get_tune_distributions(space)
         const_values = {
@@ -680,7 +689,7 @@ class ConditionalBlendSearch(BlendSearch):
             min_resource,
             max_resource,
             reduction_factor,
-            seed,
+            seed=seed,
             cost_attr=self._time_attr,
         )
         self._resources_per_trial = resources_per_trial
@@ -872,17 +881,18 @@ class ConditionalBlendSearch(BlendSearch):
     def _valid(self, config: Dict) -> bool:
         """config validator"""
         normalized_config = self._ls.normalize(config)
+        step_size = self._ls.STEPSIZE  # * 4
         for key in self._gs_admissible_min:
             if key in config:
                 value = normalized_config[key]
                 # logger.info(
                 #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
                 if (
-                    value + self._ls.STEPSIZE < self._gs_admissible_min[key]
-                    or value > self._gs_admissible_max[key] + self._ls.STEPSIZE
+                    value + step_size < self._gs_admissible_min[key]
+                    or value > self._gs_admissible_max[key] + step_size
                 ):
                     print(
-                        f"normalized key {key} is invalid due to {value+ self._ls.STEPSIZE} < {self._gs_admissible_min[key]} or {value} > {self._gs_admissible_max[key] + self._ls.STEPSIZE}"
+                        f"normalized key {key} is invalid due to {value+ step_size} < {self._gs_admissible_min[key]} or {value} > {self._gs_admissible_max[key] + step_size}"
                     )
                     return False
         return True
@@ -946,9 +956,13 @@ class ConditionalBlendSearch(BlendSearch):
                     self._trial_proposed_by[trial_id] = choice
                 elif not choice:
                     try:
-                        for _ in range(9):
-                            config = self._search_thread_pool[choice].suggest(trial_id, reask=True)
-                            print(f"{trial_id} another main choice suggestion: {config}")
+                        for _ in range(99):
+                            config = self._search_thread_pool[choice].suggest(
+                                trial_id, reask=True
+                            )
+                            print(
+                                f"{trial_id} another main choice suggestion: {config}"
+                            )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
                             if skip or not self._valid(config):
@@ -1180,14 +1194,13 @@ class BlendSearchTuner(RayTuneTuner):
         self._searcher_kwargs = {}
 
     def _set_up_early_stopping(self, X, y, groups=None):
-        if self.early_stopping and self.X_.shape[0] > 12000:
+        step = 4
+        if self.early_stopping and self.X_.shape[0] > 20001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
             min_dist = max(min_dist, 10000 / self.X_.shape[0])
-
-            step = 4
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = min_dist

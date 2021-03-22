@@ -42,7 +42,6 @@ class RayStore(object):
             v = self.values[store_name].pop(key)
         else:
             v = self.values[store_name][key]
-        gc.collect()
         if not decompress:
             return v
         return RayStore.decompress(v)
@@ -54,8 +53,9 @@ class RayStore(object):
         return list(self.values[store_name].keys())
 
     def get_all_refs(self, store_name, pop=False) -> list:
-        r = [self.get(key, store_name, pop=pop) for key in self.get_all_keys(store_name)]
-        gc.collect()
+        r = [
+            self.get(key, store_name, pop=pop) for key in self.get_all_keys(store_name)
+        ]
         return r
 
 
@@ -70,10 +70,6 @@ class SklearnTrainable(Trainable):
     def setup(self, config, **params):
         # forward-compatbility
         self._setup(config, **params)
-
-    def stop(self):
-        super().stop()
-        ray.actor.exit_actor()
 
     def _setup(self, config, **params):
         """Sets up Trainable attributes during initialization.
@@ -217,14 +213,13 @@ class SklearnTrainable(Trainable):
                 for k in scores["estimator"][0]._saved_preds.keys()
             }
 
+        metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
+            metrics["matthews_corrcoef"], metrics["roc_auc"]
+        )
+
         gc.collect()
 
         ret = {}
-
-        if self.cache_results:
-            store = ray.get_actor("object_store")
-        else:
-            store = None
 
         test_metrics = None
         fitted_estimator = None
@@ -234,18 +229,6 @@ class SklearnTrainable(Trainable):
                 estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
             print("scoring test done")
-            if store is not None:
-                try:
-                    store.put.remote(self.trial_id, "fitted_estimators", ray.put(fitted_estimator))
-                except ray.exceptions.ObjectStoreFullError:
-                    pass
-                del fitted_estimator
-
-        metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-            metrics["matthews_corrcoef"], metrics["roc_auc"]
-        )
-
-        metrics["f2_mcc_roc_auc"] = metrics["f2_mcc_roc_auc"] if metrics["f2_mcc_roc_auc"] else 0
 
         if self.metric_name:
             ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
@@ -258,12 +241,25 @@ class SklearnTrainable(Trainable):
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
 
+        if self.cache_results:
+            store = ray.get_actor("object_store")
+        else:
+            store = None
+
         if store is not None:
             try:
-                store.put.remote(self.trial_id, "fold_predictions", ray.put(combined_predictions))
+                store.put.remote(
+                    self.trial_id, "fold_predictions", ray.put(combined_predictions)
+                )
             except ray.exceptions.ObjectStoreFullError:
                 pass
-            del combined_predictions
+            if fitted_estimator is not None:
+                try:
+                    store.put.remote(
+                        self.trial_id, "fitted_estimators", ray.put(fitted_estimator)
+                    )
+                except ray.exceptions.ObjectStoreFullError:
+                    pass
 
         gc.collect()
         print("done")
