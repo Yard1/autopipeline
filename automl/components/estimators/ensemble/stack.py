@@ -1,10 +1,11 @@
 import numpy as np
 import pandas as pd
 
+import ray.exceptions
 from joblib import Parallel
 
 from sklearn.ensemble import StackingClassifier
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
 from sklearn.model_selection import cross_val_predict
@@ -13,11 +14,22 @@ from sklearn.base import is_classifier, clone
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
-from .utils import get_cv_predictions
+from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_method
+from ....utils.estimators import clone_with_n_jobs_1
 from ...preprocessing import PrepareDataFrame
 
+
+# TODO consider RFE for LogisticRegression
 class PandasStackingClassifier(StackingClassifier):
-    def fit(self, X, y, sample_weight=None, fit_final_estimator=True, predictions=None):
+    def fit(
+        self,
+        X,
+        y,
+        sample_weight=None,
+        fit_final_estimator=True,
+        refit_estimators=True,
+        predictions=None,
+    ):
         """Fit the estimators.
 
         Parameters
@@ -54,11 +66,27 @@ class PandasStackingClassifier(StackingClassifier):
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-            delayed(_fit_single_estimator)(clone(est), X, y, sample_weight)
-            for est in all_estimators
-            if est != "drop"
-        )
+        try:
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est, X, y, sample_weight, force_refit=refit_estimators
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
+        except:  # TODO is there a better way to catch exceptions here?
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est,
+                    X,
+                    y,
+                    sample_weight,
+                    cloning_function=clone_with_n_jobs_1,
+                    force_refit=refit_estimators,
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
 
         self.named_estimators_ = Bunch()
         est_fitted_idx = 0
@@ -116,6 +144,23 @@ class PandasStackingClassifier(StackingClassifier):
             )
 
         return self
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(call_method)(
+                est,
+                meth,
+                X,
+            )
+            for est, meth in zip(self.estimators_, self.stack_method_)
+            if est != 'drop'
+        )
+        predictions = list(predictions)
+
+        return self._concatenate_predictions(X, predictions)
 
     def _concatenate_predictions(self, X, predictions):
         """Concatenate the predictions of each first layer learner and

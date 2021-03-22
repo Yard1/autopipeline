@@ -53,7 +53,7 @@ class LGBMClassifier(GradientBoosterEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
+        "num_leaves": IntUniformDistribution(2, 256),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
     }
     _default_tuning_grid_extended = {
@@ -100,7 +100,7 @@ class LGBMRegressor(GradientBoosterEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "num_leaves": FunctionDistribution(get_lgbm_n_estimators),
+        "num_leaves": IntUniformDistribution(2, 256),
         "learning_rate": UniformDistribution(0.01, 1.0, log=True),
     }
     _default_tuning_grid_extended = {

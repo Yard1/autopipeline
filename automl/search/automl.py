@@ -33,6 +33,7 @@ class AutoML(BaseEstimator):
         random_state: Optional[int] = None,  # TODO: support other random states
         float_dtype: type = np.float32,
         int_dtype: Optional[type] = None,
+        trainer_config: Optional[dict] = None,
     ) -> None:
         self.problem_type = problem_type
         self.test_size = test_size
@@ -41,6 +42,11 @@ class AutoML(BaseEstimator):
         self.random_state = random_state
         self.float_dtype = float_dtype
         self.int_dtype = int_dtype
+        self.trainer_config = trainer_config or {
+            "cache": True,
+            "early_stopping": True,
+            "return_test_scores_during_tuning": True,
+        }
         super().__init__()
 
         self._validate()
@@ -51,7 +57,9 @@ class AutoML(BaseEstimator):
         validate_type(self.cv, "cv", (int, BaseCrossValidator))
         validate_type(self.test_size, "test_size", float)
         if isinstance(self.cv, int) and self.cv < 2:
-            raise ValueError(f"If cv is an int, it must be bigger than 2. Got {self.cv}.")
+            raise ValueError(
+                f"If cv is an int, it must be bigger than 2. Got {self.cv}."
+            )
         if self.test_size < 0 or self.test_size > 0.9:
             raise ValueError(f"test_size must be in range (0.0, 0.9)")
         if not is_float_dtype(self.float_dtype):
@@ -195,7 +203,10 @@ class AutoML(BaseEstimator):
             float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False
         )
         X_validator = PrepareDataFrame(
-            float_dtype=self.float_dtype, int_dtype=self.int_dtype, copy_X=False, ordinal_columns=ordinal_columns
+            float_dtype=self.float_dtype,
+            int_dtype=self.int_dtype,
+            copy_X=False,
+            ordinal_columns=ordinal_columns,
         )
 
         y = y_validator.fit_transform(y)
@@ -237,9 +248,7 @@ class AutoML(BaseEstimator):
             logger.info(
                 f"Splitting data into training and test sets ({1-(self.test_size*100)}-{(self.test_size*100)})"
             )
-            X, self.X_test_, y, self.y_test_ = self._make_test_split(
-                X, y
-            )
+            X, self.X_test_, y, self.y_test_ = self._make_test_split(X, y)
 
         categorical_columns = X.dtypes.apply(lambda x: DataType.is_categorical(x))
         numeric_columns = list(categorical_columns[~categorical_columns].index)
@@ -252,10 +261,8 @@ class AutoML(BaseEstimator):
             cv=self.cv_,
             categorical_columns=categorical_columns,
             numeric_columns=numeric_columns,
-            cache=True,
-            early_stopping=True,
-            return_test_scores_during_tuning=True,
-            #cache="/home/baum/Documents/Coding/Python/automl",
+            **self.trainer_config
+            # cache="/home/baum/Documents/Coding/Python/automl",
         )
 
         self.X_ = X
@@ -263,4 +270,4 @@ class AutoML(BaseEstimator):
 
         return self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
 
-        #return X, y
+        # return X, y

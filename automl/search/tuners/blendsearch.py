@@ -1138,7 +1138,10 @@ class BlendSearchTuner(RayTuneTuner):
         cv,
         random_state,
         use_extended: bool = True,
-        num_samples: int = 1,
+        num_samples: int = -1,
+        time_budget_s: int = 600,
+        target_metric=None,
+        scoring=None,
         early_stopping: bool = True,
         cache=False,
         **tune_kwargs,
@@ -1152,10 +1155,12 @@ class BlendSearchTuner(RayTuneTuner):
             use_extended=use_extended,
             num_samples=num_samples,
             cache=cache,
+            time_budget_s=time_budget_s,
+            target_metric=target_metric,
+            scoring=scoring,
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
-        self._tune_kwargs["time_budget_s"] = 600
 
     def _set_up_early_stopping(self, X, y, groups=None):
         if self.early_stopping and self.X_.shape[0] > 2000:

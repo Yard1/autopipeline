@@ -11,9 +11,6 @@ from ray import tune
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
-from sklearn.metrics import matthews_corrcoef, roc_auc_score, make_scorer
-
-matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 
 from .trainable import SklearnTrainable, RayStore
 from .utils import get_all_tunable_params
@@ -40,12 +37,22 @@ class Tuner(ABC):
         cv,
         random_state,
         use_extended: bool = False,
+        num_samples: int = -1,
+        time_budget_s: int = 600,
+        target_metric=None,
+        scoring=None,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
         self.cv = cv
         self.random_state = random_state
         self.use_extended = use_extended
+        self.num_samples = num_samples
+        self.time_budget_s = time_budget_s
+        self.target_metric = target_metric
+        self.scoring = scoring
+        if target_metric:
+            assert target_metric in scoring
 
     def _get_single_default_hyperparams(self, components, grid):
         hyperparams = {}
@@ -155,7 +162,10 @@ class RayTuneTuner(Tuner):
         cv,
         random_state,
         use_extended: bool = False,
-        num_samples: int = 50,
+        num_samples: int = -1,
+        time_budget_s: int = 600,
+        target_metric=None,
+        scoring=None,
         cache=False,
         **tune_kwargs,
     ) -> None:
@@ -163,18 +173,19 @@ class RayTuneTuner(Tuner):
         self._set_cache()
         self.tune_kwargs = tune_kwargs
         self.num_samples = num_samples
-        self.target_metric = "matthews_corrcoef"
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
             "scheduler": None,
             "num_samples": num_samples,
+            "time_budget_s": time_budget_s,
             "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
             "resources_per_trial": {"cpu": 1},
             "run_or_experiment": SklearnTrainable,
-            "stop":  {"training_iteration": 1}
+            "stop":  {"training_iteration": 1},
+            #"max_failures": 2
         }
         super().__init__(
             problem_type=problem_type,
@@ -182,36 +193,11 @@ class RayTuneTuner(Tuner):
             cv=cv,
             random_state=random_state,
             use_extended=use_extended,
+            num_samples=num_samples,
+            time_budget_s=time_budget_s,
+            scoring=scoring,
+            target_metric=target_metric,
         )
-
-    @property
-    def scoring_dict(self):
-        # TODO fault tolerant metrics
-        if self.problem_type == ProblemType.BINARY:
-            return {
-                "accuracy": "accuracy",
-                "balanced_accuracy": "balanced_accuracy",
-                "roc_auc": "roc_auc",
-                "precision": "precision",
-                "recall": "recall",
-                "f1": "f1",
-                "matthews_corrcoef": matthews_corrcoef_scorer,
-            }
-        elif self.problem_type == ProblemType.MULTICLASS:
-            return {
-                "accuracy": "accuracy",
-                "balanced_accuracy": "balanced_accuracy",
-                "roc_auc": "roc_auc_ovr_weighted",
-                "roc_auc_unweighted": "roc_auc_ovr",
-                "precision_macro": "precision_macro",
-                "precision_weighted": "precision_weighted",
-                "recall_macro": "recall_macro",
-                "recall_weighted": "recall_weighted",
-                "f1_macro": "f1_macro",
-                "f1_weighted": "f1_weighted",
-                "matthews_corrcoef": matthews_corrcoef_scorer,
-            }
-        # TODO regression
 
     @property
     def total_num_samples(self):
@@ -253,7 +239,7 @@ class RayTuneTuner(Tuner):
             "_component_strings_": self._component_strings_,
             "groups_": self.groups_,
             "fit_params": None,
-            "scoring": self.scoring_dict,
+            "scoring": self.scoring,
             "metric_name": self.target_metric,
             "cv": self.cv,
             "n_jobs": None,
@@ -268,13 +254,26 @@ class RayTuneTuner(Tuner):
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
-            store = RayStore.options(name="fold_predictions_store").remote()
+            fold_predictions_store = RayStore.options(name="fold_predictions_store").remote()
+            estimator_store = RayStore.options(name="estimator_store").remote()
+
             self.analysis_ = tune.run(**tune_kwargs)
+
             self.fold_predictions_ = {}
-            fold_predictions = ray.get(store.get_all_refs.remote())
-            for i, key in enumerate(self.analysis_.results.keys()):
-                self.fold_predictions_[key] = fold_predictions[i]
-            del store
+            self.fitted_estimators_ = {}
+            trial_ids = ray.get(fold_predictions_store.get_all_keys.remote())
+            fold_predictions = ray.get(fold_predictions_store.get_all_refs.remote())
+            fold_predictions = dict(zip(trial_ids, fold_predictions))
+            for key in self.analysis_.results.keys():
+                self.fold_predictions_[key] = fold_predictions.get(key, {})
+
+            del fold_predictions_store
+
+            trial_ids = ray.get(estimator_store.get_all_keys.remote())
+            fitted_estimators = ray.get(estimator_store.get_all_refs.remote())
+            self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
+
+            del estimator_store
             gc.collect()
 
     def _search(self, X, y, X_test=None, y_test=None, groups=None):

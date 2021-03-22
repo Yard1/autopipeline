@@ -13,10 +13,13 @@ from copy import deepcopy
 import time
 
 import ray
+import ray.exceptions
 from ray.tune import Trainable
 import ray.cloudpickle as cpickle
+from sklearn.utils.validation import check_is_fitted
 
 from .utils import treat_config
+from ..utils import f2_mcc_roc_auc
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 
@@ -27,14 +30,17 @@ class RayStore(object):
         self.values = {}
 
     def get(self, key):
-        v = ray.put(self.values[key])
-        return v
+        return self.values[key]
 
     def put(self, key, value):
         self.values[key] = value
 
+    def get_all_keys(self) -> list:
+        return list(self.values.keys())
+
     def get_all_refs(self) -> list:
         return list(self.values.values())
+
 
 class SklearnTrainable(Trainable):
     """Class to be passed in as the first argument of tune.run to train models.
@@ -77,7 +83,7 @@ class SklearnTrainable(Trainable):
             self.cache = params.get("cache", None)
             self.X_test_ = params.get("X_test_", None)
             self.y_test_ = params.get("y_test_", None)
-            self.fit_params = params.get("fit_params", {})
+            self.cache_results = params.get("cache_results", True)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -88,15 +94,43 @@ class SklearnTrainable(Trainable):
 
     def _make_scoring_dict(self):
         scoring = self.scoring.copy()
+
         def dummy_score(y_true, y_pred):
             return 0
+
         dummy_pred_scorer = make_scorer(dummy_score, greater_is_better=True)
-        dummy_pred_proba_scorer = make_scorer(dummy_score, greater_is_better=True, needs_proba=True)
-        dummy_thereshold_scorer = make_scorer(dummy_score, greater_is_better=True, needs_threshold=True)
+        dummy_pred_proba_scorer = make_scorer(
+            dummy_score, greater_is_better=True, needs_proba=True
+        )
+        dummy_thereshold_scorer = make_scorer(
+            dummy_score, greater_is_better=True, needs_threshold=True
+        )
         scoring["dummy_pred_scorer"] = dummy_pred_scorer
         scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
         scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
         return scoring
+
+    # TODO move this outside
+    @staticmethod
+    def score_test(estimator, X, y, X_test, y_test, scoring, refit=True, error_score=np.nan):
+        try:
+            check_is_fitted(estimator)
+        except:
+            refit = True
+        if refit:
+            estimator = clone(estimator)
+            estimator.fit(X, y)
+        scores = _score(
+            estimator,
+            X_test,
+            y_test,
+            _check_multimetric_scoring(estimator, scoring),
+            error_score=error_score,
+        )
+        scores["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
+            scores["matthews_corrcoef"], scores["roc_auc"]
+        )
+        return scores, estimator
 
     def _train(self):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -113,9 +147,12 @@ class SklearnTrainable(Trainable):
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self.cache)
+
         estimator.set_params(memory=memory)
 
-        if prune_attr and prune_attr < 1.0:
+        is_early_stopping_on = prune_attr and prune_attr < 1.0
+
+        if is_early_stopping_on:
             subsample_cv = _SubsampleMetaSplitter(
                 base_cv=self.cv,
                 fraction=prune_attr,
@@ -144,42 +181,59 @@ class SklearnTrainable(Trainable):
         estimator_fit_time = np.sum(
             [x.final_estimator_fit_time_ for x in scores["estimator"]]
         )
-        combined_predictions = {
-            k: np.concatenate([x._saved_preds[k] for x in scores["estimator"]])
-            for k in scores["estimator"][0]._saved_preds.keys()
-        }
         metrics = {
             metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring.keys()
         }
 
+        combined_predictions = {}
+        if self.cache_results and not is_early_stopping_on:
+            combined_predictions = {
+                k: np.concatenate([x._saved_preds[k] for x in scores["estimator"]])
+                for k in scores["estimator"][0]._saved_preds.keys()
+            }
+
         gc.collect()
 
         ret = {}
-        store = ray.get_actor("fold_predictions_store")
-        store.put.remote(self.trial_id, combined_predictions)
 
         test_metrics = None
-        if self.X_test_ is not None and not (prune_attr and prune_attr < 1.0):
-            test_estimator = clone(estimator)
-            test_estimator.fit(self.X_, self.y_)
-            test_metrics = _score(
-                test_estimator,
-                self.X_test_,
-                self.y_test_,
-                _check_multimetric_scoring(test_estimator, self.scoring),
-                error_score=np.nan,
+        fitted_estimator = None
+        if self.X_test_ is not None and not is_early_stopping_on:
+            test_metrics, fitted_estimator = SklearnTrainable.score_test(
+                estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
+            if self.cache_results:
+                store = ray.get_actor("estimator_store")
+                try:
+                    store.put.remote(self.trial_id, ray.put(fitted_estimator))
+                except ray.exceptions.ObjectStoreFullError:
+                    pass
+                del fitted_estimator
 
-        # ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
-        ret["mean_validation_score"] = self._mean_validation_score(
+        metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
             metrics["matthews_corrcoef"], metrics["roc_auc"]
         )
+
+        if self.metric_name:
+            ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
+        else:
+            ret["mean_validation_score"] = metrics["f2_mcc_roc_auc"]
         ret["estimator_fit_time"] = estimator_fit_time
         ret["metrics"] = metrics
         if test_metrics:
             ret["test_metrics"] = test_metrics
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
+
+        if self.cache_results:
+            store = ray.get_actor("fold_predictions_store")
+            try:
+                store.put.remote(self.trial_id, ray.put(combined_predictions))
+            except ray.exceptions.ObjectStoreFullError:
+                pass
+            del combined_predictions
+
+        gc.collect()
 
         return ret
 
@@ -188,8 +242,3 @@ class SklearnTrainable(Trainable):
         self.estimator_config = new_config
         gc.collect()
         return True
-
-    # TODO move this outside
-    def _mean_validation_score(self, mcc, roc_auc, beta=2):
-        roc_auc = (roc_auc * 2) - 1
-        return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)

@@ -23,6 +23,8 @@ class RoundRobin(EnsembleStrategy):
         pipeline_blueprint,
         percentile,
     ) -> list:
+        if configurations_to_select < 0:
+            return [x for x in set(results) if x in results_df.index]
         selected_trial_ids = []
         groupby_list = [
             f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
@@ -63,6 +65,8 @@ class RoundRobinEstimator(EnsembleStrategy):
         pipeline_blueprint,
         percentile,
     ) -> list:
+        if configurations_to_select < 0:
+            return [x for x in set(results) if x in results_df.index]
         selected_trial_ids = []
         groupby_list = ["config.Estimator"]
         grouped_results_df = results_df.sort_values(

@@ -18,7 +18,7 @@ class ColumnTransformer(Flow):
     _default_parameters = {
         "remainder": "passthrough",
         "sparse_threshold": 0,
-        "n_jobs": None,
+        "n_jobs": 1,
         "transformer_weights": None,
         "verbose": False,
     }

@@ -1,5 +1,6 @@
 import ray
 import os
+import json
 from unittest.mock import patch
 import contextlib
 
@@ -13,13 +14,23 @@ def call_component_if_needed(possible_component, **kwargs):
         return possible_component
 
 
+# TODO make this better
+def f2_mcc_roc_auc(mcc, roc_auc, beta=2):
+    roc_auc = (roc_auc * 2) - 1
+    return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)
+
 class ray_context:
     DEFAULT_CONFIG = {
         "ignore_reinit_error": True,
         "configure_logging": False,
         "include_dashboard": True,
+        "_system_config": {
+            "object_spilling_config": json.dumps(
+                {"type": "filesystem", "params": {"directory_path": "/tmp/ray_spill"}},
+            )
+        }
         # "local_mode": True,
-        "num_cpus": 8,
+        # "num_cpus": 8,
     }
 
     def __init__(self, global_checkpoint_s=10, **ray_config):
@@ -42,4 +53,3 @@ class ray_context:
     def __exit__(self, type, value, traceback):
         if not self.ray_init and ray.is_initialized():
             ray.shutdown()
-
