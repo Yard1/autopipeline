@@ -18,6 +18,9 @@ from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_
 from ....utils.estimators import clone_with_n_jobs_1
 from ...preprocessing import PrepareDataFrame
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 # TODO consider RFE for LogisticRegression
 class PandasStackingClassifier(StackingClassifier):
@@ -50,7 +53,7 @@ class PandasStackingClassifier(StackingClassifier):
         -------
         self : object
         """
-        print("fitting stack", flush=True)
+        logger.debug("fitting stack", flush=True)
         self.preprocesser_ = PrepareDataFrame(find_id_column=False, copy_X=False)
         self.stacked_predictions_ = None
         self._le = LabelEncoder().fit(y)

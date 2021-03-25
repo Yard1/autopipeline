@@ -223,7 +223,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             )
 
         if trial_id in self._ot_trials:
-            print(f"{trial_id} already in ot_trials")
+            logger.debug(f"{trial_id} already in ot_trials")
             return False
 
         if not result:
@@ -273,7 +273,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         ot_trial = self._ot_trials[trial_id]
 
         params = self._get_params(ot_trial)
-        print(params)
+        logger.debug(params)
         return unflatten_dict(params)
 
 
@@ -329,7 +329,7 @@ class OptunaTPETuner(RayTuneTuner):
                 self.early_stopping_fractions_[0] = 1
         else:
             self.early_stopping_fractions_ = [1]
-        print(self.early_stopping_fractions_)
+        logger.debug(self.early_stopping_fractions_)
         self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
                 metric="mean_validation_score",
@@ -351,4 +351,4 @@ class OptunaTPETuner(RayTuneTuner):
             points_to_evaluate=self.default_grid_,
             seed=self.random_state,
         )
-        print(f"cache: {self._cache}")
+        logger.debug(f"cache: {self._cache}")

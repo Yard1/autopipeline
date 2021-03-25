@@ -4,6 +4,10 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def fit_single_estimator_if_not_fitted(
     estimator,
     X,
@@ -19,7 +23,7 @@ def fit_single_estimator_if_not_fitted(
         check_is_fitted(estimator)
         return estimator
     except (NotFittedError, AssertionError):
-        print(f"fitting estimator {estimator}", flush=True)
+        logger.debug(f"fitting estimator {estimator}", flush=True)
         return _fit_single_estimator(
             cloning_function(estimator),
             X,
@@ -54,7 +58,7 @@ def get_cv_predictions(
         if meth in prediction:
             predictions_new.append(prediction[meth])
         else:
-            print(f"doing cv for {est}.{meth}")
+            logger.debug(f"doing cv for {est}.{meth}")
             predictions_new.append(
                 cross_val_predict(
                     clone(est),

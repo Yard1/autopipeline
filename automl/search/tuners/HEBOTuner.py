@@ -84,7 +84,7 @@ class HEBOTuner(RayTuneTuner):
             ), f"Could not generate correct fractions for the given number of splits. {self.early_stopping_fractions_}"
         else:
             self.early_stopping_fractions_ = [1]
-        print(self.early_stopping_fractions_)
+        logger.debug(self.early_stopping_fractions_)
         self._tune_kwargs["scheduler"] = (
             ASHAScheduler(
                 metric="mean_validation_score",
@@ -98,9 +98,9 @@ class HEBOTuner(RayTuneTuner):
         )
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
-        print("_pre_search")
+        logger.debug("_pre_search")
         points_to_evaluate, evaluated_rewards = zip(*self.known_points)
-        print(points_to_evaluate[0])
+        logger.debug(points_to_evaluate[0])
         self.pipeline_blueprint = copy(self.pipeline_blueprint)
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         space = {}
@@ -111,7 +111,7 @@ class HEBOTuner(RayTuneTuner):
                 space[k] = CategoricalDistribution(
                     [next(x for x in v.values if str(x) == points_to_evaluate[0][k])]
                 )
-        print(space)
+        logger.debug(space)
         space, _ = get_all_tunable_params(
             self.pipeline_blueprint,
             to_str=True,
@@ -150,14 +150,14 @@ class HEBOTuner(RayTuneTuner):
         default_values = {
             k: v.default for k, v in space.items() if k not in points_to_evaluate[0]
         }
-        print(space)
+        logger.debug(space)
         space = get_tune_distributions(space)
         points_to_evaluate = [
             {**default_values, **{k: v for k, v in x.items() if k in space}}
             for x in points_to_evaluate
         ]
-        print(points_to_evaluate)
-        print(list(evaluated_rewards))
+        logger.debug(points_to_evaluate)
+        logger.debug(list(evaluated_rewards))
         self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
             HEBOSearch(
                 space=space,

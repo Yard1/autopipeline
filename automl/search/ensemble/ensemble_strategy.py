@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from abc import ABC
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EnsembleStrategy(ABC):
     def select_trial_ids(
@@ -51,10 +54,10 @@ class RoundRobin(EnsembleStrategy):
                     break
                 if len(group) <= idx:
                     continue
-                print(selected_trial_ids)
-                print(idx)
-                print(len(group))
-                print(group.iloc[idx].name)
+                logger.debug(selected_trial_ids)
+                logger.debug(idx)
+                logger.debug(len(group))
+                logger.debug(group.iloc[idx].name)
                 selected_trial_ids.append(results[group.iloc[idx].name]["config"])
             idx += 1
         return selected_trial_ids

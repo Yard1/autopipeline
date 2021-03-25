@@ -160,9 +160,9 @@ class Trainer:
         self.tuners_.append(tuner)
         gc.collect()
 
-        print("starting tuning", flush=True)
+        logger.debug("starting tuning", flush=True)
         self.last_tuner_.fit(X, y, X_test=X_test, y_test=y_test, groups=groups)
-        print("tuning complete", flush=True)
+        logger.debug("tuning complete", flush=True)
 
         trial_ids_to_remove = set()
         results = self.last_tuner_.analysis_.results
@@ -171,7 +171,7 @@ class Trainer:
                 result.get("mean_validation_score", None)
             ):
                 trial_ids_to_remove.add(trial_id)
-                print(f"removing {trial_id}")
+                logger.debug(f"removing {trial_id}")
                 continue
             if "config" in result:
                 if trial_id in self.last_tuner_.fitted_estimators_:
@@ -191,8 +191,8 @@ class Trainer:
 
     def _fit_one_layer(self, X, y, X_test=None, y_test=None, groups=None):
         self.current_stacking_level += 1
-        print(f"current_stacking_level: {self.current_stacking_level}")
-        print(X.columns)
+        logger.debug(f"current_stacking_level: {self.current_stacking_level}")
+        logger.debug(X.columns)
 
         if self.return_test_scores_during_tuning:
             X_test_tuning = X_test
@@ -238,7 +238,7 @@ class Trainer:
         )
         del self.last_tuner_.fold_predictions_
         if self.current_stacking_level >= self.stacking_level:
-            print("fitting final ensemble", flush=True)
+            logger.debug("fitting final ensemble", flush=True)
             self.final_ensemble_ = self._create_final_ensemble()
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
@@ -282,16 +282,16 @@ class Trainer:
                 random_state=self.random_state,
             )()
         )
-        print(f"creating stacking classifier with {len(estimators)}")
+        logger.debug(f"creating stacking classifier with {len(estimators)}")
         ensemble = PandasStackingClassifier(
             estimators=estimators,
             final_estimator=final_estimator,
             cv=self.cv_,
             n_jobs=None,
         )
-        print("ensemble created")
+        logger.debug("ensemble created")
         gc.collect()
-        print("fitting ensemble")
+        logger.debug("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
@@ -354,7 +354,7 @@ class Trainer:
 
         def optimize_function(weights, *args):
             weights = np.append(weights, 1 - np.sum(weights))
-            print(np.min(weights))
+            logger.debug(np.min(weights))
             ensemble.weights = weights
             scores, _ = SklearnTrainable.score_test(
                 ensemble,
@@ -366,11 +366,11 @@ class Trainer:
                 refit=False,
                 error_score="raise",
             )
-            # print(-1 * scores[target_metric])
+            # logger.debug(-1 * scores[target_metric])
             return -1 * scores[target_metric]
 
         constraints = {"type": "ineq", "fun": lambda x: 1 - np.sum(x)}
-        print(initial_guess)
+        logger.debug(initial_guess)
         bounds = tuple((0, 1) for x in initial_guess)
         res = scipy.optimize.minimize(
             optimize_function,
@@ -422,7 +422,7 @@ class Trainer:
             results, results_df, pipeline_blueprint, percentile
         )
         trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
-        print(f"creating voting classifier with {self.max_voting_size}")
+        logger.debug(f"creating voting classifier with {self.max_voting_size}")
         weights = [
             max(0, (trial["metrics"]["roc_auc"] - 0.5) * 2)
             for trial in trials_for_ensembling
@@ -436,16 +436,16 @@ class Trainer:
         estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
-        print(f"final number of estimators: {len(estimators)}")
+        logger.debug(f"final number of estimators: {len(estimators)}")
         ensemble = PandasVotingClassifier(
             estimators=estimators,
             voting="soft",
             n_jobs=None,
             weights=weights,
         )
-        print("ensemble created")
+        logger.debug("ensemble created")
         gc.collect()
-        print("fitting ensemble")
+        logger.debug("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
@@ -468,7 +468,7 @@ class Trainer:
     def _score_ensemble(self, ensemble, X, y, X_test=None, y_test=None):
         if X_test is None:
             return
-        print("scoring ensemble")
+        logger.debug("scoring ensemble")
         self.ensemble_results_[-1][str(ensemble)], _ = SklearnTrainable.score_test(
             ensemble,
             X,
@@ -530,7 +530,7 @@ class Trainer:
                     for k, v in self.all_results_[-1].items()
                     if k in group_trial_ids
                 ]
-                print(known_points[0])
+                logger.debug(known_points[0])
                 self.secondary_tuners_[self.current_stacking_level].append(
                     self.secondary_tuner(
                         problem_type=self.problem_type,

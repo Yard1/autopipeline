@@ -21,6 +21,9 @@ from ..utils import f2_mcc_roc_auc
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 @ray.remote
 class RayStore(object):
@@ -82,7 +85,7 @@ class SklearnTrainable(Trainable):
                 stopping if it is set to true.
 
         """
-        print("setup")
+        logger.debug("setup")
         if params:
             self.X_ = params["X_"]
             self.y_ = params["y_"]
@@ -106,7 +109,7 @@ class SklearnTrainable(Trainable):
 
     def step(self):
         # forward-compatbility
-        print("training")
+        logger.debug("training")
         return self._train()
 
     def _make_scoring_dict(self):
@@ -162,7 +165,7 @@ class SklearnTrainable(Trainable):
             prune_attr = config_called.pop(self.prune_attr, None)
         else:
             prune_attr = None
-        print(f"trial prune_attr: {prune_attr}")
+        logger.debug(f"trial prune_attr: {prune_attr}")
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self.cache)
@@ -183,7 +186,7 @@ class SklearnTrainable(Trainable):
 
         estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
         scoring_with_dummies = self._make_scoring_dict()
-        print(f"doing cv on {estimator_subclassed.steps[-1][1]}")
+        logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
         scores = cross_validate(
             estimator_subclassed,
             self.X_,
@@ -197,7 +200,7 @@ class SklearnTrainable(Trainable):
             fit_params=self.fit_params,
             # return_train_score=self.return_train_score,
         )
-        print("cv done")
+        logger.debug("cv done")
 
         estimator_fit_time = np.sum(
             [x.final_estimator_fit_time_ for x in scores["estimator"]]
@@ -224,11 +227,11 @@ class SklearnTrainable(Trainable):
         test_metrics = None
         fitted_estimator = None
         if self.X_test_ is not None and not is_early_stopping_on:
-            print("scoring test")
+            logger.debug("scoring test")
             test_metrics, fitted_estimator = SklearnTrainable.score_test(
                 estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
-            print("scoring test done")
+            logger.debug("scoring test done")
 
         if self.metric_name:
             ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
@@ -262,11 +265,11 @@ class SklearnTrainable(Trainable):
                     pass
 
         gc.collect()
-        print("done")
+        logger.debug("done")
         return ret
 
     def reset_config(self, new_config):
-        print("reset_config")
+        logger.debug("reset_config")
         self.estimator_config = new_config
         gc.collect()
         return True

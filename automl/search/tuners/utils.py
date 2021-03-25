@@ -51,7 +51,6 @@ def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
             k: [v2 for v2 in v.values if v2 in grid[k].values] if k in grid else []
             for k, v in preprocessors_grid.items()
         }
-        # print(f"{estimator}: {removed_components}")
         estimator_key = str(estimator) if to_str else estimator
         conditions_spec[estimator_name][estimator_key] = (
             {k: [str(x) for x in v] for k, v in remaining_components.items()}
