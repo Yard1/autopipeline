@@ -21,6 +21,8 @@ from ..utils import f2_mcc_roc_auc
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 
+import warnings
+
 import logging
 
 logger = logging.getLogger(__name__)

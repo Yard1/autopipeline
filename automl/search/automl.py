@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# TODO: unique ID
 class AutoML(BaseEstimator):
     def __init__(
         self,

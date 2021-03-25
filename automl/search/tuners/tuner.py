@@ -1,3 +1,8 @@
+from automl.utils.display import IPythonDisplay
+from automl.utils.tune_callbacks import BestPlotCallback
+import plotly.graph_objs as go
+
+
 from time import sleep
 import numpy as np
 import pandas as pd
@@ -23,6 +28,8 @@ from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
 from ...utils.exceptions import validate_type
 from ...utils.memory import dynamic_memory_factory
+
+import warnings
 
 import logging
 
@@ -229,7 +236,16 @@ class RayTuneTuner(Tuner):
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
+        # TODO make this better
+        display = IPythonDisplay("best_plot_display")
+        widget = go.FigureWidget()
+        widget.add_scatter(mode='lines+markers', name="Best score")
+        widget.add_scatter(mode='lines', name="Mean score")
+        display.display(widget)
+        plot_callback = BestPlotCallback(widget=widget, metric="mean_validation_score")
         tune_kwargs["num_samples"] = self.total_num_samples
+        tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
+        tune_kwargs["callbacks"].append(plot_callback)
         params = {
             "X_": self.X_,
             "y_": self.y_,
