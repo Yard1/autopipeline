@@ -1,5 +1,6 @@
 from sklearn.kernel_approximation import PolynomialCountSketch as _PolynomialCountSketch
 
+from .utils import estimate_gamma_pcs
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
@@ -50,7 +51,7 @@ class PolynomialCountSketch(SVMKernel):
     _component_level = ComponentLevel.RARE
 
     _default_tuning_grid = {
-    #    "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
+        "gamma": FunctionDistribution(estimate_gamma_pcs),
     #    "coef0": UniformDistribution(-1, 1),
         "degree": IntUniformDistribution(2, 3),
     }

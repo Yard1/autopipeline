@@ -2,7 +2,6 @@ import numpy as np
 
 from typing import Optional
 
-from ...components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
 from ...components.flow import (
@@ -76,8 +75,8 @@ def create_pipeline_blueprint(
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
-        #"BorutaSHAPClassification": BorutaSHAPClassification(),
-        #"BorutaSHAPRegression": BorutaSHAPRegression(),
+        "BorutaSHAPClassification": BorutaSHAPClassification(),
+        "BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
         "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
     }
@@ -90,6 +89,8 @@ def create_pipeline_blueprint(
         "DecisionTreeClassifier": DecisionTreeClassifier(),
         "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
+        "LinearRegression": LinearRegression(),
+        "ElasticNet": ElasticNet(),
         "LGBMClassifier": LGBMClassifier(),
         "LGBMRegressor": LGBMRegressor(),
         "RandomForestClassifier": RandomForestClassifier(),
@@ -221,5 +222,6 @@ def create_pipeline_blueprint(
         pipeline_config=config,
         current_stage=AutoMLStage.PREPROCESSING,
     )
+    # TODO: move to trainer
     pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
     return pipeline

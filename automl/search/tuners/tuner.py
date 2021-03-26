@@ -186,7 +186,7 @@ class RayTuneTuner(Tuner):
             "scheduler": None,
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
-            "verbose": 2,
+            "verbose": 1,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
             "resources_per_trial": {"cpu": 1},
@@ -239,10 +239,12 @@ class RayTuneTuner(Tuner):
         # TODO make this better
         display = IPythonDisplay("best_plot_display")
         widget = go.FigureWidget()
-        widget.add_scatter(mode='lines+markers', name="Best score")
+        widget.add_scatter(mode='lines+markers', name="Best validation score")
+        widget.add_scatter(mode='lines+markers', name="Best test score")
         widget.add_scatter(mode='lines', name="Mean score")
+        widget.add_scatter(mode='markers', name="Validation score")
         display.display(widget)
-        plot_callback = BestPlotCallback(widget=widget, metric="mean_validation_score")
+        plot_callback = BestPlotCallback(widget=widget, metric="f2_mcc_roc_auc") # TODO metric
         tune_kwargs["num_samples"] = self.total_num_samples
         tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
         tune_kwargs["callbacks"].append(plot_callback)
@@ -253,6 +255,7 @@ class RayTuneTuner(Tuner):
             "y_test_": self.y_test_,
             "pipeline_blueprint": self.pipeline_blueprint,
             "_component_strings_": self._component_strings_,
+            "problem_type": self.problem_type,
             "groups_": self.groups_,
             "fit_params": None,
             "scoring": self.scoring,

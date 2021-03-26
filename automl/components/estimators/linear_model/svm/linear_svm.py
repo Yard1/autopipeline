@@ -141,7 +141,7 @@ class LinearSVRDynamicDual(_LinearSVR):
         self.loss = loss
 
     def fit(self, X, y, sample_weight=None):
-        if self.penalty_loss == "epsilon_insensitive":
+        if self.loss == "epsilon_insensitive":
             self.dual = True
         else:
             self.dual = False

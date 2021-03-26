@@ -11,6 +11,8 @@ from collections import defaultdict
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 import scipy.optimize
+import contextlib
+import io
 
 import joblib
 import ray
@@ -30,13 +32,17 @@ from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
-from ...components.estimators.ensemble.stack import PandasStackingClassifier
+from ...components.estimators.ensemble.stack import (
+    PandasStackingClassifier,
+    PandasStackingRegressor,
+)
 from ...components.estimators.ensemble.voting import (
     PandasVotingClassifier,
     DummyClassifier,
+    PandasVotingRegressor,
 )
 from ...components.estimators.ensemble.des import DESSplitter, METADES, KNORAE
-from ...components.estimators.linear_model import LogisticRegressionCV
+from ...components.estimators.linear_model import LogisticRegressionCV, ElasticNetCV
 from ...problems.problem_type import ProblemType
 from ...search.tuners.trainable import SklearnTrainable
 from ...utils import validate_type
@@ -65,7 +71,7 @@ class Trainer:
         max_stacking_size: int = 10,  # TODO: Move to EnsembleStrategy
         stacking_strategy: Optional[EnsembleStrategy] = None,
         stacking_level: int = 0,
-        max_voting_size: int = -1,  # TODO: Move to EnsembleStrategy
+        max_voting_size: int = 100,  # TODO: Move to EnsembleStrategy
         voting_strategy: Optional[EnsembleStrategy] = None,
         return_test_scores_during_tuning: bool = True,
         early_stopping: bool = False,
@@ -129,7 +135,14 @@ class Trainer:
                 "f1_weighted": "f1_weighted",
                 "matthews_corrcoef": matthews_corrcoef_scorer,
             }
-        # TODO regression
+        elif self.problem_type == ProblemType.REGRESSION:
+            return {
+                "r2": "r2",
+                "neg_mean_absolute_error": "neg_mean_absolute_error",
+                "neg_mean_squared_error": "neg_mean_squared_error",
+                "neg_root_mean_squared_error": "neg_root_mean_squared_error",
+                "neg_median_absolute_error": "neg_median_absolute_error",
+            }
 
     def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
         validate_type(cv, "cv", (BaseCrossValidator, int, None))
@@ -268,6 +281,30 @@ class Trainer:
         """
         Creates a classic stacking ensemble
         """
+        if self.problem_type == ProblemType.REGRESSION:
+            metric = self.scoring_dict["r2"]
+            final_estimator = (
+                final_estimator
+                or ElasticNetCV(
+                    random_state=self.random_state,
+                    cv=KFold(shuffle=True, random_state=self.random_state),
+                )()
+            )
+            ensemble_class = PandasStackingRegressor
+        elif self.problem_type.is_classification():
+            metric = self.scoring_dict["matthews_corrcoef"]
+            final_estimator = (
+                final_estimator
+                or LogisticRegressionCV(
+                    scoring=metric,
+                    random_state=self.random_state,
+                    cv=StratifiedKFold(shuffle=True, random_state=self.random_state),
+                )()
+            )
+            ensemble_class = PandasStackingClassifier
+        else:
+            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+
         trial_ids_for_ensembling = self._select_trial_ids_for_stacking(
             results, results_df, pipeline_blueprint, percentile
         )
@@ -275,15 +312,8 @@ class Trainer:
         estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
-        final_estimator = (
-            final_estimator
-            or LogisticRegressionCV(
-                scoring=self.scoring_dict["matthews_corrcoef"],
-                random_state=self.random_state,
-            )()
-        )
         logger.debug(f"creating stacking classifier with {len(estimators)}")
-        ensemble = PandasStackingClassifier(
+        ensemble = ensemble_class(
             estimators=estimators,
             final_estimator=final_estimator,
             cv=self.cv_,
@@ -292,6 +322,7 @@ class Trainer:
         logger.debug("ensemble created")
         gc.collect()
         logger.debug("fitting ensemble")
+        print("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
@@ -397,7 +428,7 @@ class Trainer:
         y_test=None,
     ):
         """
-        Creates a voting ensemble using Gini weights as described in https://dmip.webs.upv.es/papers/AppliedInt.pdf
+        Creates a voting ensemble. Classification is using Gini weights as described in https://dmip.webs.upv.es/papers/AppliedInt.pdf
         @article{10.1007/s10489-012-0388-2,
         author = {Bella, Antonio and Ferri, C\`{e}sar and Hern\'{a}ndez-Orallo, Jos\'{e} and Ram\'{\i}rez-Quintana, Mar\'{\i}a Jos\'{e}},
         title = {On the Effect of Calibration in Classifier Combination},
@@ -418,15 +449,27 @@ class Trainer:
         keywords = {Classifier combination, Classifier diversity, Classifier calibration, Calibration measures, Separability measures, Probability estimation}
         }
         """
+        if self.problem_type == ProblemType.REGRESSION:
+            weight_function = lambda trial: max(
+                0, trial["metrics"]["r2"] if trial["metrics"]["r2"] > 0.5 else 0
+            )
+            ensemble_class = PandasVotingRegressor
+            ensemble_args = {}
+        elif self.problem_type.is_classification():
+            weight_function = lambda trial: max(
+                0, (trial["metrics"]["roc_auc"] - 0.5) * 2
+            )
+            ensemble_class = PandasVotingClassifier
+            ensemble_args = {"voting": "soft"}
+        else:
+            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+
         trial_ids_for_ensembling = self._select_trial_ids_for_voting(
             results, results_df, pipeline_blueprint, percentile
         )
         trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
         logger.debug(f"creating voting classifier with {self.max_voting_size}")
-        weights = [
-            max(0, (trial["metrics"]["roc_auc"] - 0.5) * 2)
-            for trial in trials_for_ensembling
-        ]
+        weights = [weight_function(trial) for trial in trials_for_ensembling]
         trials_for_ensembling = [
             results[k]
             for idx, k in enumerate(trial_ids_for_ensembling)
@@ -437,15 +480,16 @@ class Trainer:
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
         logger.debug(f"final number of estimators: {len(estimators)}")
-        ensemble = PandasVotingClassifier(
+        ensemble = ensemble_class(
             estimators=estimators,
-            voting="soft",
             n_jobs=None,
             weights=weights,
+            **ensemble_args,
         )
         logger.debug("ensemble created")
         gc.collect()
         logger.debug("fitting ensemble")
+        print("fitting ensemble")
         ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
@@ -457,19 +501,20 @@ class Trainer:
         ensemble.n_jobs = None
 
     def _get_estimators_for_ensemble(self, trials_for_ensembling):
-        return [
-            (
-                f"meta-{self.current_stacking_level}_{trial_result['trial_id']}",
-                deepcopy(trial_result["estimator"]),
-            )
-            for trial_result in trials_for_ensembling
-        ]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return [
+                (
+                    f"meta-{self.current_stacking_level}_{trial_result['trial_id']}",
+                    deepcopy(trial_result["estimator"]),
+                )
+                for trial_result in trials_for_ensembling
+            ]
 
     def _score_ensemble(self, ensemble, X, y, X_test=None, y_test=None):
         if X_test is None:
             return
         logger.debug("scoring ensemble")
-        self.ensemble_results_[-1][str(ensemble)], _ = SklearnTrainable.score_test(
+        scores, _ = SklearnTrainable.score_test(
             ensemble,
             X,
             y,
@@ -479,6 +524,11 @@ class Trainer:
             refit=False,
             error_score="raise",
         )
+        if self.problem_type.is_classification():
+            scores["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
+                scores["matthews_corrcoef"], scores["roc_auc"]
+            )
+        self.ensemble_results_[-1][str(ensemble)] = scores
 
     def _create_dynamic_ensemble(self, X, y):
         des = DESSplitter(
@@ -496,13 +546,16 @@ class Trainer:
             return next(
                 ensemble
                 for ensemble in self.ensembles_
-                if isinstance(ensemble, PandasStackingClassifier)
+                if isinstance(
+                    ensemble, (PandasStackingClassifier, PandasStackingRegressor)
+                )
             )
-        cloned_ensembles = [
-            deepcopy(ensemble)
-            for ensemble in self.ensembles_
-            if isinstance(ensemble, PandasStackingClassifier)
-        ]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            cloned_ensembles = [
+                deepcopy(ensemble)
+                for ensemble in self.ensembles_
+                if isinstance(ensemble, (PandasStackingClassifier, PandasStackingRegressor))
+            ]
         for idx in range(0, len(cloned_ensembles) - 1):
             cloned_ensembles[idx].passthrough = True
             cloned_ensembles[idx].final_estimator = cloned_ensembles[idx + 1]

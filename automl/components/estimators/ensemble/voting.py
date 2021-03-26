@@ -6,7 +6,7 @@ from joblib import Parallel
 from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
-from sklearn.ensemble import VotingClassifier
+from sklearn.ensemble import VotingClassifier, VotingRegressor
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
@@ -164,3 +164,92 @@ class PandasVotingClassifier(VotingClassifier):
             self._collect_probas(X), axis=0, weights=self._weights_not_none
         )
         return avg
+
+class PandasVotingRegressor(VotingRegressor):
+    def fit(self, X, y, sample_weight=None, refit_estimators=True):
+        """Get common fit operations."""
+        names, clfs = self._validate_estimators()
+
+        if self.weights is not None and len(self.weights) != len(self.estimators):
+            raise ValueError(
+                "Number of `estimators` and weights must be equal"
+                "; got %d weights, %d estimators"
+                % (len(self.weights), len(self.estimators))
+            )
+
+        try:
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    clf,
+                    X,
+                    y,
+                    sample_weight=sample_weight,
+                    message_clsname="Voting",
+                    message=self._log_message(names[idx], idx + 1, len(clfs)),
+                    force_refit=refit_estimators,
+                )
+                for idx, clf in enumerate(clfs)
+                if clf != "drop"
+            )
+        except (ray.exceptions.RayError):
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    clf,
+                    X,
+                    y,
+                    sample_weight=sample_weight,
+                    message_clsname="Voting",
+                    message=self._log_message(names[idx], idx + 1, len(clfs)),
+                    cloning_function=clone_with_n_jobs_1,
+                    force_refit=refit_estimators,
+                )
+                for idx, clf in enumerate(clfs)
+                if clf != "drop"
+            )
+
+        self.named_estimators_ = Bunch()
+
+        # Uses 'drop' as placeholder for dropped estimators
+        est_iter = iter(self.estimators_)
+        for name, est in self.estimators:
+            current_est = est if est == "drop" else next(est_iter)
+            self.named_estimators_[name] = current_est
+
+        return self
+
+    @property
+    def _weights_not_none(self):
+        """Get the weights of not `None` estimators."""
+        if self.weights is None:
+            return None
+        return [w for est, w in zip(self.estimators, self.weights) if est[1] != "drop"]
+
+    def predict(self, X):
+        """Predict class labels for X.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            The input samples.
+
+        Returns
+        -------
+        maj : array-like of shape (n_samples,)
+            Predicted class labels.
+        """
+        check_is_fitted(self)
+        return np.average(self._predict(X), axis=1,
+                          weights=self._weights_not_none)
+
+    def _predict(self, X):
+        """Collect results from clf.predict calls."""
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(call_method)(
+                est,
+                "predict",
+                X,
+            )
+            for est in self.estimators_
+        )
+
+        return np.asarray(predictions).T

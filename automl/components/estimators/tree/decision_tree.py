@@ -72,7 +72,6 @@ class DecisionTreeRegressor(TreeEstimator):
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
-        "class_weight": None,
         "ccp_alpha": 0.0,
     }
 

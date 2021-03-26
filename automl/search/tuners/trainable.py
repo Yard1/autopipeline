@@ -64,6 +64,7 @@ class RayStore(object):
         return r
 
 
+# TODO break this up into a class for classification and for regression
 class SklearnTrainable(Trainable):
     """Class to be passed in as the first argument of tune.run to train models.
 
@@ -93,6 +94,7 @@ class SklearnTrainable(Trainable):
             self.y_ = params["y_"]
             self.pipeline_blueprint = params["pipeline_blueprint"]
             self._component_strings_ = params["_component_strings_"]
+            self.problem_type = params["problem_type"]
             self.groups_ = params.get("groups_", None)
             self.fit_params = params.get("fit_params", None)
             self.scoring = params.get("scoring", None)
@@ -121,15 +123,16 @@ class SklearnTrainable(Trainable):
             return 0
 
         dummy_pred_scorer = make_scorer(dummy_score, greater_is_better=True)
-        dummy_pred_proba_scorer = make_scorer(
-            dummy_score, greater_is_better=True, needs_proba=True
-        )
-        dummy_thereshold_scorer = make_scorer(
-            dummy_score, greater_is_better=True, needs_threshold=True
-        )
         scoring["dummy_pred_scorer"] = dummy_pred_scorer
-        scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
-        scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
+        if self.problem_type.is_classification():
+            dummy_pred_proba_scorer = make_scorer(
+                dummy_score, greater_is_better=True, needs_proba=True
+            )
+            dummy_thereshold_scorer = make_scorer(
+                dummy_score, greater_is_better=True, needs_threshold=True
+            )
+            scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
+            scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
         return scoring
 
     # TODO move this outside
@@ -150,9 +153,6 @@ class SklearnTrainable(Trainable):
             y_test,
             _check_multimetric_scoring(estimator, scoring),
             error_score=error_score,
-        )
-        scores["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-            scores["matthews_corrcoef"], scores["roc_auc"]
         )
         return scores, estimator
 
@@ -218,9 +218,10 @@ class SklearnTrainable(Trainable):
                 for k in scores["estimator"][0]._saved_preds.keys()
             }
 
-        metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-            metrics["matthews_corrcoef"], metrics["roc_auc"]
-        )
+        if self.problem_type.is_classification():
+            metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
+                metrics["matthews_corrcoef"], metrics["roc_auc"]
+            )
 
         gc.collect()
 
@@ -233,12 +234,18 @@ class SklearnTrainable(Trainable):
             test_metrics, fitted_estimator = SklearnTrainable.score_test(
                 estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
+            if self.problem_type.is_classification():
+                test_metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
+                    test_metrics["matthews_corrcoef"], test_metrics["roc_auc"]
+                )
             logger.debug("scoring test done")
 
         if self.metric_name:
             ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
-        else:
+        elif self.problem_type.is_classification():
             ret["mean_validation_score"] = metrics["f2_mcc_roc_auc"]
+        else:
+            ret["mean_validation_score"] = metrics["r2"]
         ret["estimator_fit_time"] = estimator_fit_time
         ret["metrics"] = metrics
         if test_metrics:

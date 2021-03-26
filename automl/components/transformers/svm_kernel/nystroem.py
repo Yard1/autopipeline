@@ -1,5 +1,6 @@
 from sklearn.kernel_approximation import Nystroem
 
+from.utils import estimate_gamma_nystroem
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
@@ -29,7 +30,9 @@ class NystroemRBF(SVMKernel):
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
     _component_level = ComponentLevel.UNCOMMON
 
-    _default_tuning_grid = {"gamma": UniformDistribution(3.0517578125e-05, 8, log=True)}
+    _default_tuning_grid = {
+        "gamma": FunctionDistribution(estimate_gamma_nystroem)
+    }
 
 
 class NystroemSigmoid(SVMKernel):
@@ -48,6 +51,6 @@ class NystroemSigmoid(SVMKernel):
     _component_level = ComponentLevel.RARE
 
     _default_tuning_grid = {
-        "gamma": UniformDistribution(3.0517578125e-05, 8, log=True),
-        "coef0": UniformDistribution(-1, 1),
+        "gamma": FunctionDistribution(estimate_gamma_nystroem),
+        #"coef0": UniformDistribution(-1, 1),
     }

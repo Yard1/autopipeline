@@ -84,7 +84,6 @@ class LGBMRegressor(GradientBoosterEstimator):
         "learning_rate": 0.1,
         "n_estimators": 100,
         "subsample_for_bin": 200000,
-        "class_weight": None,
         "min_split_gain": 0,
         "min_child_weight": 1e-3,
         "min_child_samples": 20,
