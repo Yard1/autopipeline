@@ -29,6 +29,7 @@ from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
 from ...utils.string import removeprefix
+from ...utils.display import IPythonDisplay
 
 import logging
 
@@ -208,6 +209,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         trial_id: str,
         result: Optional[Dict] = None,
         error: bool = False,
+        state: TrialState = TrialState.COMPLETE,
     ):
         if not self._space:
             raise RuntimeError(
@@ -241,10 +243,11 @@ class ConditionalOptunaSearch(OptunaSearch):
         config = {k: v for k, v in config.items() if k in distributions}
         assert config
         trial = ot.trial.create_trial(
-            state=TrialState.COMPLETE,
+            state=state,
             value=result.get(self.metric, None),
             params=config,
             distributions=distributions,
+            intermediate_values={0: result.get(self.metric, None)}
         )
         self._ot_trials[trial_id] = trial
 
@@ -288,6 +291,7 @@ class OptunaTPETuner(RayTuneTuner):
         early_stopping=True,
         early_stopping_brackets=1,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
@@ -299,6 +303,7 @@ class OptunaTPETuner(RayTuneTuner):
             random_state=random_state,
             num_samples=num_samples,
             cache=cache,
+            display=display,
             **tune_kwargs,
         )
 

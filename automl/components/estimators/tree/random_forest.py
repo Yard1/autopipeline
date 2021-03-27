@@ -6,10 +6,6 @@ from sklearn.ensemble import (
     ExtraTreesClassifier as _ExtraTreesClassifier,
     ExtraTreesRegressor as _ExtraTreesRegressor,
 )
-from sklearn.ensemble._forest import (
-    ForestClassifier as _ForestClassifier,
-    ForestRegressor as _ForestRegressor,
-)
 from .tree_estimator import TreeEstimator
 from ....search.distributions import (
     CategoricalDistribution,

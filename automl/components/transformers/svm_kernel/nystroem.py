@@ -1,6 +1,6 @@
 from sklearn.kernel_approximation import Nystroem
 
-from.utils import estimate_gamma_nystroem
+from .utils import GammaMixin
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
@@ -15,11 +15,15 @@ from ....search.distributions import (
 )
 
 
+class NystroemDynamicGamma(GammaMixin, Nystroem):
+    pass
+
+
 class NystroemRBF(SVMKernel):
-    _component_class = Nystroem
+    _component_class = NystroemDynamicGamma
     _default_parameters = {
         "kernel": "rbf",
-        "gamma": 0.1,
+        "gamma": "scale",
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
@@ -31,15 +35,15 @@ class NystroemRBF(SVMKernel):
     _component_level = ComponentLevel.UNCOMMON
 
     _default_tuning_grid = {
-        "gamma": FunctionDistribution(estimate_gamma_nystroem)
+        "gamma": CategoricalDistribution(["scale", 1.0, 0.1, "auto"])
     }
 
 
 class NystroemSigmoid(SVMKernel):
-    _component_class = Nystroem
+    _component_class = NystroemDynamicGamma
     _default_parameters = {
         "kernel": "sigmoid",
-        "gamma": 0.1,
+        "gamma": "scale",
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
@@ -51,6 +55,6 @@ class NystroemSigmoid(SVMKernel):
     _component_level = ComponentLevel.RARE
 
     _default_tuning_grid = {
-        "gamma": FunctionDistribution(estimate_gamma_nystroem),
-        #"coef0": UniformDistribution(-1, 1),
+        "gamma": CategoricalDistribution(["scale", 1.0, 0.1, "auto"]),
+        # "coef0": UniformDistribution(-1, 1),
     }

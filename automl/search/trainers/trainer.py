@@ -1,3 +1,5 @@
+from sklearn.utils.validation import check_is_fitted
+from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
 from typing import Optional, Union, Tuple
 
@@ -9,6 +11,7 @@ from copy import deepcopy
 from collections import defaultdict
 
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
+from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.preprocessing import LabelEncoder
 import scipy.optimize
 import contextlib
@@ -22,7 +25,7 @@ register_ray()
 
 
 from ..ensemble import EnsembleStrategy, RoundRobin, RoundRobinEstimator
-from ..utils import ray_context, f2_mcc_roc_auc
+from ..utils import ray_context, optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
@@ -48,13 +51,16 @@ from ...search.tuners.trainable import SklearnTrainable
 from ...utils import validate_type
 from ...utils.memory import dynamic_memory_factory
 
-from sklearn.metrics import matthews_corrcoef, make_scorer
+from sklearn.metrics import matthews_corrcoef, recall_score, make_scorer
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
+specificity_scorer = make_scorer(recall_score, pos_label=0)
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+STACK_NAME = "Stack"
 
 
 class Trainer:
@@ -67,6 +73,7 @@ class Trainer:
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
         tuning_time: int = 600,
+        target_metric=None,
         best_percentile: int = 15,  # TODO: Move to EnsembleStrategy
         max_stacking_size: int = 10,  # TODO: Move to EnsembleStrategy
         stacking_strategy: Optional[EnsembleStrategy] = None,
@@ -86,6 +93,7 @@ class Trainer:
         self.level = level
         self.tuner = tuner
         self.tuning_time = tuning_time
+        self.target_metric = target_metric or self.default_metric_name
         self.random_state = random_state
         self.early_stopping = early_stopping
         self.cache = cache
@@ -99,6 +107,10 @@ class Trainer:
 
         self.secondary_tuner = None
         self.return_test_scores_during_tuning = return_test_scores_during_tuning
+
+        self._displays = {
+            "tuner_plot_display": IPythonDisplay("tuner_plot_display"),
+        }
 
     @property
     def last_tuner_(self):
@@ -118,6 +130,7 @@ class Trainer:
                 "roc_auc": "roc_auc",
                 "precision": "precision",
                 "recall": "recall",
+                "specificity": specificity_scorer,
                 "f1": "f1",
                 "matthews_corrcoef": matthews_corrcoef_scorer,
             }
@@ -144,8 +157,17 @@ class Trainer:
                 "neg_median_absolute_error": "neg_median_absolute_error",
             }
 
+    @property
+    def default_metric_name(self):
+        if self.problem_type == ProblemType.BINARY:
+            return "optimized_precision"
+        elif self.problem_type == ProblemType.MULTICLASS:
+            return "matthews_corrcoef"
+        elif self.problem_type == ProblemType.REGRESSION:
+            return "r2"
+
     def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
-        validate_type(cv, "cv", (BaseCrossValidator, int, None))
+        validate_type(cv, "cv", (BaseCrossValidator, _RepeatedSplits, int, None))
         return get_cv_for_problem_type(problem_type, n_splits=cv)
 
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
@@ -169,6 +191,8 @@ class Trainer:
             cache=self.cache,
             time_budget_s=self.tuning_time // (self.stacking_level + 1),
             scoring=self.scoring_dict,
+            target_metric=self.target_metric,
+            display=self._displays["tuner_plot_display"],
         )
         self.tuners_.append(tuner)
         gc.collect()
@@ -229,6 +253,17 @@ class Trainer:
             )
 
         self.ensemble_results_.append({})
+        self.ensembles_.append({})
+        self._create_voting_by_metric_ensemble(
+            X,
+            y,
+            results,
+            results_df,
+            percentile,
+            pipeline_blueprint,
+            X_test=X_test,
+            y_test=y_test,
+        )
         self._create_voting_ensemble(
             X,
             y,
@@ -252,7 +287,7 @@ class Trainer:
         del self.last_tuner_.fold_predictions_
         if self.current_stacking_level >= self.stacking_level:
             logger.debug("fitting final ensemble", flush=True)
-            self.final_ensemble_ = self._create_final_ensemble()
+            self.final_ensemble_ = self._create_final_stack()
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
         self.meta_columns_.extend(X_stack.columns)
@@ -281,6 +316,7 @@ class Trainer:
         """
         Creates a classic stacking ensemble
         """
+        ensemble_name = STACK_NAME
         if self.problem_type == ProblemType.REGRESSION:
             metric = self.scoring_dict["r2"]
             final_estimator = (
@@ -333,8 +369,10 @@ class Trainer:
             refit_estimators=False,
         )
         X_stack = ensemble.stacked_predictions_
-        self.ensembles_.append(ensemble)
-        self._score_ensemble(ensemble, X, y, X_test=X_test, y_test=y_test)
+        self.ensembles_[-1][ensemble_name] = ensemble
+        self._score_ensemble(
+            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
+        )
         ensemble.n_jobs = None
         if X_test is not None:
             X_test_stack = ensemble.transform(X_test)
@@ -348,11 +386,12 @@ class Trainer:
         trial_results,
         initial_guess,
         y_test,
-        target_metric="f2_mcc_roc_auc",
+        target_metric=None,
     ):
         """
         Optimize on CV predictions
         """
+        target_metric = target_metric or self.default_metric_name
         initial_guess = np.array(initial_guess)
         sum_initial_guess = np.sum(initial_guess)
         initial_guess = (initial_guess / sum_initial_guess)[:-1]
@@ -375,7 +414,7 @@ class Trainer:
         y_test = le_.transform(y_test)
         ensemble = PandasVotingClassifier(
             estimators=estimators,
-            voting="soft",
+            voting="hard",
             n_jobs=1,
             weights=initial_guess,
         )
@@ -416,7 +455,7 @@ class Trainer:
         )
         return np.append(res.x, 1 - np.sum(res.x))
 
-    def _create_voting_ensemble(
+    def _create_voting_by_metric_ensemble(
         self,
         X,
         y,
@@ -428,39 +467,33 @@ class Trainer:
         y_test=None,
     ):
         """
-        Creates a voting ensemble. Classification is using Gini weights as described in https://dmip.webs.upv.es/papers/AppliedInt.pdf
-        @article{10.1007/s10489-012-0388-2,
-        author = {Bella, Antonio and Ferri, C\`{e}sar and Hern\'{a}ndez-Orallo, Jos\'{e} and Ram\'{\i}rez-Quintana, Mar\'{\i}a Jos\'{e}},
-        title = {On the Effect of Calibration in Classifier Combination},
-        year = {2013},
-        issue_date = {June      2013},
-        publisher = {Kluwer Academic Publishers},
-        address = {USA},
-        volume = {38},
-        number = {4},
-        issn = {0924-669X},
-        url = {https://doi.org/10.1007/s10489-012-0388-2},
-        doi = {10.1007/s10489-012-0388-2},
-        abstract = {A general approach to classifier combination considers each model as a probabilistic classifier which outputs a class membership posterior probability. In this general scenario, it is not only the quality and diversity of the models which are relevant, but the level of calibration of their estimated probabilities as well. In this paper, we study the role of calibration before and after classifier combination, focusing on evaluation measures such as MSE and AUC, which better account for good probability estimation than other evaluation measures. We present a series of findings that allow us to recommend several layouts for the use of calibration in classifier combination. We also empirically analyse a new non-monotonic calibration method that obtains better results for classifier combination than other monotonic calibration methods.},
-        journal = {Applied Intelligence},
-        month = jun,
-        pages = {566–585},
-        numpages = {20},
-        keywords = {Classifier combination, Classifier diversity, Classifier calibration, Calibration measures, Separability measures, Probability estimation}
-        }
+        Creates a voting ensemble.
         """
+        ensemble_name = "VotingByMetric"
+        metric_name = self.default_metric_name
         if self.problem_type == ProblemType.REGRESSION:
-            weight_function = lambda trial: max(
-                0, trial["metrics"]["r2"] if trial["metrics"]["r2"] > 0.5 else 0
+            weight_function = (
+                lambda trial: trial["metrics"][metric_name]
+                if trial["metrics"][metric_name] > 0.5
+                else 0
             )
             ensemble_class = PandasVotingRegressor
             ensemble_args = {}
         elif self.problem_type.is_classification():
-            weight_function = lambda trial: max(
-                0, (trial["metrics"]["roc_auc"] - 0.5) * 2
-            )
+            if self.problem_type == ProblemType.BINARY:
+                weight_function = (
+                    lambda trial: trial["metrics"][metric_name]
+                    if trial["metrics"][metric_name] > 0.5
+                    else 0
+                )
+            else:
+                weight_function = (
+                    lambda trial: trial["metrics"][metric_name]
+                    if trial["metrics"][metric_name] > 0
+                    else 0
+                )
             ensemble_class = PandasVotingClassifier
-            ensemble_args = {"voting": "soft"}
+            ensemble_args = {"voting": "hard"}
         else:
             raise ValueError(f"Unknown ProblemType {self.problem_type}")
 
@@ -496,12 +529,94 @@ class Trainer:
             y,
             refit_estimators=False,
         )
-        self.ensembles_.append(ensemble)
-        self._score_ensemble(ensemble, X, y, X_test=X_test, y_test=y_test)
+        self.ensembles_[-1][ensemble_name] = ensemble
+        self._score_ensemble(
+            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
+        )
+        ensemble.n_jobs = None
+
+    def _create_voting_ensemble(
+        self,
+        X,
+        y,
+        results,
+        results_df,
+        percentile,
+        pipeline_blueprint,
+        X_test=None,
+        y_test=None,
+    ):
+        """
+        Creates a voting ensemble.
+        """
+        ensemble_name = "VotingUniform"
+        metric_name = self.default_metric_name
+        if self.problem_type == ProblemType.REGRESSION:
+            weight_function = (
+                lambda trial: 1
+                if trial["metrics"][metric_name] > 0.5
+                else 0
+            )
+            ensemble_class = PandasVotingRegressor
+            ensemble_args = {}
+        elif self.problem_type.is_classification():
+            if self.problem_type == ProblemType.BINARY:
+                weight_function = (
+                    lambda trial: 1
+                    if trial["metrics"][metric_name] > 0.5
+                    else 0
+                )
+            else:
+                weight_function = (
+                    lambda trial: 1
+                    if trial["metrics"][metric_name] > 0
+                    else 0
+                )
+            ensemble_class = PandasVotingClassifier
+            ensemble_args = {"voting": "hard"}
+        else:
+            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+
+        trial_ids_for_ensembling = self._select_trial_ids_for_voting(
+            results, results_df, pipeline_blueprint, percentile
+        )
+        trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
+        logger.debug(f"creating voting classifier with {self.max_voting_size}")
+        weights = [weight_function(trial) for trial in trials_for_ensembling]
+        trials_for_ensembling = [
+            results[k]
+            for idx, k in enumerate(trial_ids_for_ensembling)
+            if weights[idx] > 0
+        ]
+        estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
+        if not estimators:
+            raise ValueError("No estimators selected for ensembling!")
+        logger.debug(f"final number of estimators: {len(estimators)}")
+        ensemble = ensemble_class(
+            estimators=estimators,
+            n_jobs=None,
+            **ensemble_args,
+        )
+        logger.debug("ensemble created")
+        gc.collect()
+        logger.debug("fitting ensemble")
+        print("fitting ensemble")
+        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.fit(
+            X,
+            y,
+            refit_estimators=False,
+        )
+        self.ensembles_[-1][ensemble_name] = ensemble
+        self._score_ensemble(
+            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
+        )
         ensemble.n_jobs = None
 
     def _get_estimators_for_ensemble(self, trials_for_ensembling):
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
             return [
                 (
                     f"meta-{self.current_stacking_level}_{trial_result['trial_id']}",
@@ -510,27 +625,29 @@ class Trainer:
                 for trial_result in trials_for_ensembling
             ]
 
-    def _score_ensemble(self, ensemble, X, y, X_test=None, y_test=None):
+    def _score_ensemble(self, ensemble, ensemble_name, X, y, X_test=None, y_test=None):
         if X_test is None:
             return
         logger.debug("scoring ensemble")
+        scoring = self.scoring_dict
         scores, _ = SklearnTrainable.score_test(
             ensemble,
             X,
             y,
             X_test,
             y_test,
-            self.scoring_dict,
+            scoring,
             refit=False,
-            error_score="raise",
+            error_score=np.nan,
         )
-        if self.problem_type.is_classification():
-            scores["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-                scores["matthews_corrcoef"], scores["roc_auc"]
+        if self.problem_type == ProblemType.BINARY:
+            scores["optimized_precision"] = optimized_precision(
+                scores["accuracy"], scores["recall"], scores["specificity"]
             )
-        self.ensemble_results_[-1][str(ensemble)] = scores
+        self.ensemble_results_[-1][ensemble_name] = scores
 
     def _create_dynamic_ensemble(self, X, y):
+        # TODO fix
         des = DESSplitter(
             [est for name, est in self.ensembles_[-1].estimators],
             METADES(DFP=True),
@@ -540,21 +657,15 @@ class Trainer:
         des.fit(X, y)
         return des
 
-    def _create_final_ensemble(self):
+    def _create_final_stack(self):
         # TODO change isinstance
         if len(self.ensembles_) <= 1:
-            return next(
-                ensemble
-                for ensemble in self.ensembles_
-                if isinstance(
-                    ensemble, (PandasStackingClassifier, PandasStackingRegressor)
-                )
-            )
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return self.ensembles_[-1][STACK_NAME]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
             cloned_ensembles = [
-                deepcopy(ensemble)
-                for ensemble in self.ensembles_
-                if isinstance(ensemble, (PandasStackingClassifier, PandasStackingRegressor))
+                deepcopy(ensembles[STACK_NAME]) for ensembles in self.ensembles_
             ]
         for idx in range(0, len(cloned_ensembles) - 1):
             cloned_ensembles[idx].passthrough = True
@@ -662,6 +773,11 @@ class Trainer:
             percentile_threshold=percentile,
         )
 
+    def get_ensemble_by_id(self, ensemble_id):
+        check_is_fitted(self)
+        stacking_level, ensemble_name = ensemble_id.split("_")
+        return self.ensembles_[stacking_level][ensemble_name]
+
     def fit(self, X, y, X_test=None, y_test=None, groups=None):
         self.current_stacking_level = -1
 
@@ -678,8 +794,5 @@ class Trainer:
         with ray_context(
             global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ), joblib.parallel_backend("ray"):
-            return self._fit_one_layer(
-                X, y, X_test=X_test, y_test=y_test, groups=groups
-            )
-
+            self._fit_one_layer(X, y, X_test=X_test, y_test=y_test, groups=groups)
         return self

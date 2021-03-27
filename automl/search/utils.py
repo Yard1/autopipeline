@@ -1,10 +1,44 @@
 import ray
+import numpy as np
 import os
 import json
 from unittest.mock import patch
 import contextlib
+import collections
 
+from sklearn.metrics._scorer import (
+    _MultimetricScorer,
+    partial,
+    _cached_call,
+    _BaseScorer,
+)
 from ..components.component import Component
+
+
+class MultimetricScorerWithErrorScore(_MultimetricScorer):
+    def __init__(self, error_score="raise", **scorers):
+        self._error_score = error_score
+        self._scorers = scorers
+
+    def __call__(self, estimator, *args, **kwargs):
+        """Evaluate predicted target values."""
+        scores = {}
+        cache = {} if self._use_cache(estimator) else None
+        cached_call = partial(_cached_call, cache)
+
+        for name, scorer in self._scorers.items():
+            try:
+                if isinstance(scorer, _BaseScorer):
+                    score = scorer._score(cached_call, estimator, *args, **kwargs)
+                else:
+                    score = scorer(estimator, *args, **kwargs)
+            except Exception as e:
+                if self._error_score == "raise":
+                    raise e
+                else:
+                    score = self._error_score
+            scores[name] = score
+        return scores
 
 
 def call_component_if_needed(possible_component, **kwargs):
@@ -15,12 +49,29 @@ def call_component_if_needed(possible_component, **kwargs):
 
 
 # TODO make this better
-def f2_mcc_roc_auc(mcc, roc_auc, beta=2):
-    roc_auc = (roc_auc * 2) - 1
+def optimized_precision(accuracy, recall, specificity):
+    """
+    Ranawana, Romesh & Palade, Vasile. (2006). Optimized Precision - A New Measure for Classifier Performance Evaluation. 2254 - 2261. 10.1109/CEC.2006.1688586.
+    """
     try:
-        return (1 + beta) * (mcc * roc_auc) / ((beta * mcc) + roc_auc)
-    except ZeroDivisionError:
-        return 0
+        return accuracy - (np.abs(specificity - recall) / (specificity + recall))
+    except Exception:
+        return accuracy
+
+
+def flatten_iterable(x: list) -> list:
+    if isinstance(x, list):
+        return [a for i in x for a in flatten_iterable(i)]
+    else:
+        return [x]
+
+
+def get_obj_name(obj):
+    try:
+        return obj.__name__
+    except AttributeError:
+        return obj.__class__.__name__
+
 
 class ray_context:
     DEFAULT_CONFIG = {

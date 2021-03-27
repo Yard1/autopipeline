@@ -26,6 +26,8 @@ from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
 from ...utils.string import removeprefix
 from ...utils.exceptions import validate_type
+from ...utils.display import IPythonDisplay
+
 
 import logging
 
@@ -44,6 +46,7 @@ class HEBOTuner(RayTuneTuner):
         early_stopping=True,
         early_stopping_brackets=1,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         known_points=None,
         **tune_kwargs,
     ) -> None:
@@ -59,6 +62,7 @@ class HEBOTuner(RayTuneTuner):
             num_samples=num_samples,
             cache=cache,
             use_extended=use_extended,
+            display=display,
             **tune_kwargs,
         )
 

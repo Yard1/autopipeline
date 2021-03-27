@@ -1,12 +1,9 @@
-from automl.utils.display import IPythonDisplay
-from automl.utils.tune_callbacks import BestPlotCallback
+from typing import Optional
 import plotly.graph_objs as go
-
-
 from time import sleep
 import numpy as np
 import pandas as pd
-
+import random
 import gc
 from abc import ABC
 
@@ -28,6 +25,8 @@ from ...search.stage import AutoMLStage
 from ...utils.string import removesuffix
 from ...utils.exceptions import validate_type
 from ...utils.memory import dynamic_memory_factory
+from ...utils.display import IPythonDisplay
+from ...utils.tune_callbacks import BestPlotCallback
 
 import warnings
 
@@ -48,6 +47,7 @@ class Tuner(ABC):
         time_budget_s: int = 600,
         target_metric=None,
         scoring=None,
+        display: Optional[IPythonDisplay] = None,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
@@ -56,10 +56,12 @@ class Tuner(ABC):
         self.use_extended = use_extended
         self.num_samples = num_samples
         self.time_budget_s = time_budget_s
+        self.display = display or IPythonDisplay("tuner_best_plot_display")
+        # TODO reenable
+        #assert target_metric in scoring
+
         self.target_metric = target_metric
         self.scoring = scoring
-        if target_metric:
-            assert target_metric in scoring
 
     def _get_single_default_hyperparams(self, components, grid):
         hyperparams = {}
@@ -174,6 +176,7 @@ class RayTuneTuner(Tuner):
         target_metric=None,
         scoring=None,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
         self.cache = cache
@@ -204,6 +207,7 @@ class RayTuneTuner(Tuner):
             time_budget_s=time_budget_s,
             scoring=scoring,
             target_metric=target_metric,
+            display=display,
         )
 
     @property
@@ -224,8 +228,8 @@ class RayTuneTuner(Tuner):
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
-        if self._cache:
-            np.random.shuffle(self.default_grid_)
+        # this is just to ensure constant order
+        self.default_grid_.sort(key=lambda x: hash(((k,v) for k,v in x.items())))
         _, self._component_strings_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )
@@ -237,14 +241,15 @@ class RayTuneTuner(Tuner):
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         # TODO make this better
-        display = IPythonDisplay("best_plot_display")
-        widget = go.FigureWidget()
-        widget.add_scatter(mode='lines+markers', name="Best validation score")
-        widget.add_scatter(mode='lines+markers', name="Best test score")
-        widget.add_scatter(mode='lines', name="Mean score")
-        widget.add_scatter(mode='markers', name="Validation score")
-        display.display(widget)
-        plot_callback = BestPlotCallback(widget=widget, metric="f2_mcc_roc_auc") # TODO metric
+        self.widget_ = go.FigureWidget()
+        self.widget_.add_scatter(mode="lines+markers", name="Best validation score")
+        self.widget_.add_scatter(mode="lines+markers", name="Best test score")
+        self.widget_.add_scatter(mode="lines", name="Mean score")
+        self.widget_.add_scatter(mode="markers", name="Validation score")
+        self.display.display(self.widget_)
+        plot_callback = BestPlotCallback(
+            widget=self.widget_, metric=self.target_metric
+        )  # TODO metric
         tune_kwargs["num_samples"] = self.total_num_samples
         tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
         tune_kwargs["callbacks"].append(plot_callback)
@@ -273,9 +278,7 @@ class RayTuneTuner(Tuner):
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
-            object_store = RayStore.options(
-                name="object_store"
-            ).remote()
+            object_store = RayStore.options(name="object_store").remote()
 
             self.analysis_ = tune.run(**tune_kwargs)
 
@@ -288,7 +291,11 @@ class RayTuneTuner(Tuner):
             trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
             fitted_estimators = [
                 RayStore.decompress(
-                    ray.get(object_store.get.remote(key, "fitted_estimators", pop=True, decompress=False))
+                    ray.get(
+                        object_store.get.remote(
+                            key, "fitted_estimators", pop=True, decompress=False
+                        )
+                    )
                 )
                 for key in trial_ids
             ]

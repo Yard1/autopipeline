@@ -1,6 +1,6 @@
 from sklearn.kernel_approximation import PolynomialCountSketch as _PolynomialCountSketch
 
-from .utils import estimate_gamma_pcs
+from .utils import GammaMixin
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
@@ -19,7 +19,7 @@ from ....search.stage import AutoMLStage
 from ...estimators.linear_model.linear_model_estimator import LinearModelEstimator
 
 
-class PolynomialCountSketchDynamicNComponents(_PolynomialCountSketch):
+class PolynomialCountSketchDynamicNComponents(GammaMixin, _PolynomialCountSketch):
     def fit(self, X, y=None):
         n_features = X.shape[1]
         self._n_components = self.n_components
@@ -51,8 +51,8 @@ class PolynomialCountSketch(SVMKernel):
     _component_level = ComponentLevel.RARE
 
     _default_tuning_grid = {
-        "gamma": FunctionDistribution(estimate_gamma_pcs),
-    #    "coef0": UniformDistribution(-1, 1),
+        "gamma": CategoricalDistribution(["scale", 1.0, "auto"]),
+        #    "coef0": UniformDistribution(-1, 1),
         "degree": IntUniformDistribution(2, 3),
     }
 

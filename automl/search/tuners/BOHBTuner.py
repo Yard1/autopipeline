@@ -21,6 +21,7 @@ from ..distributions import CategoricalDistribution
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
+from ...utils.display import IPythonDisplay
 
 # from hpbandster.optimizers.config_generators.bohb import BOHB
 from .BOHB import BOHBConditional as BOHB
@@ -192,6 +193,7 @@ class BOHBTuner(RayTuneTuner):
         num_samples: int = 100,
         early_stopping=True,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
         assert early_stopping, "early_stopping must be True for BOHB"
@@ -203,6 +205,7 @@ class BOHBTuner(RayTuneTuner):
             random_state=random_state,
             num_samples=num_samples,
             cache=cache,
+            display=display,
             **tune_kwargs,
         )
 

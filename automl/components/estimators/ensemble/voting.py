@@ -29,6 +29,8 @@ class DummyClassifier(ClassifierMixin, BaseEstimator):
     def predict_proba(self, X):
         return self.pred_probas
 
+
+# TODO consider accumulation as in _BaseForest to avoid storing all preds
 class PandasVotingClassifier(VotingClassifier):
     def fit(self, X, y, sample_weight=None, refit_estimators=True):
         check_classification_targets(y)

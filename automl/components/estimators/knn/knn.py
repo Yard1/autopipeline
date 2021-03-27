@@ -8,6 +8,7 @@ from ....search.distributions import IntUniformDistribution, CategoricalDistribu
 
 
 # TODO: NCA
+# TODO: KNN caching
 class KNeighborsClassifier(KNNEstimator):
     _component_class = _KNeighborsClassifier
 

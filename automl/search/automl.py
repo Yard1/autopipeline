@@ -1,4 +1,6 @@
-from automl.components.component import ComponentLevel
+import itertools
+from sklearn.utils.validation import check_is_fitted
+from automl.utils.display import IPythonDisplay
 from automl.utils.logging import make_header
 from typing import Any, Dict, Optional, Union
 
@@ -9,13 +11,17 @@ from pandas.api.types import is_numeric_dtype, is_integer_dtype, is_float_dtype
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split, BaseCrossValidator
+from sklearn.model_selection._split import _RepeatedSplits
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 
 from .trainers.trainer import Trainer
 from .cv import get_cv_for_problem_type
-from ..components import DataType
+from ..components import DataType, ComponentLevel
 from ..problems import ProblemType
 from ..components import PrepareDataFrame, clean_df, LabelEncoder
 from ..utils import validate_type
+from .utils import flatten_iterable, get_obj_name
 
 import warnings
 import logging
@@ -28,10 +34,11 @@ class AutoML(BaseEstimator):
     def __init__(
         self,
         problem_type: Optional[Union[str, ProblemType]] = None,
-        test_size: float = 0.2,
+        test_size: float = 0.25,
         cv: Union[int, BaseCrossValidator] = 5,
         level: Union[str, int, ComponentLevel] = ComponentLevel.COMMON,
         random_state: Optional[int] = None,  # TODO: support other random states
+        target_metric=None,
         float_dtype: type = np.float32,
         int_dtype: Optional[type] = None,
         trainer_config: Optional[dict] = None,
@@ -42,6 +49,7 @@ class AutoML(BaseEstimator):
         self.cv = cv
         self.random_state = random_state
         self.float_dtype = float_dtype
+        self.target_metric = target_metric
         self.int_dtype = int_dtype
         self.trainer_config = trainer_config or {
             "cache": True,
@@ -50,12 +58,18 @@ class AutoML(BaseEstimator):
         }
         super().__init__()
 
+        self._displays = {
+            "results_display": IPythonDisplay("results_display"),
+        }
+
         self._validate()
 
     def _validate(self):
         validate_type(self.level, "level", (str, int, ComponentLevel))
         validate_type(self.problem_type, "problem_type", (str, ProblemType, type(None)))
-        validate_type(self.cv, "cv", (int, BaseCrossValidator))
+        validate_type(
+            self.cv, "cv", (int, BaseCrossValidator, _RepeatedSplits)
+        )  # use check_cv instead
         validate_type(self.test_size, "test_size", float)
         if isinstance(self.cv, int) and self.cv < 2:
             raise ValueError(
@@ -262,6 +276,7 @@ class AutoML(BaseEstimator):
             cv=self.cv_,
             categorical_columns=categorical_columns,
             numeric_columns=numeric_columns,
+            target_metric=self.target_metric,
             **self.trainer_config
             # cache="/home/baum/Documents/Coding/Python/automl",
         )
@@ -269,6 +284,116 @@ class AutoML(BaseEstimator):
         self.X_ = X
         self.y_ = y
 
-        return self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
+        self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
 
-        # return X, y
+        self.results_ = self._get_results()
+        self._displays["results_display"].clear_all()
+        self._displays["results_display"].display(self.results_)
+
+        return self
+
+    def _get_component_name(self, component):
+        if component == "passthrough":
+            return None
+        r = None
+        if isinstance(component, Pipeline):
+            r = [self._get_component_name(subcomponent) for name, subcomponent in component.steps]
+        elif isinstance(component, ColumnTransformer):
+            r = [self._get_component_name(subcomponent) for name, subcomponent, columns in component.transformers]
+        if r is not None:
+            r = [x for x in r if x]
+            return list(flatten_iterable(r)) if r else None
+        return get_obj_name(component)
+
+    def _get_result(self, result, stacking_level=0):
+        component_names = [self._get_component_name(component) for name, component in result['estimator'].steps[:-1]]
+        component_names = [x for x in component_names if x]
+        component_names = flatten_iterable(component_names)
+        d = {
+            "Id": result["trial_id"],
+            "Pipeline": (
+                f"{get_obj_name(result['estimator'].steps[-1][1])} w/ "
+                f"{', '.join(component_names)}"
+            ),
+        }
+
+        d.update(
+            {f"Test {key}": metric for key, metric in result["test_metrics"].items()}
+        )
+        if "metrics" in result:
+            d.update(
+                {
+                    f"Validation {key}": metric
+                    for key, metric in result["metrics"].items()
+                }
+            )
+        else:
+            d.update(
+                {
+                    f"Validation {key}": None
+                    for key, metric in result["test_metrics"].items()
+                }
+            )
+
+        d["Stacking Level"] = stacking_level
+        d["Total Time (s)"] = result["time_total_s"]
+        d["Estimator Fit Time (s)"] = result["estimator_fit_time"]
+        d["Dataset Fraction"] = result.get("dataset_fraction", 1.0)
+
+        return d
+
+    # TODO unify with above
+    def _get_ensemble_result(self, ensemble, ensemble_name, test_metrics, stacking_level=0):
+        d = {"Id": f"{stacking_level}_{ensemble_name}", "Pipeline": get_obj_name(ensemble)}
+
+        d.update(
+            {f"Test {key}": metric for key, metric in test_metrics.items()}
+        )
+        d.update(
+            {
+                f"Validation {key}": None
+                for key, metric in test_metrics.items()
+            }
+        )
+
+        d["Stacking Level"] = stacking_level
+        d["Total Time (s)"] = None
+        d["Estimator Fit Time (s)"] = None
+        d["Dataset Fraction"] = 1.0
+
+        return d
+
+    def _get_results(self, show_full_trials_only=True):
+        check_is_fitted(self)
+        all_results = []
+        for stacking_level, results in enumerate(self.trainer_.all_results_):
+            all_results.extend(
+                [
+                    self._get_result(result, stacking_level)
+                    for trial_id, result in results.items()
+                    if result.get("dataset_fraction", 1.0) >= 1.0
+                ]
+            )
+        for stacking_level, ensembles in enumerate(self.trainer_.ensembles_):
+            all_results.extend(
+                [
+                    self._get_ensemble_result(
+                        ensemble,
+                        ensemble_name,
+                        self.trainer_.ensemble_results_[stacking_level][ensemble_name],
+                        stacking_level,
+                    )
+                    for ensemble_name, ensemble in ensembles.items()
+                ]
+            )
+
+        metric_to_sort_by = (
+            self.target_metric or "optimized_precision"
+            if self.problem_type_.is_classification()
+            else "r2"
+        )
+        df = pd.DataFrame(all_results).set_index("Id", drop=True).sort_values(
+            by=[f"Test {metric_to_sort_by}", f"Validation {metric_to_sort_by}"],
+            ascending=False,
+        )
+        return df

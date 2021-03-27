@@ -20,7 +20,7 @@ class BestPlotCallback(Callback):
 
     def on_trial_result(self, iteration: int, trials, trial, result, **info):
         trial_score = None
-        text = result["trial_id"]
+        text = f"{result['trial_id']}, dataset_fraction: {result.get('dataset_fraction', 1.0)}"
         if result:
             trial_score = result["metrics"][self.metric]
             if "test_metrics" in result:
@@ -46,13 +46,18 @@ class BestPlotCallback(Callback):
             self.best_results_text.append(self.best_results_text[-1])
 
         if trial_test_score is not None and (
-            not self.best_results_test or self.best_results_test[-1] < trial_test_score
+            not self.best_results_test
+            or self.best_results_test[-1] is None
+            or self.best_results_test[-1] < trial_test_score
         ):
             self.best_results_test.append(trial_test_score)
             self.best_results_test_text.append(text)
         elif self.best_results_test:
             self.best_results_test.append(self.best_results_test[-1])
             self.best_results_test_text.append(self.best_results_test_text[-1])
+        else:
+            self.best_results_test.append(None)
+            self.best_results_test_text.append("")
 
         if not self.mean:
             self.mean.append(trial_score)
@@ -70,15 +75,29 @@ class BestPlotCallback(Callback):
         self.widget.layout.xaxis.title = "Iterations"
         self.widget.layout.yaxis.title = self.metric
 
-        lower_range_base = min(
-            (self.best_results[0], self.best_results_test[0])
-        )
-        upper_range_base = max(
-            (
-                self.best_results[-1],
-                self.best_results_test[-1] if self.best_results_test else -np.inf,
+        try:
+            lower_range_base = min(
+                (
+                    self.best_results[0],
+                    self.best_results_test[0]
+                    if self.best_results_test[0] is not None
+                    else np.inf,
+                )
             )
-        )
+            upper_range_base = max(
+                (
+                    self.best_results[-1],
+                    self.best_results_test[-1]
+                    if (
+                        self.best_results_test
+                        and self.best_results_test[-1] is not None
+                    )
+                    else -np.inf,
+                )
+            )
+        except IndexError:
+            lower_range_base = 0
+            upper_range_base = 1
         self.widget.layout.yaxis.range = [
             lower_range_base - abs(0.05 * lower_range_base),
             upper_range_base + abs(0.05 * upper_range_base),

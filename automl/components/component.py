@@ -105,6 +105,10 @@ class Component(ABC):
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
         return f"{self.__class__.__name__}({', '.join(params)})"
 
+    @property
+    def short_name(self):
+        return self.__class__.__name__
+
     def __hash__(self) -> int:
         return hash(self.__repr__())
 

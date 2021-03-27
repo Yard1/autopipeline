@@ -55,7 +55,7 @@ class LogisticRegressionCV(LinearModelEstimator):
         "multi_class": "auto",
         "verbose": 0,
         "n_jobs": None,
-        "l1_ratios": np.linspace(0, 1, num=11),
+        "l1_ratios": [0.1, 0.5, 0.7, 0.9, 0.95, 0.99, 1],
         "refit": True,
     }
 

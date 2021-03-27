@@ -1,3 +1,4 @@
+from automl.problems.problem_type import ProblemType
 from sklearn.base import clone
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._validation import _score, _check_multimetric_scoring
@@ -14,18 +15,17 @@ import ray.exceptions
 from ray.tune import Trainable
 import ray.cloudpickle as cpickle
 import lz4.frame
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import check_is_fitted, NotFittedError
 
 from .utils import treat_config
-from ..utils import f2_mcc_roc_auc
+from ..utils import optimized_precision, MultimetricScorerWithErrorScore
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
-
-import warnings
 
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 @ray.remote
 class RayStore(object):
@@ -98,7 +98,7 @@ class SklearnTrainable(Trainable):
             self.groups_ = params.get("groups_", None)
             self.fit_params = params.get("fit_params", None)
             self.scoring = params.get("scoring", None)
-            self.metric_name = params.get("metric_name", "roc_auc")
+            self.metric_name = params["metric_name"]
             self.cv = deepcopy(params.get("cv", 5))
             self.n_jobs = params.get("n_jobs", None)
             self.random_state = deepcopy(params.get("random_state", None))
@@ -142,17 +142,20 @@ class SklearnTrainable(Trainable):
     ):
         try:
             check_is_fitted(estimator)
-        except:
+        except NotFittedError:
             refit = True
         if refit:
             estimator = clone(estimator)
             estimator.fit(X, y)
+        scoring = MultimetricScorerWithErrorScore(
+            error_score=error_score, **_check_multimetric_scoring(estimator, scoring)
+        )
         scores = _score(
             estimator,
             X_test,
             y_test,
-            _check_multimetric_scoring(estimator, scoring),
-            error_score=error_score,
+            scoring,
+            error_score="raise",
         )
         return scores, estimator
 
@@ -218,9 +221,9 @@ class SklearnTrainable(Trainable):
                 for k in scores["estimator"][0]._saved_preds.keys()
             }
 
-        if self.problem_type.is_classification():
-            metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-                metrics["matthews_corrcoef"], metrics["roc_auc"]
+        if self.problem_type == ProblemType.BINARY:
+            metrics["optimized_precision"] = optimized_precision(
+                metrics["accuracy"], metrics["recall"], metrics["specificity"]
             )
 
         gc.collect()
@@ -234,18 +237,15 @@ class SklearnTrainable(Trainable):
             test_metrics, fitted_estimator = SklearnTrainable.score_test(
                 estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
             )
-            if self.problem_type.is_classification():
-                test_metrics["f2_mcc_roc_auc"] = f2_mcc_roc_auc(
-                    test_metrics["matthews_corrcoef"], test_metrics["roc_auc"]
+            if self.problem_type == ProblemType.BINARY:
+                test_metrics["optimized_precision"] = optimized_precision(
+                    test_metrics["accuracy"],
+                    test_metrics["recall"],
+                    test_metrics["specificity"],
                 )
             logger.debug("scoring test done")
 
-        if self.metric_name:
-            ret["mean_validation_score"] = np.mean(scores[f"test_{self.metric_name}"])
-        elif self.problem_type.is_classification():
-            ret["mean_validation_score"] = metrics["f2_mcc_roc_auc"]
-        else:
-            ret["mean_validation_score"] = metrics["r2"]
+        ret["mean_validation_score"] = metrics[self.metric_name]
         ret["estimator_fit_time"] = estimator_fit_time
         ret["metrics"] = metrics
         if test_metrics:

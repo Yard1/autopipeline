@@ -57,7 +57,7 @@ from ray.tune.suggest.suggestion import (
 from ray.tune.utils.util import unflatten_dict
 
 from .trainable import SklearnTrainable
-from .OptunaTPETuner import ConditionalOptunaSearch
+from .OptunaTPETuner import ConditionalOptunaSearch, TrialState
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner
@@ -65,6 +65,7 @@ from ..utils import call_component_if_needed
 from ...problems import ProblemType
 from ...components import Component
 from ...utils.memory import dynamic_memory_factory
+from ...utils.display import IPythonDisplay
 
 GlobalSearch = ConditionalOptunaSearch
 
@@ -426,7 +427,11 @@ class SharingSearchThread(SearchThread):
         self.max_prune_attr = max_prune_attr
 
     def on_trial_complete(
-        self, trial_id: str, result: Optional[Dict] = None, error: bool = False
+        self,
+        trial_id: str,
+        result: Optional[Dict] = None,
+        error: bool = False,
+        thread_created: bool = True,
     ):
         """update the statistics of the thread"""
         logger.debug(f"on_trial_complete {trial_id} {self._search_alg}")
@@ -457,12 +462,13 @@ class SharingSearchThread(SearchThread):
             logger.debug(
                 f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
             )
+            max_prune_attr_reached = (
+                self.prune_attr not in result
+                or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
+            )
             try:
                 if trial_id in self._search_alg._ot_trials:
-                    if (
-                        self.prune_attr not in result
-                        or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
-                    ):
+                    if max_prune_attr_reached:
                         logger.debug("adding trial result to optuna")
                         self._search_alg.on_trial_complete(
                             trial_id,
@@ -483,10 +489,7 @@ class SharingSearchThread(SearchThread):
                                 keys_to_keep=self._search_alg._space,
                             ),
                         )
-                elif (
-                    self.prune_attr not in result
-                    or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
-                ):
+                elif max_prune_attr_reached or not thread_created:
                     logger.debug("adding ls result to optuna")
                     return_val = self._search_alg.add_evaluated_trial(
                         trial_id,
@@ -496,10 +499,16 @@ class SharingSearchThread(SearchThread):
                             prefix="config/",
                             keys_to_keep=self._search_alg._space,
                         ),
+                        state=TrialState.COMPLETE
+                        if max_prune_attr_reached
+                        else TrialState.PRUNED,
                     )
                     assert return_val
-            except:
+            except Exception as e:
                 logger.debug(
+                    f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
+                )
+                print(
                     f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
                 )
 
@@ -809,12 +818,13 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
         thread_id = self._trial_proposed_by.get(trial_id)
+        create_condition = result and not thread_id and self._create_condition(result)
         if thread_id in self._search_thread_pool:
             self._search_thread_pool[thread_id].on_trial_complete(
-                trial_id, result, error
+                trial_id, result, error, thread_created=create_condition
             )
             if thread_id > 0 and self._global_search_thread:
-                self._global_search_thread.on_trial_complete(trial_id, result, error)
+                self._global_search_thread.on_trial_complete(trial_id, result, error, thread_created=create_condition)
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
         if result:
@@ -832,7 +842,7 @@ class ConditionalBlendSearch(BlendSearch):
             # update target metric if improved
             if (result[self._metric] - self._metric_target) * self._ls.metric_op < 0:
                 self._metric_target = result[self._metric]
-            if not thread_id and self._create_condition(result):
+            if create_condition:
                 # thread creator
                 self._search_thread_pool[self._thread_count] = SharingSearchThread(
                     self._ls.mode,
@@ -863,6 +873,7 @@ class ConditionalBlendSearch(BlendSearch):
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
         #     f"{thread_id in self._search_thread_pool}")
+        # TODO add pruned trials to Optuna here
         if thread_id and thread_id in self._search_thread_pool:
             # local search thread
             self._clean(thread_id)
@@ -923,7 +934,9 @@ class ConditionalBlendSearch(BlendSearch):
             skip = self._should_skip(choice, trial_id, config)
             if skip:
                 if choice:
-                    logger.debug(f"{trial_id} skipping choice={choice}, config={config}")
+                    logger.debug(
+                        f"{trial_id} skipping choice={choice}, config={config}"
+                    )
                     return None
                 # use rs
                 logger.debug(f"{trial_id} using rs")
@@ -965,7 +978,9 @@ class ConditionalBlendSearch(BlendSearch):
                             )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
-                            if skip or not self._valid(config, max(i/4 if i > 4 else 1, 4)):
+                            if skip or not self._valid(
+                                config, max(i / 4 if i > 4 else 1, 4)
+                            ):
                                 use_backup = True
                             else:
                                 use_backup = False
@@ -980,7 +995,9 @@ class ConditionalBlendSearch(BlendSearch):
                     prune_attr = config.get(self._ls.prune_attr, None)
                     skip = self._should_skip(backup, trial_id, config)
                     if skip:
-                        logger.debug(f"{trial_id} skipping choice={choice}, config={config}")
+                        logger.debug(
+                            f"{trial_id} skipping choice={choice}, config={config}"
+                        )
                         return None
                     self._trial_proposed_by[trial_id] = backup
                     choice = backup
@@ -1175,6 +1192,7 @@ class BlendSearchTuner(RayTuneTuner):
         scoring=None,
         early_stopping: bool = True,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
@@ -1189,6 +1207,7 @@ class BlendSearchTuner(RayTuneTuner):
             time_budget_s=time_budget_s,
             target_metric=target_metric,
             scoring=scoring,
+            display=display,
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
