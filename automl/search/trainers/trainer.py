@@ -317,8 +317,8 @@ class Trainer:
         Creates a classic stacking ensemble
         """
         ensemble_name = STACK_NAME
+        metric = self.scoring_dict[self.target_metric]
         if self.problem_type == ProblemType.REGRESSION:
-            metric = self.scoring_dict["r2"]
             final_estimator = (
                 final_estimator
                 or ElasticNetCV(
@@ -328,7 +328,6 @@ class Trainer:
             )
             ensemble_class = PandasStackingRegressor
         elif self.problem_type.is_classification():
-            metric = self.scoring_dict["balanced_accuracy"]
             final_estimator = (
                 final_estimator
                 or LogisticRegressionCV(
@@ -470,6 +469,7 @@ class Trainer:
         Creates a voting ensemble.
         """
         ensemble_name = "VotingByMetric"
+        # TODO support user defined metrics better
         metric_name = self.default_metric_name
         if self.problem_type == ProblemType.REGRESSION:
             weight_function = (
