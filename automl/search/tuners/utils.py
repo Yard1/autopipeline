@@ -10,6 +10,7 @@ from ...utils.string import removeprefix
 
 from ..utils import call_component_if_needed
 
+
 def remove_component_suffix(key: str):
     split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
     return "__".join(split_key)
@@ -30,6 +31,7 @@ def treat_config(config, component_strings, random_state=None):
         )
         for k, v in config.items()
     }
+
 
 def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
     spec = copy(spec)
@@ -132,7 +134,12 @@ def get_all_tunable_params(
                 name = v2.get_hyperparameter_key_suffix(k, k3)
                 hyperparams[name] = v3
         if to_str:
-            v.values = list({str(x) for x in v.values})
+            v.values = list(
+                {
+                    x if x is None or isinstance(x, (int, str, float, bool)) else str(x)
+                    for x in v.values
+                }
+            )
     space = {**space, **hyperparams}
 
     return space, string_space

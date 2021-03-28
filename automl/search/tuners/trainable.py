@@ -128,11 +128,12 @@ class SklearnTrainable(Trainable):
             dummy_pred_proba_scorer = make_scorer(
                 dummy_score, greater_is_better=True, needs_proba=True
             )
-            dummy_thereshold_scorer = make_scorer(
-                dummy_score, greater_is_better=True, needs_threshold=True
-            )
             scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
-            scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
+            if self.problem_type == ProblemType.BINARY:
+                dummy_thereshold_scorer = make_scorer(
+                    dummy_score, greater_is_better=True, needs_threshold=True
+                )
+                scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
         return scoring
 
     # TODO move this outside

@@ -35,6 +35,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def hyperopt_default_gamma(x: int) -> int:
+    return min(int(np.ceil(1.0 * np.sqrt(x))), 25)
+
 
 class ConditionalOptunaSearch(OptunaSearch):
     def __init__(
@@ -79,6 +82,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             n_startup_trials=n_startup_trials,
             seed=seed,
             multivariate=True,
+            gamma=hyperopt_default_gamma,
         )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "

@@ -674,7 +674,7 @@ class ConditionalBlendSearch(BlendSearch):
                 metric=metric,
                 mode=mode,
                 seed=seed,
-                n_startup_trials=2,
+                n_startup_trials=1,
                 use_extended=use_extended,
                 remove_const_values=True,
             )

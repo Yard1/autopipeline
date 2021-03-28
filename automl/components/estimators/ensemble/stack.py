@@ -163,7 +163,7 @@ class PandasStackingClassifier(StackingClassifier):
                 X,
             )
             for est, meth in zip(self.estimators_, self.stack_method_)
-            if est != 'drop'
+            if est != "drop"
         )
         predictions = list(predictions)
 
@@ -203,7 +203,7 @@ class PandasStackingClassifier(StackingClassifier):
                 else:
                     X_meta.append(preds)
                     X_meta_names.append(
-                        [f"{estimator_name}_{i}" for i in range(preds.ndim)]
+                        [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
                     )
         X_meta = [
             pd.DataFrame(x, columns=X_meta_names[i], index=X.index)  # TODO: Better name
@@ -359,7 +359,7 @@ class PandasStackingRegressor(StackingRegressor):
                 X,
             )
             for est, meth in zip(self.estimators_, self.stack_method_)
-            if est != 'drop'
+            if est != "drop"
         )
         predictions = list(predictions)
 
@@ -399,7 +399,7 @@ class PandasStackingRegressor(StackingRegressor):
                 else:
                     X_meta.append(preds)
                     X_meta_names.append(
-                        [f"{estimator_name}_{i}" for i in range(preds.ndim)]
+                        [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
                     )
         X_meta = [
             pd.DataFrame(x, columns=X_meta_names[i], index=X.index)  # TODO: Better name

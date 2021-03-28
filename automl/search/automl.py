@@ -387,11 +387,7 @@ class AutoML(BaseEstimator):
                 ]
             )
 
-        metric_to_sort_by = (
-            self.target_metric or "optimized_precision"
-            if self.problem_type_.is_classification()
-            else "r2"
-        )
+        metric_to_sort_by = self.trainer_.target_metric or self.trainer_.default_metric_name
         df = pd.DataFrame(all_results).set_index("Id", drop=True).sort_values(
             by=[f"Test {metric_to_sort_by}", f"Validation {metric_to_sort_by}"],
             ascending=False,
