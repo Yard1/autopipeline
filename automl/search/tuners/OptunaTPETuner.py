@@ -18,7 +18,7 @@ from ray.tune.suggest.suggestion import (
 from ray.tune.utils.util import unflatten_dict
 
 import optuna as ot
-from optuna.samplers import BaseSampler
+from optuna.samplers import BaseSampler, RandomSampler
 import optuna.distributions
 from optuna.trial import TrialState
 
@@ -47,6 +47,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         seed: Optional[int] = None,
         n_startup_trials: Optional[int] = None,
         use_extended: bool = False,
+        remove_const_values: bool = False,
     ):
         assert ot is not None, "Optuna must be installed! Run `pip install optuna`."
         super(OptunaSearch, self).__init__(
@@ -55,18 +56,19 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         self._conditional_space = get_conditions(space, to_str=True, use_extended=use_extended)
         space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
-        const_values = {
-            k
-            for k, v in space.items()
-            if isinstance(v, CategoricalDistribution) and len(v.values) == 1
-        }
-        space = {k: v for k, v in space.items() if k not in const_values}
+        if remove_const_values:
+            const_values = {
+                k
+                for k, v in space.items()
+                if isinstance(v, CategoricalDistribution) and len(v.values) == 1
+            }
+            space = {k: v for k, v in space.items() if k not in const_values}
         self._space = get_optuna_trial_suggestions(space)
 
         self._points_to_evaluate = points_to_evaluate or []
         assert n_startup_trials is None or isinstance(n_startup_trials, int)
         if n_startup_trials is None:
-            n_startup_trials = 10
+            n_startup_trials = max(len(space), 10)
         #     if self._points_to_evaluate:
         #         n_startup_trials = max(10 - len(self._points_to_evaluate), 10)
         #     else:
@@ -257,7 +259,7 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         return True
 
-    def suggest(self, trial_id: str, reask: bool = False) -> Optional[Dict]:
+    def suggest(self, trial_id: str, reask: bool = False, params=None) -> Optional[Dict]:
         if not self._space:
             raise RuntimeError(
                 UNDEFINED_SEARCH_SPACE.format(
@@ -275,7 +277,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._ot_trials[trial_id] = self._ot_study.ask()
         ot_trial = self._ot_trials[trial_id]
 
-        params = self._get_params(ot_trial)
+        params = self._get_params(ot_trial, params=params)
         logger.debug(params)
         return unflatten_dict(params)
 

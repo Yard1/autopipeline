@@ -23,6 +23,7 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
 """
+import collections
 import pandas as pd
 from copy import deepcopy
 from typing import Dict, Optional, List, Tuple
@@ -57,7 +58,7 @@ from ray.tune.suggest.suggestion import (
 from ray.tune.utils.util import unflatten_dict
 
 from .trainable import SklearnTrainable
-from .OptunaTPETuner import ConditionalOptunaSearch, TrialState
+from .OptunaTPETuner import ConditionalOptunaSearch, TrialState, RandomSampler
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner
@@ -149,6 +150,7 @@ class PatchedFLOW2(FLOW2):
         elif self.conditional_space:
             init_config = enforce_conditions_on_config(init_config, conditional_space)
             logger.debug(f"FLOW2 init_config {init_config}")
+            print(f"FLOW2 init_config {init_config}")
         self.init_config = self.best_config = init_config
         if limit_space_to_init_config:
             assert init_config
@@ -575,8 +577,6 @@ class SharingSearchThread(SearchThread):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _force_gs_after = 40
-
     def __init__(
         self,
         metric: Optional[str] = None,
@@ -650,20 +650,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._time_attr = time_attr
 
         self._seed = seed
-
-        if global_search_alg is not None:
-            self._gs = global_search_alg
-        elif getattr(self, "__name__", None) != "CFO":
-            self._gs = GlobalSearch(
-                space=space,
-                metric=metric,
-                mode=mode,
-                seed=seed,
-                n_startup_trials=1,
-                use_extended=use_extended,
-            )
-        else:
-            self._gs = None
+        self._force_gs_after = 16
 
         init_config = self._get_all_default_values(
             space, get_categorical=False, use_extended=use_extended
@@ -674,17 +661,35 @@ class ConditionalBlendSearch(BlendSearch):
             for k, v in init_config.items()
             if k.endswith("leaves") or k.endswith("depth") or k.endswith("n_estimators")
         }
-        space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
-        space = get_tune_distributions(space)
+        tune_space, _ = get_all_tunable_params(
+            space, to_str=True, use_extended=use_extended
+        )
+        tune_space = get_tune_distributions(tune_space)
+
+        if global_search_alg is not None:
+            self._gs = global_search_alg
+        elif getattr(self, "__name__", None) != "CFO":
+            self._gs = GlobalSearch(
+                space=space,
+                metric=metric,
+                mode=mode,
+                seed=seed,
+                n_startup_trials=2,
+                use_extended=use_extended,
+                remove_const_values=True,
+            )
+        else:
+            self._gs = None
+
         const_values = {
             k
-            for k, v in space.items()
+            for k, v in tune_space.items()
             if isinstance(v, Categorical) and len(v.categories) == 1
         }
-        space = {k: v for k, v in space.items() if k not in const_values}
+        tune_space = {k: v for k, v in tune_space.items() if k not in const_values}
         if points_to_evaluate:
             points_to_evaluate = [
-                {k: v for k, v in point.items() if k in space}
+                {k: v for k, v in point.items() if k in tune_space}
                 for point in points_to_evaluate
             ]
         self._points_to_evaluate = points_to_evaluate
@@ -693,7 +698,7 @@ class ConditionalBlendSearch(BlendSearch):
             metric,
             mode,
             cat_hp_cost,
-            space,
+            tune_space,
             prune_attr,
             min_resource,
             max_resource,
@@ -824,7 +829,9 @@ class ConditionalBlendSearch(BlendSearch):
                 trial_id, result, error, thread_created=create_condition
             )
             if thread_id > 0 and self._global_search_thread:
-                self._global_search_thread.on_trial_complete(trial_id, result, error, thread_created=create_condition)
+                self._global_search_thread.on_trial_complete(
+                    trial_id, result, error, thread_created=create_condition
+                )
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
         if result:
@@ -978,9 +985,7 @@ class ConditionalBlendSearch(BlendSearch):
                             )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
-                            if skip or not self._valid(
-                                config, max(i / 4 if i > 4 else 1, 4)
-                            ):
+                            if skip or not self._valid(config, min(1 + ((i + 1) * 0.25), 2)):
                                 use_backup = True
                             else:
                                 use_backup = False
@@ -1231,18 +1236,97 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
+
         if self._cache:
             self._searcher_kwargs["time_attr"] = "estimator_fit_time"
         logger.debug(self._searcher_kwargs)
+
+        blend_search = ConditionalBlendSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_validation_score",
+            mode="max",
+            points_to_evaluate=self.default_grid_,
+            seed=self.random_state,
+            use_extended=self.use_extended,
+            **self._searcher_kwargs,
+        )
+
+        random_sampler = ConditionalOptunaSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_validation_score",
+            mode="max",
+            sampler=RandomSampler(seed=self.random_state),
+            seed=self.random_state,
+            use_extended=self.use_extended,
+        )
+
+        init_config = blend_search._ls.init_config
+
+        lower_bound = blend_search._ls.denormalize(
+            {
+                k: blend_search._gs_admissible_min[k] - blend_search._ls.STEPSIZE + 1e-8
+                for k, v in init_config.items()
+            }
+        )
+        upper_bound = blend_search._ls.denormalize(
+            {
+                k: blend_search._gs_admissible_min[k] + blend_search._ls.STEPSIZE - 1e-8
+                for k, v in init_config.items()
+            }
+        )
+        assert len(lower_bound) == len(upper_bound)
+
+        def set_bounds(param, lower_bound, upper_bound):
+            param_name = param[1][0]
+            if param_name in lower_bound:
+                return (
+                    param[0],
+                    (
+                        param_name,
+                        max(param[1][1], lower_bound[param_name]),
+                        min(param[1][2], upper_bound[param_name]),
+                    ),
+                    param[2],
+                )
+            return param
+
+        random_sampler._space = {
+            k: set_bounds(v, lower_bound, upper_bound)
+            for k, v in random_sampler._space.items()
+        }
+
+        # TODO move this into ConditionalBlendSearch, make it respect cost
+        estimator_counts = collections.Counter()
+        for config in self.default_grid_:
+            estimator_counts[config["Estimator"]] += 1
+        most_common_estimators = estimator_counts.most_common()
+        second_most_common_estimator = most_common_estimators[1]
+        most_common_estimators = most_common_estimators[2:]
+        extra_params = []
+
+        for estimator, count in most_common_estimators:
+            for _ in range(second_most_common_estimator[1] - count):
+                extra_params.append(
+                    random_sampler.suggest(
+                        1, reask=True, params={"Estimator": estimator}
+                    )
+                )
+
+        del random_sampler
+
+        self.default_grid_.extend(extra_params)
+
+        blend_search = ConditionalBlendSearch(
+            space=self.pipeline_blueprint,
+            metric="mean_validation_score",
+            mode="max",
+            points_to_evaluate=self.default_grid_,
+            seed=self.random_state,
+            use_extended=self.use_extended,
+            **self._searcher_kwargs,
+        )
+
         self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
-            ConditionalBlendSearch(
-                space=self.pipeline_blueprint,
-                metric="mean_validation_score",
-                mode="max",
-                points_to_evaluate=self.default_grid_,
-                seed=self.random_state,
-                use_extended=self.use_extended,
-                **self._searcher_kwargs,
-            ),
+            blend_search,
             max_concurrent=8,
         )

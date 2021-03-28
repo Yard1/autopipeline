@@ -288,7 +288,7 @@ class AutoML(BaseEstimator):
 
         self.results_ = self._get_results()
         self._displays["results_display"].clear_all()
-        self._displays["results_display"].display(self.results_)
+        self._displays["results_display"].display(self.results_.head(20))
 
         return self
 

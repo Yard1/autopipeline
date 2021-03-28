@@ -54,7 +54,7 @@ class DecisionTreeClassifier(TreeEstimator):
     }
 
     _component_level = (
-        ComponentLevel.UNCOMMON
+        ComponentLevel.RARE
     )  # uncommon because RFs are almost always better
 
 
@@ -92,5 +92,5 @@ class DecisionTreeRegressor(TreeEstimator):
     }
 
     _component_level = (
-        ComponentLevel.UNCOMMON
+        ComponentLevel.RARE
     )  # uncommon because RFs are almost always better

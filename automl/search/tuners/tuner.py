@@ -3,7 +3,7 @@ import plotly.graph_objs as go
 from time import sleep
 import numpy as np
 import pandas as pd
-import random
+import collections
 import gc
 from abc import ABC
 

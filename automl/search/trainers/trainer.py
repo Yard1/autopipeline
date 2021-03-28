@@ -328,7 +328,7 @@ class Trainer:
             )
             ensemble_class = PandasStackingRegressor
         elif self.problem_type.is_classification():
-            metric = self.scoring_dict["matthews_corrcoef"]
+            metric = self.scoring_dict["balanced_accuracy"]
             final_estimator = (
                 final_estimator
                 or LogisticRegressionCV(
