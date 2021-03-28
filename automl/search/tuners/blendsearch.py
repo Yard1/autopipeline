@@ -221,24 +221,24 @@ class PatchedFLOW2(FLOW2):
     def step_lower_bound(self) -> float:
         step_lb = self._step_lb
         for key in self._tunable_keys:
+            if key not in self.best_config:
+                continue
             domain = self.space[key]
             sampler = domain.get_sampler()
             if isinstance(sampler, sample.Quantized):
                 sampler_inner = sampler.get_sampler()
                 if str(sampler_inner) == "LogUniform":
-                    if key in self.best_config:
-                        step_lb = min(
-                            step_lb,
-                            np.log(1.0 + sampler.q / self.best_config[key])
-                            / np.log(domain.upper / domain.lower),
-                        )
-            elif isinstance(domain, sample.Integer) and str(sampler) == "LogUniform":
-                if key in self.best_config:
                     step_lb = min(
                         step_lb,
-                        np.log(1.0 + 1.0 / self.best_config[key])
+                        np.log(1.0 + sampler.q / self.best_config[key])
                         / np.log(domain.upper / domain.lower),
                     )
+            elif isinstance(domain, sample.Integer) and str(sampler) == "LogUniform":
+                step_lb = min(
+                    step_lb,
+                    np.log(1.0 + 1.0 / self.best_config[key])
+                    / np.log(domain.upper / domain.lower),
+                )
         if np.isinf(step_lb):
             step_lb = self.STEP_LOWER_BOUND
         else:
@@ -650,7 +650,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._time_attr = time_attr
 
         self._seed = seed
-        self._force_gs_after = 16
+        self._force_gs_after = 40
 
         init_config = self._get_all_default_values(
             space, get_categorical=False, use_extended=use_extended
@@ -985,7 +985,9 @@ class ConditionalBlendSearch(BlendSearch):
                             )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
-                            if skip or not self._valid(config, min(1 + ((i + 1) * 0.25), 2)):
+                            if skip or not self._valid(
+                                config, min(1 + ((i + 1) * 0.25), 2)
+                            ):
                                 use_backup = True
                             else:
                                 use_backup = False
