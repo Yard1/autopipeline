@@ -299,16 +299,14 @@ class AutoML(BaseEstimator):
         check_is_fitted(self)
         return self.get_pipeline_by_id(self.best_id_)
 
-    def get_pipeline_by_id(self, id, refit=False):
+    def get_pipeline_by_id(self, id, refit: bool = False):
         check_is_fitted(self)
         pipeline = deepcopy(self.trainer_.get_ensemble_or_pipeline_by_id(id))
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
             pipeline.fit(self.X_, self.y_)
-        pipeline.steps = (
-            self.X_steps_ + pipeline.steps
-        )
+        pipeline.steps = self.X_steps_ + pipeline.steps
         return pipeline
 
     def _get_component_name(self, component):
@@ -330,7 +328,7 @@ class AutoML(BaseEstimator):
             return list(flatten_iterable(r)) if r else None
         return get_obj_name(component)
 
-    def _get_result(self, result, stacking_level=0):
+    def _get_result(self, result, stacking_level: int = 0):
         component_names = [
             self._get_component_name(component)
             for name, component in result["estimator"].steps[:-1]
@@ -372,7 +370,7 @@ class AutoML(BaseEstimator):
 
     # TODO unify with above
     def _get_ensemble_result(
-        self, ensemble, ensemble_name, test_metrics, stacking_level=0
+        self, ensemble, ensemble_name, test_metrics, stacking_level: int = 0
     ):
         d = {
             "Id": f"{stacking_level}_{ensemble_name}",
@@ -389,7 +387,7 @@ class AutoML(BaseEstimator):
 
         return d
 
-    def _get_results(self, show_full_trials_only=True):
+    def _get_results(self, show_full_trials_only: bool = True):
         check_is_fitted(self)
         all_results = []
         for stacking_level, results in enumerate(self.trainer_.all_results_):
