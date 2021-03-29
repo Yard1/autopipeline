@@ -58,7 +58,7 @@ class Tuner(ABC):
         self.time_budget_s = time_budget_s
         self.display = display or IPythonDisplay("tuner_best_plot_display")
         # TODO reenable
-        #assert target_metric in scoring
+        # assert target_metric in scoring
 
         self.target_metric = target_metric
         self.scoring = scoring
@@ -229,7 +229,7 @@ class RayTuneTuner(Tuner):
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         # this is just to ensure constant order
-        self.default_grid_.sort(key=lambda x: hash(((k,v) for k,v in x.items())))
+        self.default_grid_.sort(key=lambda x: hash(((k, v) for k, v in x.items())))
         _, self._component_strings_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )

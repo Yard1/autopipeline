@@ -1318,6 +1318,9 @@ class BlendSearchTuner(RayTuneTuner):
 
         self.default_grid_.extend(extra_params)
 
+        # this is just to ensure constant order
+        self.default_grid_.sort(key=lambda x: hash(((k, v) for k, v in x.items())))
+
         blend_search = ConditionalBlendSearch(
             space=self.pipeline_blueprint,
             metric="mean_validation_score",

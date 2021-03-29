@@ -777,7 +777,22 @@ class Trainer:
     def get_ensemble_by_id(self, ensemble_id):
         check_is_fitted(self)
         stacking_level, ensemble_name = ensemble_id.split("_")
-        return self.ensembles_[stacking_level][ensemble_name]
+        return self.ensembles_[int(stacking_level)][ensemble_name]
+
+    def get_pipeline_by_id(self, id):
+        check_is_fitted(self)
+        for stacking_results in self.all_results_:
+            result = stacking_results.get(id, None)
+            if result:
+                return result["estimator"]
+        if not result:
+            raise KeyError(f"id {id} not present in results")
+
+    def get_ensemble_or_pipeline_by_id(self, id):
+        try:
+            return self.get_ensemble_by_id(id)
+        except (KeyError, ValueError):
+            return self.get_pipeline_by_id(id)
 
     def fit(self, X, y, X_test=None, y_test=None, groups=None):
         self.current_stacking_level = -1

@@ -1,3 +1,4 @@
+from copy import deepcopy
 import itertools
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
@@ -236,14 +237,14 @@ class AutoML(BaseEstimator):
 
         y.index = list(X.index)
 
-        self.y_steps_.append(y_validator)
-        self.X_steps_.append(X_validator)
+        self.y_steps_.append(("PrepareTarget", y_validator))
+        self.X_steps_.append(("PrepareData", X_validator))
 
         if self.problem_type_.is_classification():
             logger.info("Encoding labels in y")
             y_encoder = LabelEncoder()()
             y = y_encoder.fit_transform(y)
-            self.y_steps_.append(y_encoder)
+            self.y_steps_.append(("LabelEncoding", y_encoder))
 
         if X_test is not None and y_test is not None:
             logger.info("Using predefined test sets")
@@ -287,26 +288,53 @@ class AutoML(BaseEstimator):
         self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
 
         self.results_ = self._get_results()
+        self.best_id_ = str(self.results_.index[0])
         self._displays["results_display"].clear_all()
         self._displays["results_display"].display(self.results_.head(20))
 
         return self
+
+    @property
+    def best_pipeline_(self):
+        check_is_fitted(self)
+        return self.get_pipeline_by_id(self.best_id_)
+
+    def get_pipeline_by_id(self, id, refit=False):
+        check_is_fitted(self)
+        pipeline = deepcopy(self.trainer_.get_ensemble_or_pipeline_by_id(id))
+        if not isinstance(pipeline, Pipeline):
+            pipeline = Pipeline(steps=[("Ensemble", pipeline)])
+        if refit:
+            pipeline.fit(self.X_, self.y_)
+        pipeline.steps = (
+            self.X_steps_ + pipeline.steps
+        )
+        return pipeline
 
     def _get_component_name(self, component):
         if component == "passthrough":
             return None
         r = None
         if isinstance(component, Pipeline):
-            r = [self._get_component_name(subcomponent) for name, subcomponent in component.steps]
+            r = [
+                self._get_component_name(subcomponent)
+                for name, subcomponent in component.steps
+            ]
         elif isinstance(component, ColumnTransformer):
-            r = [self._get_component_name(subcomponent) for name, subcomponent, columns in component.transformers]
+            r = [
+                self._get_component_name(subcomponent)
+                for name, subcomponent, columns in component.transformers
+            ]
         if r is not None:
             r = [x for x in r if x]
             return list(flatten_iterable(r)) if r else None
         return get_obj_name(component)
 
     def _get_result(self, result, stacking_level=0):
-        component_names = [self._get_component_name(component) for name, component in result['estimator'].steps[:-1]]
+        component_names = [
+            self._get_component_name(component)
+            for name, component in result["estimator"].steps[:-1]
+        ]
         component_names = [x for x in component_names if x]
         component_names = flatten_iterable(component_names)
         d = {
@@ -343,18 +371,16 @@ class AutoML(BaseEstimator):
         return d
 
     # TODO unify with above
-    def _get_ensemble_result(self, ensemble, ensemble_name, test_metrics, stacking_level=0):
-        d = {"Id": f"{stacking_level}_{ensemble_name}", "Pipeline": get_obj_name(ensemble)}
+    def _get_ensemble_result(
+        self, ensemble, ensemble_name, test_metrics, stacking_level=0
+    ):
+        d = {
+            "Id": f"{stacking_level}_{ensemble_name}",
+            "Pipeline": get_obj_name(ensemble),
+        }
 
-        d.update(
-            {f"Test {key}": metric for key, metric in test_metrics.items()}
-        )
-        d.update(
-            {
-                f"Validation {key}": None
-                for key, metric in test_metrics.items()
-            }
-        )
+        d.update({f"Test {key}": metric for key, metric in test_metrics.items()})
+        d.update({f"Validation {key}": None for key, metric in test_metrics.items()})
 
         d["Stacking Level"] = stacking_level
         d["Total Time (s)"] = None
@@ -387,9 +413,15 @@ class AutoML(BaseEstimator):
                 ]
             )
 
-        metric_to_sort_by = self.trainer_.target_metric or self.trainer_.default_metric_name
-        df = pd.DataFrame(all_results).set_index("Id", drop=True).sort_values(
-            by=[f"Test {metric_to_sort_by}", f"Validation {metric_to_sort_by}"],
-            ascending=False,
+        metric_to_sort_by = (
+            self.trainer_.target_metric or self.trainer_.default_metric_name
+        )
+        df = (
+            pd.DataFrame(all_results)
+            .set_index("Id", drop=True)
+            .sort_values(
+                by=[f"Test {metric_to_sort_by}", f"Validation {metric_to_sort_by}"],
+                ascending=False,
+            )
         )
         return df
