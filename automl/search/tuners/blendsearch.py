@@ -656,11 +656,11 @@ class ConditionalBlendSearch(BlendSearch):
             space, get_categorical=False, use_extended=use_extended
         )
         # TODO make it a part of components
-        init_config = {
-            k: v
-            for k, v in init_config.items()
-            if k.endswith("leaves") or k.endswith("depth") or k.endswith("n_estimators")
-        }
+        #init_config = {
+        #    k: v
+        #    for k, v in init_config.items()
+        #    if k.endswith("leaves") or k.endswith("depth") or k.endswith("n_estimators") or k.endswith("min_data_in_leaf")
+        #}
         tune_space, _ = get_all_tunable_params(
             space, to_str=True, use_extended=use_extended
         )

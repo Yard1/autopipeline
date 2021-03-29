@@ -44,8 +44,8 @@ class LGBMClassifier(GradientBoosterEstimator):
         "subsample": 1.0,
         "subsample_freq": 0,
         "colsample_bytree": 1.0,
-        "reg_alpha": 1e-10,
-        "reg_lambda": 1e-10,
+        "reg_alpha": 1/1024,
+        "reg_lambda": 1.0,
         "random_state": None,
         "n_jobs": 1,
         "silent": True,
@@ -54,14 +54,14 @@ class LGBMClassifier(GradientBoosterEstimator):
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
         "num_leaves": IntUniformDistribution(2, 256),
-        "learning_rate": UniformDistribution(0.01, 1.0, log=True),
+        "learning_rate": UniformDistribution(1/1024, 1.0, log=True),
     }
     _default_tuning_grid_extended = {
-        "subsample": UniformDistribution(0.6, 1.0),
-        "colsample_bytree": UniformDistribution(0.7, 1.0),
-        "reg_alpha": UniformDistribution(1e-10, 1.0, log=True),
-        "reg_lambda": UniformDistribution(1e-10, 1.0, log=True),
-        "min_child_weight": UniformDistribution(0.001, 20.0, log=True),
+        "subsample": UniformDistribution(0.1, 1.0),
+        "colsample_bytree": UniformDistribution(0.01, 1.0),
+        "reg_alpha": UniformDistribution(1/1024, 1/1024, log=True),
+        "reg_lambda": UniformDistribution(1/1024, 1024, log=True),
+        "min_child_samples": IntUniformDistribution(2, 2**7, log=True),
         "class_weight": CategoricalDistribution([None, "balanced"]),
     }
 
@@ -90,8 +90,8 @@ class LGBMRegressor(GradientBoosterEstimator):
         "subsample": 1.0,
         "subsample_freq": 0,
         "colsample_bytree": 1.0,
-        "reg_alpha": 1e-10,
-        "reg_lambda": 1e-10,
+        "reg_alpha": 1/1024,
+        "reg_lambda": 1.0,
         "random_state": None,
         "n_jobs": 1,
         "silent": True,
@@ -100,14 +100,14 @@ class LGBMRegressor(GradientBoosterEstimator):
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
         "num_leaves": IntUniformDistribution(2, 256),
-        "learning_rate": UniformDistribution(0.01, 1.0, log=True),
+        "learning_rate": UniformDistribution(1/1024, 1.0, log=True),
     }
     _default_tuning_grid_extended = {
-        "subsample": UniformDistribution(0.6, 1.0),
-        "colsample_bytree": UniformDistribution(0.7, 1.0),
-        "reg_alpha": UniformDistribution(1e-10, 1.0, log=True),
-        "reg_lambda": UniformDistribution(1e-10, 1.0, log=True),
-        "min_child_weight": UniformDistribution(0.001, 20.0, log=True),
+        "subsample": UniformDistribution(0.1, 1.0),
+        "colsample_bytree": UniformDistribution(0.01, 1.0),
+        "reg_alpha": UniformDistribution(1/1024, 1/1024, log=True),
+        "reg_lambda": UniformDistribution(1/1024, 1024, log=True),
+        "min_child_samples": IntUniformDistribution(2, 2**7, log=True),
     }
 
     _problem_types = {
