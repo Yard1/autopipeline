@@ -171,7 +171,7 @@ class AutoML(BaseEstimator):
         X, _, y, _ = train_test_split(
             X,
             y,
-            test_size=0,
+            test_size=0.0,
             random_state=self.random_seed_,
             stratify=y if self.problem_type_.is_classification() else None,
         )
