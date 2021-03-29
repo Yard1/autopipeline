@@ -317,8 +317,8 @@ class Trainer:
         Creates a classic stacking ensemble
         """
         ensemble_name = STACK_NAME
-        metric = self.scoring_dict[self.target_metric]
         if self.problem_type == ProblemType.REGRESSION:
+            metric = self.scoring_dict[self.target_metric]
             final_estimator = (
                 final_estimator
                 or ElasticNetCV(
@@ -328,6 +328,7 @@ class Trainer:
             )
             ensemble_class = PandasStackingRegressor
         elif self.problem_type.is_classification():
+            metric = self.scoring_dict["balanced_accuracy"]  # TODO fix after adding op as a scorer
             final_estimator = (
                 final_estimator
                 or LogisticRegressionCV(
