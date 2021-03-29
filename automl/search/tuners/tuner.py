@@ -140,6 +140,11 @@ class Tuner(ABC):
         ]
         self.default_grid_ += preset_configurations
 
+        self._remove_duplicates_from_default_grid()
+
+        self._set_up_early_stopping(X, y, groups=groups)
+
+    def _remove_duplicates_from_default_grid(self):
         default_grid_list_dict = []
         default_grid_list_no_dups = []
         for config in self.default_grid_:
@@ -150,8 +155,6 @@ class Tuner(ABC):
                 default_grid_list_dict.append(str_config)
                 default_grid_list_no_dups.append(config)
         self.default_grid_ = default_grid_list_no_dups
-
-        self._set_up_early_stopping(X, y, groups=groups)
 
     def _set_up_early_stopping(self, X, y, groups=None):
         pass
@@ -183,17 +186,18 @@ class RayTuneTuner(Tuner):
         self._set_cache()
         self.tune_kwargs = tune_kwargs
         self.num_samples = num_samples
+        self.max_concurrent = 1
+        self.trainable_n_jobs = 4
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
             "scheduler": None,
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
-            "verbose": 1,
+            "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
-            "resources_per_trial": {"cpu": 1},
-            "run_or_experiment": SklearnTrainable,
+            #"resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
             # "max_failures": 2
         }
@@ -266,11 +270,13 @@ class RayTuneTuner(Tuner):
             "scoring": self.scoring,
             "metric_name": self.target_metric,
             "cv": self.cv,
-            "n_jobs": None,
             "random_state": self.random_state,
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
             "cache": self._cache,
         }
+        tune_kwargs["run_or_experiment"] = type(
+            "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
+        )
         tune_kwargs["run_or_experiment"] = tune.with_parameters(
             tune_kwargs["run_or_experiment"], **params
         )

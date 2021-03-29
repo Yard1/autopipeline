@@ -12,8 +12,16 @@ from collections import defaultdict
 
 import ray
 import ray.exceptions
+
 from ray.tune import Trainable
+from ray.tune.resources import Resources
 import ray.cloudpickle as cpickle
+
+import joblib
+from ray.util.joblib import register_ray
+
+register_ray()
+
 import lz4.frame
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
@@ -21,6 +29,7 @@ from .utils import treat_config
 from ..utils import optimized_precision, MultimetricScorerWithErrorScore
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
+from ...utils.estimators import set_param_context
 
 import logging
 
@@ -73,6 +82,8 @@ class SklearnTrainable(Trainable):
 
     """
 
+    N_JOBS = 1
+
     def setup(self, config, **params):
         # forward-compatbility
         self._setup(config, **params)
@@ -100,7 +111,6 @@ class SklearnTrainable(Trainable):
             self.scoring = params.get("scoring", None)
             self.metric_name = params["metric_name"]
             self.cv = deepcopy(params.get("cv", 5))
-            self.n_jobs = params.get("n_jobs", None)
             self.random_state = deepcopy(params.get("random_state", None))
             self.prune_attr = params.get("prune_attr", None)
             self.const_values = params.get("const_values", {})
@@ -114,7 +124,8 @@ class SklearnTrainable(Trainable):
     def step(self):
         # forward-compatbility
         logger.debug("training")
-        return self._train()
+        with joblib.parallel_backend("ray"):
+            return self._train()
 
     def _make_scoring_dict(self):
         scoring = self.scoring.copy()
@@ -135,6 +146,15 @@ class SklearnTrainable(Trainable):
                 )
                 scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
         return scoring
+
+    @classmethod
+    def default_resource_request(cls, config):
+        return Resources(
+            #cpu=cls.N_JOBS,
+            cpu=1,
+            gpu=0,
+            extra_cpu=cls.N_JOBS,
+        )
 
     # TODO move this outside
     @staticmethod
@@ -201,9 +221,10 @@ class SklearnTrainable(Trainable):
             groups=self.groups_,
             error_score="raise",
             return_estimator=True,
-            verbose=0,
+            verbose=1,
             scoring=scoring_with_dummies,
             fit_params=self.fit_params,
+            n_jobs=self.N_JOBS,
             # return_train_score=self.return_train_score,
         )
         logger.debug("cv done")
@@ -235,9 +256,24 @@ class SklearnTrainable(Trainable):
         fitted_estimator = None
         if self.X_test_ is not None and not is_early_stopping_on:
             logger.debug("scoring test")
-            test_metrics, fitted_estimator = SklearnTrainable.score_test(
-                estimator, self.X_, self.y_, self.X_test_, self.y_test_, self.scoring
-            )
+            fitted_estimator = None
+            with set_param_context(
+                estimator,
+                cloned_estimators=[fitted_estimator],
+                **{
+                    k: self.N_JOBS
+                    for k, v in estimator.get_params().items()
+                    if k.endswith("n_jobs")
+                },
+            ):
+                test_metrics, fitted_estimator = SklearnTrainable.score_test(
+                    estimator,
+                    self.X_,
+                    self.y_,
+                    self.X_test_,
+                    self.y_test_,
+                    self.scoring,
+                )
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],
