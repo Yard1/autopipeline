@@ -176,7 +176,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = self.dim # max number of trials without improvement
+        self.dir = max(self.dim - 2, 4)  # max number of trials without improvement
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -386,7 +386,7 @@ class PatchedFLOW2(FLOW2):
                     # decrease step size
                     self._oldK = self._K if self._K else self._iter_best_config
                     self._K = self.trial_count + 1
-                    self.step *= (self._oldK / self._K)**3
+                    self.step *= (self._oldK / self._K) ** 3
                     print(f"step={self.step}, lb={self.step_lower_bound} _K={self._K}")
                 self._num_complete4incumbent -= 2
                 if self._num_allowed4incumbent < 2:
@@ -844,6 +844,7 @@ class ConditionalBlendSearch(BlendSearch):
                 )
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
+        # TODO start creating threads only after initial points
         if result:
             config = self._suggested_configs[trial_id]
             (
@@ -984,25 +985,28 @@ class ConditionalBlendSearch(BlendSearch):
                     )
                     self._trial_proposed_by[trial_id] = choice
                 elif not choice:
+                    j = 0
                     try:
-                        for i in range(299):
+                        for _ in range(399):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
                             if config["Estimator"] != estimator:
                                 continue
-                            print(
-                                f"{trial_id} another main choice suggestion: {config}"
-                            )
                             prune_attr = config.get(self._ls.prune_attr, None)
                             skip = self._should_skip(choice, trial_id, config)
                             if skip or not self._valid(
-                                config, min(1 + ((i + 1) * 0.1), 2)
+                                config,
+                                min(
+                                    1 + ((j + 1) * (self._ls.STEPSIZE / 100)),
+                                    1 + self._ls.STEPSIZE,
+                                ),
                             ):
                                 use_backup = True
                             else:
                                 use_backup = False
                                 break
+                            j += 1
                     except TypeError:
                         use_backup = True
                 else:
@@ -1208,6 +1212,8 @@ class BlendSearchTuner(RayTuneTuner):
         scoring=None,
         early_stopping: bool = True,
         cache=False,
+        max_concurrent: int = 1,
+        trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
@@ -1224,6 +1230,8 @@ class BlendSearchTuner(RayTuneTuner):
             target_metric=target_metric,
             scoring=scoring,
             display=display,
+            max_concurrent=max_concurrent,
+            trainable_n_jobs=trainable_n_jobs,
             **tune_kwargs,
         )
         self._searcher_kwargs = {}
@@ -1244,6 +1252,7 @@ class BlendSearchTuner(RayTuneTuner):
             logger.debug(self._searcher_kwargs["prune_attr"])
         else:
             self.early_stopping_fractions_ = [1]
+        self.early_stopping_fractions_ = [1]
 
     def _add_extra_random_trials_to_default_grid(self):
         blend_search = ConditionalBlendSearch(

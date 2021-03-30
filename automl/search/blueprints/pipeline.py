@@ -85,6 +85,9 @@ def create_pipeline_blueprint(
         "PolynomialCountSketch": PolynomialCountSketch(),
         "NystroemSigmoid": NystroemSigmoid(),
     }
+    knn_transformers = {
+        "KNNTransformer": KNNTransformer(),
+    }
     estimators = {
         "DecisionTreeClassifier": DecisionTreeClassifier(),
         "DecisionTreeRegressor": DecisionTreeRegressor(),
@@ -110,6 +113,7 @@ def create_pipeline_blueprint(
         **oridinal_encoder,
         **feature_selectors,
         **svm_kernels,
+        **knn_transformers,
         **estimators,
     }
 
@@ -170,41 +174,14 @@ def create_pipeline_blueprint(
             [components["Passthrough"]] + list(svm_kernels.values()),
         ),
         (
+            "KNNTransformer",
+            list(knn_transformers.values()),
+        ),
+        (
             "Estimator",
             list(estimators.values()),
         ),
     ]
-
-    d = {
-        "Preprocessor__ColumnTransformer__Categorical__Imputer": (
-            components["SimpleCategoricalImputer"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
-            components["OneHotEncoder"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__Imputers": (
-            components["SimpleNumericImputer"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["CombinedScalerTransformer"],
-            {},
-        ),
-        "Estimator": (components["LogisticRegression"], {"C": 4.0}),
-    }
-    d2 = {
-        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
-            components["OneHotEncoder"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["CombinedScalerTransformer"],
-            {},
-        ),
-        "Estimator": (components["LogisticRegression"], {"C": 1.0}),
-    }
 
     pipeline = TopPipeline(
         steps=pipeline_steps,

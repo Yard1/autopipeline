@@ -1,5 +1,5 @@
 from typing import Any, Optional, Union, Dict, List, Tuple
-
+from copy import deepcopy
 from sklearn.base import BaseEstimator, clone
 
 
@@ -37,8 +37,8 @@ def create_dynamically_subclassed_estimator(obj: BaseEstimator) -> BaseEstimator
         subclasses.append(SavePredictMixin)
     if hasattr(obj, "predict_proba"):
         subclasses.append(SavePredictProbaMixin)
-    if hasattr(obj, "decision_function"):
-        subclasses.append(SaveDecisionFunctionMixin)
+    #if hasattr(obj, "decision_function"):
+    #    subclasses.append(SaveDecisionFunctionMixin)
     return create_dynamically_subclassed_object(obj, subclasses)
 
 
@@ -49,7 +49,10 @@ def create_dynamically_subclassed_object(obj: Any, subclasses: List[type]) -> An
         tuple(subclasses + [original_type]),
         {},
     )
-    obj = clone(obj)
+    try:
+        obj = clone(obj)
+    except Exception:
+        obj = deepcopy(obj)
     obj.__class__ = subtype
 
     return obj

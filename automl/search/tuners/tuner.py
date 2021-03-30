@@ -179,6 +179,8 @@ class RayTuneTuner(Tuner):
         target_metric=None,
         scoring=None,
         cache=False,
+        max_concurrent: int = 1,
+        trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
@@ -186,8 +188,8 @@ class RayTuneTuner(Tuner):
         self._set_cache()
         self.tune_kwargs = tune_kwargs
         self.num_samples = num_samples
-        self.max_concurrent = 1
-        self.trainable_n_jobs = 4
+        self.max_concurrent = max_concurrent
+        self.trainable_n_jobs = trainable_n_jobs
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
@@ -197,7 +199,7 @@ class RayTuneTuner(Tuner):
             "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
-            #"resources_per_trial": {"cpu": self.trainable_n_jobs},
+            # "resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
             # "max_failures": 2
         }

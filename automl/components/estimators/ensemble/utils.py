@@ -23,7 +23,7 @@ def fit_single_estimator_if_not_fitted(
         check_is_fitted(estimator)
         return estimator
     except (NotFittedError, AssertionError):
-        logger.debug(f"fitting estimator {estimator}", flush=True)
+        print(f"fitting estimator {estimator}", flush=True)
         return _fit_single_estimator(
             cloning_function(estimator),
             X,
@@ -58,7 +58,7 @@ def get_cv_predictions(
         if meth in prediction:
             predictions_new.append(prediction[meth])
         else:
-            logger.debug(f"doing cv for {est}.{meth}")
+            print(f"doing cv for {est}.{meth}")
             predictions_new.append(
                 cross_val_predict(
                     clone(est),

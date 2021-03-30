@@ -297,6 +297,8 @@ class OptunaTPETuner(RayTuneTuner):
         early_stopping=True,
         early_stopping_brackets=1,
         cache=False,
+        max_concurrent: int = 1,
+        trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
@@ -310,6 +312,8 @@ class OptunaTPETuner(RayTuneTuner):
             num_samples=num_samples,
             cache=cache,
             display=display,
+            max_concurrent=max_concurrent,
+            trainable_n_jobs=trainable_n_jobs,
             **tune_kwargs,
         )
 

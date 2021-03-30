@@ -16,15 +16,14 @@ class KNeighborsClassifier(KNNEstimator):
         "n_neighbors": 5,
         "weights": "distance",
         "p": 2,
-        "metric": "minkowski",
+        "metric": "precomputed",
         "metric_params": None,
         "n_jobs": None,
     }
 
     _default_tuning_grid = {
-        "n_neighbors": IntUniformDistribution(1, 100, log=True),
+        "n_neighbors": IntUniformDistribution(1, 40, log=True),
         "weights": CategoricalDistribution(["uniform", "distance"]),
-        "p": IntUniformDistribution(1, 2),
     }
     _default_tuning_grid_extended = {}
 
@@ -38,15 +37,14 @@ class KNeighborsRegressor(KNNEstimator):
         "n_neighbors": 5,
         "weights": "uniform",
         "p": 2,
-        "metric": "minkowski",
+        "metric": "precomputed",
         "metric_params": None,
         "n_jobs": None,
     }
 
     _default_tuning_grid = {
-        "n_neighbors": IntUniformDistribution(1, 100, log=True),
+        "n_neighbors": IntUniformDistribution(1, 40, log=True),
         "weights": CategoricalDistribution(["uniform", "distance"]),
-        "p": IntUniformDistribution(1, 2),
     }
     _default_tuning_grid_extended = {}
 

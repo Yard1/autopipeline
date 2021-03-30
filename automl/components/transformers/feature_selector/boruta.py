@@ -37,6 +37,7 @@ class BorutaSHAP(BorutaPy):
         "subsample": 0.632,
         "subsample_freq": 1,
         "verbose": -1,
+        "learning_rate": 0.05,
     }
 
     def __init__(

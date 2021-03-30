@@ -31,5 +31,5 @@ class set_param_context:
             for cloned_estimator in self.cloned_estimators:
                 try:
                     cloned_estimator.set_params(**self.old_params)
-                except Exception:
+                except AttributeError:
                     pass

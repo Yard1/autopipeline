@@ -140,11 +140,6 @@ class SklearnTrainable(Trainable):
                 dummy_score, greater_is_better=True, needs_proba=True
             )
             scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
-            if self.problem_type == ProblemType.BINARY:
-                dummy_thereshold_scorer = make_scorer(
-                    dummy_score, greater_is_better=True, needs_threshold=True
-                )
-                scoring["dummy_thereshold_scorer"] = dummy_thereshold_scorer
         return scoring
 
     @classmethod
@@ -254,12 +249,12 @@ class SklearnTrainable(Trainable):
 
         test_metrics = None
         fitted_estimator = None
+        fitted_estimator_list = []
         if self.X_test_ is not None and not is_early_stopping_on:
             logger.debug("scoring test")
-            fitted_estimator = None
             with set_param_context(
                 estimator,
-                cloned_estimators=[fitted_estimator],
+                cloned_estimators=fitted_estimator_list,
                 **{
                     k: self.N_JOBS
                     for k, v in estimator.get_params().items()
@@ -274,6 +269,8 @@ class SklearnTrainable(Trainable):
                     self.y_test_,
                     self.scoring,
                 )
+                fitted_estimator_list.append(fitted_estimator)
+            fitted_estimator = fitted_estimator_list[0]
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],

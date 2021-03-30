@@ -1,5 +1,4 @@
 from copy import deepcopy
-import itertools
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from automl.utils.logging import make_header
@@ -16,6 +15,11 @@ from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 
+import joblib
+from ray.util.joblib import register_ray
+
+register_ray()
+
 from .trainers.trainer import Trainer
 from .cv import get_cv_for_problem_type
 from ..components import DataType, ComponentLevel
@@ -23,6 +27,7 @@ from ..problems import ProblemType
 from ..components import PrepareDataFrame, clean_df, LabelEncoder
 from ..utils import validate_type
 from .utils import flatten_iterable, get_obj_name
+from .utils import ray_context
 
 import warnings
 import logging
@@ -305,7 +310,8 @@ class AutoML(BaseEstimator):
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
-            pipeline.fit(self.X_, self.y_)
+            with ray_context(), joblib.parallel_backend("ray"):
+                pipeline.fit(self.X_, self.y_)
         pipeline.steps = self.X_steps_ + pipeline.steps
         return pipeline
 
