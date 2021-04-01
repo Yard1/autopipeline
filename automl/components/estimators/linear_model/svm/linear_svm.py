@@ -5,6 +5,7 @@ from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.extmath import softmax
 
 from .svm import SVM
+from ....component import ComponentLevel
 from .....problems import ProblemType
 from .....search.distributions import UniformDistribution, CategoricalDistribution
 
@@ -112,6 +113,7 @@ class LinearSVC(SVM):
     }
     _default_tuning_grid_extended = {}
 
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
 
@@ -172,4 +174,5 @@ class LinearSVR(SVM):
     }
     _default_tuning_grid_extended = {}
 
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.REGRESSION}

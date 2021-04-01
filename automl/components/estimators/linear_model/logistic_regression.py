@@ -15,7 +15,7 @@ class LogisticRegression(LinearModelEstimator):
         "C": 1.0,
         "fit_intercept": True,
         "intercept_scaling": 1,
-        "class_weight": "!None",
+        "class_weight": None,
         "random_state": None,
         "solver": "saga",
         "max_iter": 1000,
@@ -29,7 +29,7 @@ class LogisticRegression(LinearModelEstimator):
     _default_tuning_grid = {
         "C": UniformDistribution(0.01, 10),
         "l1_ratio": UniformDistribution(0, 1),
-        "class_weight": CategoricalDistribution(["!None", "balanced"]),
+        "class_weight": CategoricalDistribution([None, "balanced"]),
     }
     _default_tuning_grid_extended = {}
 
