@@ -1,3 +1,4 @@
+from automl.components.transformers.knn.knn_transformer import NCATransformer
 import numpy as np
 
 from typing import Optional
@@ -87,11 +88,14 @@ def create_pipeline_blueprint(
     }
     knn_transformers = {
         "KNNTransformer": KNNTransformer(),
+        "NCATransformer": NCATransformer(),
     }
     estimators = {
-        "DecisionTreeClassifier": DecisionTreeClassifier(),
-        "DecisionTreeRegressor": DecisionTreeRegressor(),
+        #"DecisionTreeClassifier": DecisionTreeClassifier(),
+        #"DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
+        "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
+        "LogisticRegression_EN": LogisticRegression(l1_ratio=0.5),
         "LinearRegression": LinearRegression(),
         "ElasticNet": ElasticNet(),
         "LGBMClassifier": LGBMClassifier(),
@@ -119,6 +123,10 @@ def create_pipeline_blueprint(
 
     pipeline_steps = [
         (
+            "FeatureSelector",
+            [components["Passthrough"]] + list(feature_selectors.values()),
+        ),
+        (
             "ColumnImputation",
             ColumnTransformer(
                 transformers=[
@@ -136,10 +144,6 @@ def create_pipeline_blueprint(
             ),
         ),
         ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
-        (
-            "FeatureSelector",
-            [components["Passthrough"]] + list(feature_selectors.values()),
-        ),
         (
             "ColumnOrdinal",
             ColumnTransformer(

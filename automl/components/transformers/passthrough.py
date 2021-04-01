@@ -7,6 +7,7 @@ from ...search.stage import AutoMLStage
 class Passthrough(Transformer):
     _component_class = None
     _component_level = ComponentLevel.NECESSARY
+    _allow_duplicates = True
 
     def __init__(
         self,

@@ -27,6 +27,7 @@ from ...utils.exceptions import validate_type
 from ...utils.memory import dynamic_memory_factory
 from ...utils.display import IPythonDisplay
 from ...utils.tune_callbacks import BestPlotCallback
+from ...utils.memory.hashing import hash as xxd_hash
 
 import warnings
 
@@ -119,11 +120,24 @@ class Tuner(ABC):
             self._get_single_default_hyperparams(components, default_grid)
             for components in ParameterGrid(default_grid)
         ]
+
+        for step_name, classes in self.pipeline_blueprint.extra_configs.items():
+            extra_config_presets = []
+            for config in default_grid_list:
+                if type(config.get(step_name, None)) in classes:
+                    for extra_config in classes[type(config.get(step_name, None))]:
+                        extra_config_presets.append(config.copy())
+                        for k, v in extra_config.final_parameters.items():
+                            name = extra_config.get_hyperparameter_key_suffix(step_name, k)
+                            extra_config_presets[-1][name] = v if v is not None else "!None"
+            default_grid_list.extend(extra_config_presets)
+
         default_grid_list = [
             components
             for components in default_grid_list
             if self._are_components_valid(components)
         ]
+
         return default_grid_list
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
@@ -232,10 +246,15 @@ class RayTuneTuner(Tuner):
         if self._cache:
             logger.info(f"Cache dir set as '{self._cache}'")
 
+    def _shuffle_default_grid(self):
+        # default python hash is different on every run
+        self.default_grid_.sort(key=lambda x: xxd_hash(tuple((k, v) for k, v in x.items())))
+        np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
+
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         # this is just to ensure constant order
-        self.default_grid_.sort(key=lambda x: hash(((k, v) for k, v in x.items())))
+        self._shuffle_default_grid()
         _, self._component_strings_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )

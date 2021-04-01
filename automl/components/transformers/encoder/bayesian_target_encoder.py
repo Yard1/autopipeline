@@ -618,7 +618,7 @@ class BayesianTargetEncoderBinary(Encoder):
         "handle_missing": "value",
         "random_state": None,
         "prior_samples_ratio": 1e-4,
-        "n_draws": 10,
+        "n_draws": 5,
         "mapper": "identity",
         "task": TaskType.BINARY_CLASSIFICATION,
     }
@@ -650,7 +650,7 @@ class BayesianTargetEncoderMulticlass(Encoder):
         "handle_missing": "value",
         "random_state": None,
         "prior_samples_ratio": 1e-4,
-        "n_draws": 10,
+        "n_draws": 5,
         "mapper": "identity",
         "task": TaskType.MULTICLASS_CLASSIFICATION,
     }
@@ -682,7 +682,7 @@ class BayesianTargetEncoderRegression(Encoder):
         "handle_missing": "value",
         "random_state": None,
         "prior_samples_ratio": 1e-4,
-        "n_draws": 10,
+        "n_draws": 5,
         "mapper": "identity",
         "task": TaskType.REGRESSION,
         "n_jobs": None,

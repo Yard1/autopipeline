@@ -1,4 +1,5 @@
 from typing import List, Optional
+from collections import defaultdict
 
 import pandas as pd
 import numpy as np
@@ -243,14 +244,10 @@ class Pipeline(Flow):
         }
         return {**step_grids, **default_grid}
 
-    def call_tuning_grid_funcs(
-        self, config: ComponentConfig, stage: AutoMLStage
-    ):
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
         super().call_tuning_grid_funcs(config, stage)
         for name, step in self.components:
-            recursively_call_tuning_grid_funcs(
-                step, config=config, stage=stage
-            )
+            recursively_call_tuning_grid_funcs(step, config=config, stage=stage)
 
     def __copy__(self):
         # self.spam is to be ignored, it is calculated anew for the copy
@@ -352,6 +349,24 @@ class TopPipeline(Pipeline):
                 converted_configurations.append(configuration)
         self.preset_configurations = converted_configurations
 
+    def _convert_duplicates_in_steps_to_extra_configs(self):
+        self.extra_configs = defaultdict(dict)
+        for i, name_step_pair in enumerate(self.parameters[self.components_name]):
+            name, step = name_step_pair
+            if not isinstance(step, list):
+                continue
+            no_dups_step = []
+            for component in step:
+                if component._allow_duplicates:
+                    no_dups_step.append(component)
+                elif not any(isinstance(component, type(x)) for x in no_dups_step):
+                    no_dups_step.append(component)
+                else:
+                    if type(component) not in self.extra_configs[name]:
+                        self.extra_configs[name][type(component)] = []
+                    self.extra_configs[name][type(component)].append(component)
+            self.parameters[self.components_name][i] = (name, no_dups_step)
+
     def __init__(
         self,
         tuning_grid=None,
@@ -363,3 +378,4 @@ class TopPipeline(Pipeline):
         self.preset_configurations = preset_configurations or []
         assert "steps" in self.parameters
         assert "Estimator" == self.parameters["steps"][-1][0]
+        self._convert_duplicates_in_steps_to_extra_configs()

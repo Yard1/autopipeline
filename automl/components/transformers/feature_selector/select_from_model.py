@@ -21,6 +21,7 @@ from sklearn.feature_selection import SelectFromModel as _SelectFromModel
 from sklearn.utils.validation import check_random_state
 from sklearn.feature_selection._from_model import _calculate_threshold
 
+from .utils import lightgbm_rf_config as _lightgbm_rf_config
 from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
@@ -33,17 +34,6 @@ import warnings
 
 
 class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromModel):
-    _lightgbm_rf_config = {
-        "n_jobs": 1,
-        "boosting_type": "rf",
-        "max_depth": 5,
-        "num_leaves": 32,
-        "subsample": 0.632,
-        "subsample_freq": 1,
-        "verbose": -1,
-        "learning_rate": 0.05,
-    }
-
     def __init__(
         self,
         estimator,
@@ -53,12 +43,13 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         norm_order=1,
         max_features=None,
         importance_getter="auto",
+        n_estimators=100,
         random_state=None
     ):
         if estimator == "LGBMRegressor":
-            estimator = LGBMRegressor(**self._lightgbm_rf_config)
+            estimator = LGBMRegressor(**_lightgbm_rf_config)
         elif estimator == "LGBMClassifier":
-            estimator = LGBMClassifier(**self._lightgbm_rf_config)
+            estimator = LGBMClassifier(**_lightgbm_rf_config)
         super().__init__(
             estimator=estimator,
             threshold=threshold,
@@ -68,6 +59,24 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
             importance_getter=importance_getter,
         )
         self.random_state = random_state
+        self.n_estimators = n_estimators
+
+    def _get_tree_num(self, n_feat):
+        depth = None
+        try:
+            depth = self.estimator.get_params()["max_depth"]
+        except KeyError:
+            warnings.warn(
+                "The estimator does not have a max_depth property, as a result "
+                " the number of trees to use cannot be estimated automatically."
+            )
+        if depth is None:
+            depth = 10
+        # how many times a feature should be considered on average
+        f_repr = 100
+        multi = (n_feat) / (np.sqrt(n_feat) * depth)
+        n_estimators = int(multi * f_repr)
+        return n_estimators
 
     def fit(self, X, y=None, **fit_params):
         self._is_classification_ = is_classifier(self.estimator)
@@ -81,6 +90,14 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
             or "lightgbm" in str(type(self.estimator))
         ):
             self.estimator.set_params(colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1])
+
+        # set n_estimators
+        if self.n_estimators == "auto":
+            estimators = self._get_tree_num(X.shape[1])
+        else:
+            estimators = self.n_estimators
+        self.estimator.set_params(n_estimators=estimators)
+
         X = X.apply(categorical_column_to_int_categories)
         super().fit(X=X, y=y, **fit_params)
         self.shap_imp_ = self._get_shap_imp(X, self.estimator_)
@@ -167,6 +184,7 @@ class SHAPSelectFromModelClassification(FeatureSelector):
         "norm_order": 1,
         "max_features": None,
         "importance_getter": "auto",
+        "n_estimators": "auto",
         "random_state": None,
     }
     _component_level = ComponentLevel.UNCOMMON  # TODO: RARE
@@ -196,6 +214,7 @@ class SHAPSelectFromModelRegression(FeatureSelector):
         "norm_order": 1,
         "max_features": None,
         "importance_getter": "auto",
+        "n_estimators": "auto",
         "random_state": None,
     }
     _component_level = ComponentLevel.UNCOMMON  # TODO: RARE

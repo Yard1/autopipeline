@@ -102,6 +102,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         if is_categorical_dtype(col.dtype):
             if col.dtype.ordered:
+                col = col.copy()
                 return col.cat.codes.replace(-1, None)
             return col
 

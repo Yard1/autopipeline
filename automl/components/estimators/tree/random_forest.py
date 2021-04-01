@@ -204,8 +204,7 @@ def get_rf_n_estimators(config, space):
     X = config.X
     if X is None:
         return IntUniformDistribution(10, 100, log=True)
-    # TODO make sure that secondary tuner gets the max number BlendSearch got
-    return IntUniformDistribution(10, min(1000, int(X.shape[0])), log=True)
+    return IntUniformDistribution(10, min(2048, int(X.shape[0])), log=True)
 
 
 class RandomForestClassifier(TreeEstimator):
@@ -285,7 +284,7 @@ class RandomForestRegressor(TreeEstimator):
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_rf_n_estimators),
         "randomization_type": CategoricalDistribution(["rf", "et"]),
-        "criterion": CategoricalDistribution(["mse", "mae"]),
+        #"criterion": CategoricalDistribution(["mse", "mae"]),
         "min_samples_split": IntUniformDistribution(2, 20),
         "min_samples_leaf": IntUniformDistribution(1, 20),
         "max_features": CategoricalDistribution([None, "sqrt", "log2"]),

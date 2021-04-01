@@ -216,6 +216,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         result: Optional[Dict] = None,
         error: bool = False,
         state: TrialState = TrialState.COMPLETE,
+        num_intermediate_values: int = 1,
     ):
         if not self._space:
             raise RuntimeError(
@@ -253,7 +254,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             value=result.get(self.metric, None),
             params=config,
             distributions=distributions,
-            intermediate_values={0: result.get(self.metric, None)}
+            intermediate_values={k: result.get(self.metric, None) for k in range(num_intermediate_values)}
         )
         self._ot_trials[trial_id] = trial
 

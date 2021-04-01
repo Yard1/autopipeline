@@ -6,6 +6,7 @@ from ...search.stage import AutoMLStage
 
 class Flow(Transformer):
     _component_level = ComponentLevel.NECESSARY
+    _allow_duplicates = True
 
     @property
     def components_name(self) -> str:

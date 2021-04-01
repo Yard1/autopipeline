@@ -20,6 +20,7 @@ from sklearn.base import clone, is_classifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_random_state
 
+from .utils import lightgbm_rf_config as _lightgbm_rf_config
 from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
 from ...component import ComponentLevel
@@ -29,17 +30,6 @@ import warnings
 
 
 class BorutaSHAP(BorutaPy):
-    _lightgbm_rf_config = {
-        "n_jobs": 1,
-        "boosting_type": "rf",
-        "max_depth": 5,
-        "num_leaves": 32,
-        "subsample": 0.632,
-        "subsample_freq": 1,
-        "verbose": -1,
-        "learning_rate": 0.05,
-    }
-
     def __init__(
         self,
         estimator,
@@ -54,13 +44,9 @@ class BorutaSHAP(BorutaPy):
         n_iter_no_change=20,
     ):
         if estimator == "LGBMRegressor":
-            estimator = LGBMRegressor(
-                **self._lightgbm_rf_config
-            )
+            estimator = LGBMRegressor(**_lightgbm_rf_config)
         elif estimator == "LGBMClassifier":
-            estimator = LGBMClassifier(
-                **self._lightgbm_rf_config
-            )
+            estimator = LGBMClassifier(**_lightgbm_rf_config)
         super().__init__(
             estimator=estimator,
             n_estimators=n_estimators,
@@ -308,7 +294,7 @@ class BorutaSHAP(BorutaPy):
         Check hyperparameters as well as X and y before proceeding with fit.
         """
         # check X and y are consistent len, X is Array and y is column
-        X, y = check_X_y(X, y, dtype=None)
+        X, y = check_X_y(X, y, dtype=None, force_all_finite=False)
         if self.perc <= 0 or self.perc > 100:
             raise ValueError("The percentile should be between 0 and 100.")
 

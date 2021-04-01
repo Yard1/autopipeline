@@ -55,6 +55,7 @@ class Component(ABC):
     _component_level = ComponentLevel.COMMON
 
     _automl_id_sign = "\u200B"
+    _allow_duplicates = False
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters

@@ -431,6 +431,7 @@ class SharingSearchThread(SearchThread):
         if prune_attr:
             assert max_prune_attr
         self.max_prune_attr = max_prune_attr
+        self.resources = [1.0]
 
     def on_trial_complete(
         self,
@@ -469,10 +470,15 @@ class SharingSearchThread(SearchThread):
             logger.debug(
                 f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
             )
-            max_prune_attr_reached = (
-                self.prune_attr not in result
-                or np.around(result[self.prune_attr], 1) >= self.max_prune_attr
-            )
+            if self.prune_attr in result:
+                resource = np.around(result[self.prune_attr], 2)
+                if resource not in self.resources:
+                    self.resources.append(resource)
+                    self.resources.sort()
+                max_prune_attr_reached = resource >= self.max_prune_attr
+            else:
+                resource = 1.0
+                max_prune_attr_reached = True
             try:
                 if trial_id in self._search_alg._ot_trials:
                     if max_prune_attr_reached:
@@ -509,6 +515,7 @@ class SharingSearchThread(SearchThread):
                         state=TrialState.COMPLETE
                         if max_prune_attr_reached
                         else TrialState.PRUNED,
+                        num_intermediate_values=self.resources.index(resource) + 1,
                     )
                     assert return_val
                     return
@@ -699,6 +706,7 @@ class ConditionalBlendSearch(BlendSearch):
                 for point in points_to_evaluate
             ]
         self._points_to_evaluate = points_to_evaluate
+        self._points_to_evaluate_trials = {}
         self._ls = LocalSearch(
             init_config=init_config,
             metric=metric,
@@ -784,6 +792,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._conditional_space,
             self._time_attr,
             self._last_global_search,
+            self._points_to_evaluate,
+            self._points_to_evaluate_trials,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -805,6 +815,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._conditional_space,
             self._time_attr,
             self._last_global_search,
+            self._points_to_evaluate,
+            self._points_to_evaluate_trials,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
@@ -823,13 +835,65 @@ class ConditionalBlendSearch(BlendSearch):
         self._search_thread_pool[thread_id].on_trial_result(trial_id, result)
 
     def on_trial_complete(
-        self, trial_id: str, result: Optional[Dict] = None, error: bool = False
+        self, trial_id: str, result: Optional[dict] = None, error: bool = False
     ):
         """search thread updater and cleaner"""
         if result is None:
             result = {}
+
+        if self._points_to_evaluate:
+            self._points_to_evaluate_trials[trial_id] = (result, error)
+        elif self._points_to_evaluate_trials:
+            trials = [
+                (trial_id, v[0], v[1])
+                for trial_id, v in self._points_to_evaluate_trials.items()
+            ]
+            sorted_trials = []
+            bad_trials = []
+            for result in trials:
+                if not result[1] or result[2]:
+                    bad_trials.append(result)
+                else:
+                    sorted_trials.append(result)
+            sorted_trials.sort(key=lambda x: x[1][self._metric] * self._ls.metric_op)
+
+            middle_index = (len(sorted_trials) - 1) // 2
+            if len(sorted_trials) % 2 == 0:
+                median = (
+                    sorted_trials[middle_index][1][self._metric]
+                    + sorted_trials[middle_index + 1][1][self._metric]
+                ) / 2
+            else:
+                median = sorted_trials[middle_index][1][self._metric]
+            median *= self._ls.metric_op
+
+            for trial_id, result, error in sorted_trials + bad_trials:
+                self._on_trial_complete(
+                    trial_id,
+                    result=result,
+                    error=error,
+                    condition_kwargs={"median": median},
+                )
+            self._points_to_evaluate_trials = None
+        else:
+            return self._on_trial_complete(
+                trial_id=trial_id, result=result, error=error
+            )
+
+    def _on_trial_complete(
+        self,
+        trial_id: str,
+        result: Optional[dict] = None,
+        error: bool = False,
+        condition_kwargs=None,
+    ):
         thread_id = self._trial_proposed_by.get(trial_id)
-        create_condition = result and not thread_id and self._create_condition(result)
+        condition_kwargs = condition_kwargs or {}
+        create_condition = (
+            result
+            and not thread_id
+            and self._create_condition(result, **condition_kwargs)
+        )
         if thread_id in self._search_thread_pool:
             self._search_thread_pool[thread_id].on_trial_complete(
                 trial_id, result, error, thread_created=create_condition
@@ -895,6 +959,15 @@ class ConditionalBlendSearch(BlendSearch):
         if thread_id and thread_id in self._search_thread_pool:
             # local search thread
             self._clean(thread_id)
+
+    def _create_condition(self, result: dict, median=None) -> bool:
+        """create thread condition"""
+        if len(self._search_thread_pool) < 2:
+            return True
+        obj_median = median or np.median(
+            [thread.obj_best1 for id, thread in self._search_thread_pool.items() if id]
+        )
+        return result[self._metric] * self._ls.metric_op < obj_median
 
     def _update_admissible_region(self, config, admissible_min, admissible_max):
         # update admissible region
@@ -1238,12 +1311,12 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
-        if self.early_stopping and self.X_.shape[0] > 20001:
+        if self.early_stopping and self.X_.shape[0] > 4001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 10000 / self.X_.shape[0])
+            min_dist = max(min_dist, 2000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = min_dist
@@ -1315,8 +1388,9 @@ class BlendSearchTuner(RayTuneTuner):
             estimator_counts[config["Estimator"]] += 1
         most_common_estimators = estimator_counts.most_common()
         target_count = int(
-            np.mean([count for estimator, count in most_common_estimators])
+            np.median([count for estimator, count in most_common_estimators])
         )
+        target_count = max(target_count, 2)
         extra_params = []
 
         for estimator, count in most_common_estimators:
@@ -1343,7 +1417,7 @@ class BlendSearchTuner(RayTuneTuner):
         self._add_extra_random_trials_to_default_grid()
 
         # this is just to ensure constant order
-        self.default_grid_.sort(key=lambda x: hash(((k, v) for k, v in x.items())))
+        self._shuffle_default_grid()
 
         blend_search = ConditionalBlendSearch(
             space=self.pipeline_blueprint,
