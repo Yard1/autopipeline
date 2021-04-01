@@ -268,14 +268,14 @@ class TopPipeline(Pipeline):
     def get_estimator_distribution(self):
         return (self.components[-1][0], CategoricalDistribution(self.components[-1][1]))
 
-    def get_preprocessor_distribution(self, use_extended: bool = False):
+    def get_preprocessor_distribution(self, use_extended: bool = False) -> dict:
         grid = self.get_tuning_grid(use_extended=use_extended)
         grid.pop(self.components[-1][0])
         return {
             k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
         }
 
-    def get_all_distributions(self, use_extended: bool = False):
+    def get_all_distributions(self, use_extended: bool = False) -> dict:
         grid = self.get_tuning_grid(use_extended=use_extended)
         return {
             k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()

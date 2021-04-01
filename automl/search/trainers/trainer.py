@@ -25,7 +25,7 @@ register_ray()
 
 
 from ..ensemble import EnsembleStrategy, RoundRobin, RoundRobinEstimator
-from ..utils import ray_context, optimized_precision
+from ..utils import ray_context, optimized_precision, score_test
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
@@ -426,7 +426,7 @@ class Trainer:
             weights = np.append(weights, 1 - np.sum(weights))
             logger.debug(np.min(weights))
             ensemble.weights = weights
-            scores, _ = SklearnTrainable.score_test(
+            scores, _ = score_test(
                 ensemble,
                 np.zeros((1, 1)),
                 np.zeros((1, 1)),
@@ -631,7 +631,7 @@ class Trainer:
             return
         logger.debug("scoring ensemble")
         scoring = self.scoring_dict
-        scores, _ = SklearnTrainable.score_test(
+        scores, _ = score_test(
             ensemble,
             X,
             y,

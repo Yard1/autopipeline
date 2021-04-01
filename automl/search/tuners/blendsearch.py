@@ -139,7 +139,6 @@ class PatchedFLOW2(FLOW2):
         self.signature_space = list(space.keys())
         self._random = np.random.RandomState(seed)
         self._seed = seed
-        # TODO only consider cost-related HPOs
         if not init_config:
             logger.warning(
                 "No init config given to FLOW2. Using random initial config."
@@ -668,12 +667,6 @@ class ConditionalBlendSearch(BlendSearch):
         init_config = self._get_all_default_values(
             space, get_categorical=False, use_extended=use_extended
         )
-        # TODO make it a part of components
-        # init_config = {
-        #    k: v
-        #    for k, v in init_config.items()
-        #    if k.endswith("leaves") or k.endswith("depth") or k.endswith("n_estimators") or k.endswith("min_data_in_leaf")
-        # }
         tune_space, _ = get_all_tunable_params(
             space, to_str=True, use_extended=use_extended
         )
@@ -908,7 +901,6 @@ class ConditionalBlendSearch(BlendSearch):
                 )
             del self._trial_proposed_by[trial_id]
             # if not thread_id: logger.info(f"result {result}")
-        # TODO start creating threads only after initial points
         if result:
             config = self._suggested_configs[trial_id]
             (
@@ -955,7 +947,6 @@ class ConditionalBlendSearch(BlendSearch):
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
         #     f"{thread_id in self._search_thread_pool}")
-        # TODO add pruned trials to Optuna here
         if thread_id and thread_id in self._search_thread_pool:
             # local search thread
             self._clean(thread_id)

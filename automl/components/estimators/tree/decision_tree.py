@@ -27,7 +27,7 @@ class DecisionTreeClassifier(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": "sqrt",  # TODO: make dynamic
+        "max_features": "sqrt",
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
@@ -68,7 +68,7 @@ class DecisionTreeRegressor(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": None,  # TODO: make dynamic
+        "max_features": None,
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,

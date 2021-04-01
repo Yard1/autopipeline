@@ -8,22 +8,22 @@ from ...search.stage import AutoMLStage
 from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
 
-from ..utils import call_component_if_needed
+from ..utils import call_component_if_needed, MultimetricScorerWithErrorScore
 
 
-def remove_component_suffix(key: str):
+def remove_component_suffix(key: str) -> str:
     split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
     return "__".join(split_key)
 
 
-def split_list_into_chunks(lst: list, chunk_size: int):
+def split_list_into_chunks(lst: list, chunk_size: int) -> list:
     return [
         lst[i * chunk_size : (i + 1) * chunk_size]
         for i in range((len(lst) + chunk_size - 1) // chunk_size)
     ]
 
 
-def treat_config(config, component_strings, random_state=None):
+def treat_config(config: dict, component_strings: dict, random_state=None) -> dict:
     config = {k: component_strings.get(v, v) for k, v in config.items()}
     return {
         remove_component_suffix(k): call_component_if_needed(
@@ -33,7 +33,9 @@ def treat_config(config, component_strings, random_state=None):
     }
 
 
-def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
+def get_conditions(
+    spec: Dict, to_str: bool = False, use_extended: bool = False
+) -> dict:
     spec = copy(spec)
     conditions_spec = defaultdict(dict)
     estimator_name, estimators = spec.get_estimator_distribution()
@@ -75,8 +77,12 @@ def get_conditions(spec: Dict, to_str=False, use_extended=False) -> dict:
 
 
 def enforce_conditions_on_config(
-    config, conditional_space, prefix="", keys_to_keep=None, raise_exceptions=True
-):
+    config: dict,
+    conditional_space: dict,
+    prefix: str = "",
+    keys_to_keep: Optional[Union[dict, set]] = None,
+    raise_exceptions: bool = True,
+) -> dict:
     config = config.copy()
     allowed_keys = {"Estimator"}
     for param_key, independent_choice in conditional_space.items():
@@ -113,15 +119,13 @@ def enforce_conditions_on_config(
 
 
 def get_all_tunable_params(
-    pipeline: Pipeline, to_str=False, use_extended=False, space=None
+    pipeline: Pipeline,
+    to_str: bool = False,
+    use_extended: bool = False,
+    space: dict = None,
 ) -> Tuple[dict, dict]:
     if space is None:
-        space = {
-            k: v
-            for k, v in pipeline.get_all_distributions(
-                use_extended=use_extended
-            ).items()
-        }
+        space = pipeline.get_all_distributions(use_extended=use_extended)
     string_space = {}
     for k, v in space.items():
         choices = v.values

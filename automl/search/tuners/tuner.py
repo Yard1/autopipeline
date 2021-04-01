@@ -64,7 +64,7 @@ class Tuner(ABC):
         self.target_metric = target_metric
         self.scoring = scoring
 
-    def _get_single_default_hyperparams(self, components, grid):
+    def _get_single_default_hyperparams(self, components: dict, grid: list) -> dict:
         hyperparams = {}
         valid_keys = set()
         for k, v in components.items():
@@ -98,7 +98,7 @@ class Tuner(ABC):
                     return False
         return True
 
-    def _is_component_valid(self, component, estimator):
+    def _is_component_valid(self, component, estimator) -> bool:
         if component is estimator:
             return True
         if isinstance(component, Component):
@@ -128,8 +128,12 @@ class Tuner(ABC):
                     for extra_config in classes[type(config.get(step_name, None))]:
                         extra_config_presets.append(config.copy())
                         for k, v in extra_config.final_parameters.items():
-                            name = extra_config.get_hyperparameter_key_suffix(step_name, k)
-                            extra_config_presets[-1][name] = v if v is not None else "!None"
+                            name = extra_config.get_hyperparameter_key_suffix(
+                                step_name, k
+                            )
+                            extra_config_presets[-1][name] = (
+                                v if v is not None else "!None"
+                            )
             default_grid_list.extend(extra_config_presets)
 
         default_grid_list = [
@@ -248,7 +252,9 @@ class RayTuneTuner(Tuner):
 
     def _shuffle_default_grid(self):
         # default python hash is different on every run
-        self.default_grid_.sort(key=lambda x: xxd_hash(tuple((k, v) for k, v in x.items())))
+        self.default_grid_.sort(
+            key=lambda x: xxd_hash(tuple((k, v) for k, v in x.items()))
+        )
         np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):

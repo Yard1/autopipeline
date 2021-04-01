@@ -1,7 +1,5 @@
 from automl.problems.problem_type import ProblemType
-from sklearn.base import clone
 from sklearn.model_selection import cross_validate
-from sklearn.model_selection._validation import _score, _check_multimetric_scoring
 from sklearn.utils.metaestimators import _safe_split
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.metrics import make_scorer
@@ -23,10 +21,9 @@ from ray.util.joblib import register_ray
 register_ray()
 
 import lz4.frame
-from sklearn.utils.validation import check_is_fitted, NotFittedError
 
 from .utils import treat_config
-from ..utils import optimized_precision, MultimetricScorerWithErrorScore
+from ..utils import optimized_precision, score_test
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 from ...utils.estimators import set_param_context
@@ -151,30 +148,6 @@ class SklearnTrainable(Trainable):
             extra_cpu=cls.N_JOBS,
         )
 
-    # TODO move this outside
-    @staticmethod
-    def score_test(
-        estimator, X, y, X_test, y_test, scoring, refit=True, error_score=np.nan
-    ):
-        try:
-            check_is_fitted(estimator)
-        except NotFittedError:
-            refit = True
-        if refit:
-            estimator = clone(estimator)
-            estimator.fit(X, y)
-        scoring = MultimetricScorerWithErrorScore(
-            error_score=error_score, **_check_multimetric_scoring(estimator, scoring)
-        )
-        scores = _score(
-            estimator,
-            X_test,
-            y_test,
-            scoring,
-            error_score="raise",
-        )
-        return scores, estimator
-
     def _train(self):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
@@ -261,7 +234,7 @@ class SklearnTrainable(Trainable):
                     if k.endswith("n_jobs")
                 },
             ):
-                test_metrics, fitted_estimator = SklearnTrainable.score_test(
+                test_metrics, fitted_estimator = score_test(
                     estimator,
                     self.X_,
                     self.y_,

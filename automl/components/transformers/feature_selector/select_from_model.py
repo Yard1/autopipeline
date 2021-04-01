@@ -187,7 +187,7 @@ class SHAPSelectFromModelClassification(FeatureSelector):
         "n_estimators": "auto",
         "random_state": None,
     }
-    _component_level = ComponentLevel.UNCOMMON  # TODO: RARE
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
@@ -217,7 +217,7 @@ class SHAPSelectFromModelRegression(FeatureSelector):
         "n_estimators": "auto",
         "random_state": None,
     }
-    _component_level = ComponentLevel.UNCOMMON  # TODO: RARE
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.REGRESSION}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
