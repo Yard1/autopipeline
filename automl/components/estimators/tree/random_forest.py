@@ -218,7 +218,7 @@ class RandomForestClassifier(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": "sqrt",
+        "max_features": 0.2,
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
@@ -238,7 +238,7 @@ class RandomForestClassifier(TreeEstimator):
         "criterion": CategoricalDistribution(["gini", "entropy"]),
         "min_samples_split": IntUniformDistribution(2, 20),
         "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
+        "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),
@@ -268,7 +268,7 @@ class RandomForestRegressor(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": None,
+        "max_features": 1.0,
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
@@ -287,7 +287,7 @@ class RandomForestRegressor(TreeEstimator):
         #"criterion": CategoricalDistribution(["mse", "mae"]),
         "min_samples_split": IntUniformDistribution(2, 20),
         "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
+        "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),

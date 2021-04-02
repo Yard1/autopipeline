@@ -4,6 +4,7 @@ import pandas as pd
 from typing import Optional, Union
 
 from category_encoders.cat_boost import CatBoostEncoder as _CatBoostEncoder
+from category_encoders.wrapper import PolynomialWrapper
 from category_encoders.utils import convert_input, convert_input_vector
 from sklearn.model_selection import check_cv
 from sklearn.base import BaseEstimator, TransformerMixin, clone
@@ -187,7 +188,7 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         return X_ if self.return_same_type and is_pandas else X_.values
 
 
-class CatBoostEncoderClassification(Encoder):
+class CatBoostEncoderBinary(Encoder):
     _component_class = KFoldEncoderWrapper
     _default_parameters = {
         "base_transformer": _CatBoostEncoder(
@@ -208,9 +209,46 @@ class CatBoostEncoderClassification(Encoder):
         "is_classification": True,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.COMMON
+    _component_level = ComponentLevel.NECESSARY
     _problem_types = {
         ProblemType.BINARY,
+    }
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        if config is None:
+            return True
+        super_check = super().is_component_valid(config, stage)
+        return super_check and (
+            config.estimator is None
+            or not getattr(config.estimator, "_has_own_cat_encoding", False)
+        )
+
+
+class CatBoostEncoderMulticlass(Encoder):
+    _component_class = KFoldEncoderWrapper
+    _default_parameters = {
+        "base_transformer": PolynomialWrapper(
+            _CatBoostEncoder(
+                **{
+                    "verbose": 0,
+                    "cols": None,
+                    "drop_invariant": False,
+                    "return_df": True,
+                    "handle_unknown": "value",
+                    "handle_missing": "value",
+                    "random_state": None,
+                    "sigma": None,
+                    "a": 1,
+                }
+            )
+        ),
+        "cv": 5,
+        "return_same_type": True,
+        "is_classification": True,
+    }
+    _allowed_dtypes = {DataType.CATEGORICAL}
+    _component_level = ComponentLevel.NECESSARY
+    _problem_types = {
         ProblemType.MULTICLASS,
     }
 
@@ -245,7 +283,7 @@ class CatBoostEncoderRegression(Encoder):
         "is_classification": False,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
-    _component_level = ComponentLevel.COMMON
+    _component_level = ComponentLevel.NECESSARY
     _problem_types = {
         ProblemType.REGRESSION,
     }

@@ -8,6 +8,7 @@ from ..transformer import DataType
 from ...component import ComponentLevel, ComponentConfig
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ....search.stage import AutoMLStage
+from ...estimators.tree.tree_estimator import TreeEstimator
 
 
 class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
@@ -25,9 +26,11 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
         return pd.CategoricalDtype([0, 1])
 
     def _validate_keywords(self):
-        if self.handle_unknown not in ('error', 'ignore'):
-            msg = ("handle_unknown should be either 'error' or 'ignore', "
-                   "got {0}.".format(self.handle_unknown))
+        if self.handle_unknown not in ("error", "ignore"):
+            msg = (
+                "handle_unknown should be either 'error' or 'ignore', "
+                "got {0}.".format(self.handle_unknown)
+            )
             raise ValueError(msg)
 
     def fit(self, X, y=None):
@@ -57,6 +60,14 @@ class OneHotEncoder(Encoder):
         if config is None:
             return True
         super_check = super().is_component_valid(config, stage)
-        return super_check and (
-            config.estimator is None or not getattr(config.estimator, "_has_own_cat_encoding", False)
+        return (
+            super_check
+            and (
+                config.estimator is None
+                or not getattr(config.estimator, "_has_own_cat_encoding", False)
+            )
+            and (
+                config.estimator is None
+                or not isinstance(config.estimator, TreeEstimator)
+            )
         )

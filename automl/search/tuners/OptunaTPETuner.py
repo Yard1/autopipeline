@@ -8,6 +8,7 @@ from copy import copy
 import numpy as np
 import pandas as pd
 
+from ray.tune.result import DEFAULT_METRIC, TRAINING_ITERATION
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.optuna import OptunaSearch
@@ -35,9 +36,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def hyperopt_default_gamma(x: int) -> int:
-    return min(int(np.ceil(1.0 * np.sqrt(x))), 25)
-
 
 class ConditionalOptunaSearch(OptunaSearch):
     def __init__(
@@ -57,7 +55,9 @@ class ConditionalOptunaSearch(OptunaSearch):
             metric=metric, mode=mode, max_concurrent=None, use_early_stopped_trials=None
         )
 
-        self._conditional_space = get_conditions(space, to_str=True, use_extended=use_extended)
+        self._conditional_space = get_conditions(
+            space, to_str=True, use_extended=use_extended
+        )
         space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
         if remove_const_values:
             const_values = {
@@ -82,7 +82,6 @@ class ConditionalOptunaSearch(OptunaSearch):
             n_startup_trials=n_startup_trials,
             seed=seed,
             multivariate=True,
-            gamma=hyperopt_default_gamma,
         )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "
@@ -210,6 +209,47 @@ class ConditionalOptunaSearch(OptunaSearch):
                 raise ValueError(f"Unknown distribution suggester {fn}")
         return distributions
 
+    def on_trial_result(self, trial_id: str, result: Dict, step=None):
+        metric = result[self.metric]
+        step = result[TRAINING_ITERATION] if step is None else step
+        ot_trial = self._ot_trials[trial_id]
+        ot_trial.report(metric, step)
+
+    def on_trial_complete(
+        self,
+        trial_id: str,
+        result: Optional[Dict] = None,
+        error: bool = False,
+        state: TrialState = TrialState.COMPLETE,
+        num_intermediate_values: int = 1,
+    ):
+        ot_trial = self._ot_trials[trial_id]
+
+        if state == TrialState.PRUNED:
+            for i in range(num_intermediate_values):
+                self.on_trial_result(trial_id, result, step=i)
+        if state != TrialState.COMPLETE:
+            val = None
+        else:
+            val = result.get(self.metric, None) if result else None
+        try:
+            self._ot_study.tell(ot_trial, val, state=state)
+            if state == TrialState.FAIL:
+                self._ot_trials.pop(trial_id)
+        except ValueError as exc:
+            logger.warning(exc)  # E.g. if NaN was reported
+            print(exc)
+
+    def save(self, checkpoint_path: str):
+        save_object = (
+            self._sampler,
+            self._ot_trials,
+            self._ot_study,
+            self._points_to_evaluate,
+        )
+        with open(checkpoint_path, "wb") as outputFile:
+            pickle.dump(save_object, outputFile)
+
     def add_evaluated_trial(
         self,
         trial_id: str,
@@ -254,7 +294,9 @@ class ConditionalOptunaSearch(OptunaSearch):
             value=result.get(self.metric, None),
             params=config,
             distributions=distributions,
-            intermediate_values={k: result.get(self.metric, None) for k in range(num_intermediate_values)}
+            intermediate_values={
+                k: result.get(self.metric, None) for k in range(num_intermediate_values)
+            },
         )
         self._ot_trials[trial_id] = trial
 
@@ -264,7 +306,9 @@ class ConditionalOptunaSearch(OptunaSearch):
 
         return True
 
-    def suggest(self, trial_id: str, reask: bool = False, params=None) -> Optional[Dict]:
+    def suggest(
+        self, trial_id: str, reask: bool = False, params=None
+    ) -> Optional[Dict]:
         if not self._space:
             raise RuntimeError(
                 UNDEFINED_SEARCH_SPACE.format(
@@ -278,7 +322,10 @@ class ConditionalOptunaSearch(OptunaSearch):
                 )
             )
 
-        if reask or trial_id not in self._ot_trials:
+        if trial_id not in self._ot_trials:
+            self._ot_trials[trial_id] = self._ot_study.ask()
+        elif reask:
+            self._ot_study.tell(self._ot_trials[trial_id], None, TrialState.FAIL)
             self._ot_trials[trial_id] = self._ot_study.ask()
         ot_trial = self._ot_trials[trial_id]
 

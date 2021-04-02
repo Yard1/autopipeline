@@ -68,7 +68,8 @@ def create_pipeline_blueprint(
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
-        "CatBoostEncoderClassification": CatBoostEncoderClassification(),
+        "CatBoostEncoderBinary": CatBoostEncoderBinary(),
+        "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),
         "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
         "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
@@ -102,6 +103,8 @@ def create_pipeline_blueprint(
         "LGBMRegressor": LGBMRegressor(),
         "RandomForestClassifier": RandomForestClassifier(),
         "RandomForestRegressor": RandomForestRegressor(),
+        "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
+        "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
         "LinearSVC": LinearSVC(),
         "LinearSVR": LinearSVR(),
         "KNeighborsClassifier": KNeighborsClassifier(),

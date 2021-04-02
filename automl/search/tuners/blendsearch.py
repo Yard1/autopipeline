@@ -439,13 +439,17 @@ class SharingSearchThread(SearchThread):
         error: bool = False,
         thread_created: bool = True,
         update_results: bool = True,
+        add_to_gs: bool = True,
     ):
         """update the statistics of the thread"""
-        logger.debug(f"on_trial_complete {trial_id} {self._search_alg}")
+        print(f"on_trial_complete {trial_id} {self._search_alg}")
         if not self._search_alg:
             return
-        if pd.isnull(result["mean_validation_score"]):
+        if pd.isnull(result.get(self._search_alg.metric, None)):
             error = True
+        print(
+            f"on_trial_complete error: {error} thread_created: {thread_created} update_results: {update_results}"
+        )
         if not hasattr(self._search_alg, "_ot_trials"):
             # optuna doesn't handle error
             if self._is_ls or not self._init_config:
@@ -466,9 +470,6 @@ class SharingSearchThread(SearchThread):
                 # under this thread
                 self._init_config = False
         elif not error:
-            logger.debug(
-                f"Optuna has {len(self._search_alg._ot_study.trials)} trials in memory"
-            )
             if self.prune_attr in result:
                 resource = np.around(result[self.prune_attr], 2)
                 if resource not in self.resources:
@@ -478,31 +479,30 @@ class SharingSearchThread(SearchThread):
             else:
                 resource = 1.0
                 max_prune_attr_reached = True
+            print(
+                f"resource: {resource} max_prune_attr_reached: {max_prune_attr_reached}"
+            )
             try:
                 if trial_id in self._search_alg._ot_trials:
-                    if max_prune_attr_reached:
-                        logger.debug("adding trial result to optuna")
-                        self._search_alg.on_trial_complete(
-                            trial_id,
-                            enforce_conditions_on_config(
-                                result,
-                                self._search_alg._conditional_space,
-                                prefix="config/",
-                                keys_to_keep=self._search_alg._space,
-                            ),
-                        )
-                    else:
-                        self._search_alg.on_trial_result(
-                            trial_id,
-                            enforce_conditions_on_config(
-                                result,
-                                self._search_alg._conditional_space,
-                                prefix="config/",
-                                keys_to_keep=self._search_alg._space,
-                            ),
-                        )
-                elif max_prune_attr_reached or not thread_created:
-                    logger.debug("adding ls result to optuna")
+                    print("adding trial result to optuna")
+                    self._search_alg.on_trial_complete(
+                        trial_id,
+                        enforce_conditions_on_config(
+                            result,
+                            self._search_alg._conditional_space,
+                            prefix="config/",
+                            keys_to_keep=self._search_alg._space,
+                        ),
+                        state=TrialState.COMPLETE
+                        if max_prune_attr_reached
+                        else TrialState.PRUNED,
+                        num_intermediate_values=self.resources.index(resource) + 1,
+                    )
+                    print(
+                        f"Optuna has {len(self._search_alg._ot_study.trials)} ({len(self._search_alg._ot_study.get_trials(deepcopy=False, states=(TrialState.COMPLETE, TrialState.PRUNED)))} usable) trials in memory"
+                    )
+                elif add_to_gs:
+                    print("adding ls result to optuna")
                     return_val = self._search_alg.add_evaluated_trial(
                         trial_id,
                         enforce_conditions_on_config(
@@ -517,6 +517,9 @@ class SharingSearchThread(SearchThread):
                         num_intermediate_values=self.resources.index(resource) + 1,
                     )
                     assert return_val
+                    print(
+                        f"Optuna has {len(self._search_alg._ot_study.trials)} ({len(self._search_alg._ot_study.get_trials(deepcopy=False, states=(TrialState.COMPLETE, TrialState.PRUNED)))} usable) trials in memory"
+                    )
                     return
             except Exception as e:
                 logger.debug(
@@ -662,7 +665,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._time_attr = time_attr
 
         self._seed = seed
-        self._force_gs_after = 16
+        self._force_gs_after = 40
 
         init_config = self._get_all_default_values(
             space, get_categorical=False, use_extended=use_extended
@@ -718,6 +721,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._mem_threshold = (
             resources_per_trial.get("mem") if resources_per_trial else None
         )
+        self._reached_max_prune_attr = not bool(prune_attr)
         self._init_search()
 
     @property
@@ -787,6 +791,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._last_global_search,
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
+            self._reached_max_prune_attr,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -810,6 +815,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._last_global_search,
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
+            self._reached_max_prune_attr,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
@@ -828,58 +834,15 @@ class ConditionalBlendSearch(BlendSearch):
         self._search_thread_pool[thread_id].on_trial_result(trial_id, result)
 
     def on_trial_complete(
-        self, trial_id: str, result: Optional[dict] = None, error: bool = False
-    ):
-        """search thread updater and cleaner"""
-        if result is None:
-            result = {}
-
-        if self._points_to_evaluate:
-            self._points_to_evaluate_trials[trial_id] = (result, error)
-        elif self._points_to_evaluate_trials:
-            trials = [
-                (trial_id, v[0], v[1])
-                for trial_id, v in self._points_to_evaluate_trials.items()
-            ]
-            sorted_trials = []
-            bad_trials = []
-            for result in trials:
-                if not result[1] or result[2]:
-                    bad_trials.append(result)
-                else:
-                    sorted_trials.append(result)
-            sorted_trials.sort(key=lambda x: x[1][self._metric] * self._ls.metric_op)
-
-            middle_index = (len(sorted_trials) - 1) // 2
-            if len(sorted_trials) % 2 == 0:
-                median = (
-                    sorted_trials[middle_index][1][self._metric]
-                    + sorted_trials[middle_index + 1][1][self._metric]
-                ) / 2
-            else:
-                median = sorted_trials[middle_index][1][self._metric]
-            median *= self._ls.metric_op
-
-            for trial_id, result, error in sorted_trials + bad_trials:
-                self._on_trial_complete(
-                    trial_id,
-                    result=result,
-                    error=error,
-                    condition_kwargs={"median": median},
-                )
-            self._points_to_evaluate_trials = None
-        else:
-            return self._on_trial_complete(
-                trial_id=trial_id, result=result, error=error
-            )
-
-    def _on_trial_complete(
         self,
         trial_id: str,
         result: Optional[dict] = None,
         error: bool = False,
         condition_kwargs=None,
     ):
+        if result is None:
+            result = {}
+
         thread_id = self._trial_proposed_by.get(trial_id)
         condition_kwargs = condition_kwargs or {}
         create_condition = (
@@ -887,16 +850,22 @@ class ConditionalBlendSearch(BlendSearch):
             and not thread_id
             and self._create_condition(result, **condition_kwargs)
         )
+        print(
+            f"on_trial_complete thread_id {thread_id}, self._search_thread_pool {self._search_thread_pool}"
+        )
         if thread_id in self._search_thread_pool:
             self._search_thread_pool[thread_id].on_trial_complete(
                 trial_id, result, error, thread_created=create_condition
+            )
+            treat_as_thread_created = (
+                False if self._points_to_evaluate else create_condition
             )
             if thread_id > 0 and self._global_search_thread:
                 self._global_search_thread.on_trial_complete(
                     trial_id,
                     result,
                     error,
-                    thread_created=create_condition,
+                    thread_created=treat_as_thread_created,
                     update_results=False,
                 )
             del self._trial_proposed_by[trial_id]
@@ -947,6 +916,8 @@ class ConditionalBlendSearch(BlendSearch):
         # cleaner
         # logger.info(f"thread {thread_id} in search thread pool="
         #     f"{thread_id in self._search_thread_pool}")
+
+        # TODO add cleaned trials to Optuna
         if thread_id and thread_id in self._search_thread_pool:
             # local search thread
             self._clean(thread_id)
@@ -1003,7 +974,7 @@ class ConditionalBlendSearch(BlendSearch):
                 if self._last_global_search >= self._force_gs_after and backup:
                     choice = 0
                 else:
-                    self._last_global_search += 1
+                    self._last_global_search += 1 * int(self._reached_max_prune_attr)
             if not choice:
                 self._last_global_search = 0
             print(
@@ -1012,7 +983,6 @@ class ConditionalBlendSearch(BlendSearch):
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
             prune_attr = config.get(self._ls.prune_attr, None)
-            estimator = config["Estimator"]
             print(f"{trial_id} main choice suggestion: {config}")
             skip = self._should_skip(choice, trial_id, config)
             if skip:
@@ -1041,34 +1011,33 @@ class ConditionalBlendSearch(BlendSearch):
                 #    )  # tell GS there is an error
                 self._use_rs = False
                 use_backup = False
-                if choice == backup:
-                    # use CFO's init point
-                    init_config = self._ls.init_config
-                    config = self._ls.complete_config(
-                        init_config, self._ls_bound_min, self._ls_bound_max
-                    )
-                    self._trial_proposed_by[trial_id] = choice
-                elif not choice:
+                if not choice:
                     j = 0
+                    estimator = None
                     try:
-                        for _ in range(399):
+                        for i in range(499):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
-                            if config["Estimator"] != estimator:
+                            if estimator is None:
+                                estimator = config["Estimator"]
+                            elif config["Estimator"] != estimator:
                                 continue
                             prune_attr = config.get(self._ls.prune_attr, None)
+                            config[self._ls.prune_attr] = prune_attr
                             skip = self._should_skip(choice, trial_id, config)
                             if skip or not self._valid(
                                 config,
                                 min(
-                                    1 + ((j + 1) * (self._ls.STEPSIZE / 100)),
-                                    1 + self._ls.STEPSIZE,
+                                    1 + ((j + 1) * (1 / 50)),
+                                    2,
                                 ),
                             ):
                                 use_backup = True
                             else:
+                                print(f"Got a valid GS config in {i} steps")
                                 use_backup = False
+                                self._trial_proposed_by[trial_id] = choice
                                 break
                             j += 1
                     except TypeError:
@@ -1076,15 +1045,34 @@ class ConditionalBlendSearch(BlendSearch):
                 else:
                     use_backup = True
                 if use_backup:
-                    config = self._search_thread_pool[backup].suggest(trial_id)
-                    print(f"{trial_id} backup choice suggestion: {config}")
-                    prune_attr = config.get(self._ls.prune_attr, None)
-                    skip = self._should_skip(backup, trial_id, config)
-                    if skip:
-                        print(f"{trial_id} skipping choice={choice}, config={config}")
-                        return None
-                    self._trial_proposed_by[trial_id] = backup
-                    choice = backup
+                    try:
+                        assert choice == 0
+                        self._search_thread_pool[choice]._search_alg.on_trial_complete(
+                            trial_id, result=None, state=TrialState.FAIL
+                        )
+                        print(f"Marked {trial_id} as an error")
+                    except Exception as e:
+                        print(f"Couldn't mark {trial_id} as an error, {e}")
+                    if choice == backup:
+                        # use CFO's init point
+                        print("use CFO's init point")
+                        init_config = self._ls.init_config
+                        config = self._ls.complete_config(
+                            init_config, self._ls_bound_min, self._ls_bound_max
+                        )
+                        self._trial_proposed_by[trial_id] = choice
+                    else:
+                        config = self._search_thread_pool[backup].suggest(trial_id)
+                        print(f"{trial_id} backup choice suggestion: {config}")
+                        prune_attr = config.get(self._ls.prune_attr, None)
+                        skip = self._should_skip(backup, trial_id, config)
+                        if skip:
+                            print(
+                                f"{trial_id} skipping choice={choice}, config={config}"
+                            )
+                            return None
+                        self._trial_proposed_by[trial_id] = backup
+                        choice = backup
             if not choice:  # global search
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
@@ -1143,6 +1131,8 @@ class ConditionalBlendSearch(BlendSearch):
         if prune_attr:
             print(f"{trial_id} suggest prune_attr: {prune_attr}")
             assert prune_attr
+            if np.around(prune_attr, 1) >= 1.0:
+                self._reached_max_prune_attr = True
         clean_config = {}
         print(f"{trial_id} suggestion before enforcement: {config}")
         try:
@@ -1221,10 +1211,10 @@ class ConditionalBlendSearch(BlendSearch):
                 if not result and enforced_config_signature:
                     result = self._result.get(enforced_config_signature)
                 if result:
-                    self._search_thread_pool[choice].on_trial_complete(
-                        trial_id, result, error=False
-                    )
                     if choice:
+                        self._search_thread_pool[choice].on_trial_complete(
+                            trial_id, result, error=False, add_to_gs=False
+                        )
                         # local search thread
                         self._clean(choice)
                 # else:
