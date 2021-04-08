@@ -68,10 +68,10 @@ class KNNTransformer(KNN):
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
     _component_level = ComponentLevel.COMMON
-    _problem_types = {ProblemType.REGRESSION}
+    _problem_types = {ProblemType.REGRESSION, ProblemType.BINARY, ProblemType.MULTICLASS}
 
     _default_tuning_grid = {
-        "p": IntUniformDistribution(1, 2),
+        "p": IntUniformDistribution(1, 2, cost_related=False),
     }
 
 

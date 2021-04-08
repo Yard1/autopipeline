@@ -21,7 +21,7 @@ from sklearn.feature_selection import SelectFromModel as _SelectFromModel
 from sklearn.utils.validation import check_random_state
 from sklearn.feature_selection._from_model import _calculate_threshold
 
-from .utils import lightgbm_rf_config as _lightgbm_rf_config
+from .utils import lightgbm_fs_config as _lightgbm_rf_config
 from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
@@ -187,7 +187,7 @@ class SHAPSelectFromModelClassification(FeatureSelector):
         "n_estimators": "auto",
         "random_state": None,
     }
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
@@ -217,7 +217,7 @@ class SHAPSelectFromModelRegression(FeatureSelector):
         "n_estimators": "auto",
         "random_state": None,
     }
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.REGRESSION}
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:

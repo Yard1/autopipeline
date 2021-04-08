@@ -89,7 +89,7 @@ def create_pipeline_blueprint(
     }
     knn_transformers = {
         "KNNTransformer": KNNTransformer(),
-        "NCATransformer": NCATransformer(),
+        #"NCATransformer": NCATransformer(),
     }
     estimators = {
         #"DecisionTreeClassifier": DecisionTreeClassifier(),

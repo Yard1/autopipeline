@@ -1,12 +1,12 @@
-from automl.problems.problem_type import ProblemType
-from sklearn.model_selection import cross_validate
-from sklearn.utils.metaestimators import _safe_split
-from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
-from sklearn.metrics import make_scorer
 import numpy as np
 import gc
 from copy import deepcopy
 from collections import defaultdict
+
+from sklearn.model_selection import cross_validate
+from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+from sklearn.metrics import make_scorer
+from sklearn.utils import resample, _safe_indexing
 
 import ray
 import ray.exceptions
@@ -24,6 +24,7 @@ import lz4.frame
 
 from .utils import treat_config
 from ..utils import optimized_precision, score_test
+from ...problems.problem_type import ProblemType
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 from ...utils.estimators import set_param_context
@@ -31,6 +32,40 @@ from ...utils.estimators import set_param_context
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class _SubsampleMetaSplitterWithStratify(_SubsampleMetaSplitter):
+    """Splitter that subsamples a given fraction of the dataset"""
+
+    def __init__(
+        self, *, base_cv, fraction, subsample_test, random_state, stratify=False
+    ):
+        super().__init__(
+            base_cv=base_cv,
+            fraction=fraction,
+            subsample_test=subsample_test,
+            random_state=random_state,
+        )
+        self.stratify = stratify
+
+    def split(self, X, y, groups=None):
+        for train_idx, test_idx in self.base_cv.split(X, y, groups):
+            train_idx = resample(
+                train_idx,
+                replace=False,
+                random_state=self.random_state,
+                n_samples=int(self.fraction * train_idx.shape[0]),
+                stratify=_safe_indexing(y, train_idx) if self.stratify else None,
+            )
+            if self.subsample_test:
+                test_idx = resample(
+                    test_idx,
+                    replace=False,
+                    random_state=self.random_state,
+                    n_samples=int(self.fraction * test_idx.shape[0]),
+                    stratify=_safe_indexing(y, test_idx) if self.stratify else None,
+                )
+            yield train_idx, test_idx
 
 
 @ray.remote
@@ -71,6 +106,7 @@ class RayStore(object):
 
 
 # TODO break this up into a class for classification and for regression
+# TODO save all split scores
 class SklearnTrainable(Trainable):
     """Class to be passed in as the first argument of tune.run to train models.
 
@@ -142,7 +178,7 @@ class SklearnTrainable(Trainable):
     @classmethod
     def default_resource_request(cls, config):
         return Resources(
-            #cpu=cls.N_JOBS,
+            # cpu=cls.N_JOBS,
             cpu=1,
             gpu=0,
             extra_cpu=cls.N_JOBS,
@@ -170,11 +206,12 @@ class SklearnTrainable(Trainable):
 
         if is_early_stopping_on:
             # TODO is this stratifying?
-            subsample_cv = _SubsampleMetaSplitter(
+            subsample_cv = _SubsampleMetaSplitterWithStratify(
                 base_cv=self.cv,
                 fraction=prune_attr,
                 subsample_test=True,
                 random_state=self.random_state,
+                stratify=self.problem_type.is_classification(),
             )
         else:
             subsample_cv = self.cv

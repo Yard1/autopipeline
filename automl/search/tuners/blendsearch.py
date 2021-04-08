@@ -30,6 +30,7 @@ from typing import Dict, Optional, List, Tuple
 import numpy as np
 import traceback
 import pickle
+import time
 import gc
 from ray.tune.sample import Categorical
 
@@ -377,16 +378,16 @@ class PatchedFLOW2(FLOW2):
                 and self._num_allowed4incumbent == 0
             ):
                 self._num_allowed4incumbent = 2
-            if self._num_complete4incumbent == self.dir and (
-                not self._resource or self._resource == self.max_resource
+            if self._num_complete4incumbent >= self.dir and (
+                not self._resource or self._resource >= self.max_resource
             ):
+                print(f"step={self.step}, lb={self.step_lower_bound} _K={self._K}")
                 # check stuck condition if using max resource
                 if self.step >= self.step_lower_bound:
                     # decrease step size
                     self._oldK = self._K if self._K else self._iter_best_config
                     self._K = self.trial_count + 1
                     self.step *= (self._oldK / self._K) ** 3
-                    print(f"step={self.step}, lb={self.step_lower_bound} _K={self._K}")
                 self._num_complete4incumbent -= 2
                 if self._num_allowed4incumbent < 2:
                     self._num_allowed4incumbent = 2
@@ -598,6 +599,7 @@ class ConditionalBlendSearch(BlendSearch):
         mode: Optional[str] = None,
         space: Optional[dict] = None,
         points_to_evaluate: Optional[List[Dict]] = None,
+        low_cost_partial_config: Optional[dict] = None,
         cat_hp_cost: Optional[dict] = None,
         prune_attr: Optional[str] = None,
         min_resource: Optional[float] = None,
@@ -610,54 +612,6 @@ class ConditionalBlendSearch(BlendSearch):
         use_extended: bool = False,
         mem_size=None,
     ):
-        """Constructor
-
-        Args:
-            metric: A string of the metric name to optimize for.
-                minimization or maximization.
-            mode: A string in ['min', 'max'] to specify the objective as
-            space: A dictionary to specify the search space.
-            points_to_evaluate: Initial parameter suggestions to be run first.
-                The first element needs to be a dictionary from a subset of
-                controlled dimensions to the initial low-cost values.
-                e.g.,
-
-                .. code-block:: python
-
-                    [{'epochs': 1}]
-
-            cat_hp_cost: A dictionary from a subset of categorical dimensions
-                to the relative cost of each choice.
-                e.g.,
-
-                .. code-block:: python
-
-                    {'tree_method': [1, 1, 2]}
-
-                i.e., the relative cost of the
-                three choices of 'tree_method' is 1, 1 and 2 respectively.
-            prune_attr: A string of the attribute used for pruning.
-                Not necessarily in space.
-                When prune_attr is in space, it is a hyperparameter, e.g.,
-                    'n_iters', and the best value is unknown.
-                When prune_attr is not in space, it is a resource dimension,
-                    e.g., 'sample_size', and the peak performance is assumed
-                    to be at the max_resource.
-            min_resource: A float of the minimal resource to use for the
-                prune_attr; only valid if prune_attr is not in space.
-            max_resource: A float of the maximal resource to use for the
-                prune_attr; only valid if prune_attr is not in space.
-            reduction_factor: A float of the reduction factor used for
-                incremental pruning.
-            resources_per_trial: A dictionary of the resources permitted per
-                trial, such as 'mem'.
-            global_search_alg: A Searcher instance as the global search
-                instance. If omitted, Optuna is used. The following algos have
-                known issues when used as global_search_alg:
-                - HyperOptSearch raises exception sometimes
-                - TuneBOHB has its own scheduler
-            mem_size: A function to estimate the memory size for a given config.
-        """
         self._metric, self._mode = metric, mode
         self._conditional_space = get_conditions(
             space, to_str=True, use_extended=use_extended
@@ -665,7 +619,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._time_attr = time_attr
 
         self._seed = seed
-        self._force_gs_after = 40
+        self._force_gs_after = 100
 
         init_config = self._get_all_default_values(
             space,
@@ -852,6 +806,59 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
+        if self._points_to_evaluate:
+            self._points_to_evaluate_trials[trial_id] = (
+                trial_id,
+                result,
+                error,
+                condition_kwargs,
+            )
+        else:
+            if self._points_to_evaluate_trials:
+                clean_sorted_evaluted_trials = sorted(
+                    [
+                        trial
+                        for trial in self._points_to_evaluate_trials.values()
+                        if not pd.isnull(trial[1].get(self._metric, None))
+                    ],
+                    key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
+                )
+                median_trial = clean_sorted_evaluted_trials[
+                    len(clean_sorted_evaluted_trials) // 2
+                ]
+                self._points_to_evaluate_trials.pop(median_trial[0])
+                self._on_trial_complete(
+                    trial_id=median_trial[0],
+                    result=median_trial[1],
+                    error=median_trial[2],
+                    condition_kwargs=median_trial[3],
+                )
+                for trial in self._points_to_evaluate_trials.values():
+                    self._on_trial_complete(
+                        trial_id=trial[0],
+                        result=trial[1],
+                        error=trial[2],
+                        condition_kwargs=trial[3],
+                    )
+                self._points_to_evaluate_trials = None
+            else:
+                return self._on_trial_complete(
+                    trial_id=trial_id,
+                    result=result,
+                    error=error,
+                    condition_kwargs=condition_kwargs,
+                )
+
+    def _on_trial_complete(
+        self,
+        trial_id: str,
+        result: Optional[dict] = None,
+        error: bool = False,
+        condition_kwargs=None,
+    ):
+        if result is None:
+            result = {}
+
         thread_id = self._trial_proposed_by.get(trial_id)
         condition_kwargs = condition_kwargs or {}
         create_condition = (
@@ -970,12 +977,50 @@ class ConditionalBlendSearch(BlendSearch):
                     return False
         return True
 
+    def _select_thread(self) -> Tuple:
+        """thread selector; use can_suggest to check LS availability"""
+        # update priority
+        min_eci = self._deadline - time.time()
+        if min_eci <= 0:
+            return -1, -1
+        max_speed = 0
+        for thread in self._search_thread_pool.values():
+            if thread.speed > max_speed:
+                max_speed = thread.speed
+        for thread in self._search_thread_pool.values():
+            thread.update_eci(self._metric_target, max_speed)
+            if thread.eci < min_eci:
+                min_eci = thread.eci
+        for thread in self._search_thread_pool.values():
+            thread.update_priority(min_eci)
+
+        top_thread_id = backup_thread_id = 0
+        priority1 = self._search_thread_pool[0].priority
+        # print(f"priority of thread 0={priority1}, obj_best1={self._search_thread_pool[0].obj_best1}")
+        local_threads_by_priority = sorted(
+            [
+                (thread_id, thread)
+                for thread_id, thread in self._search_thread_pool.items()
+                if thread_id and thread.can_suggest
+            ],
+            reverse=True,
+            key=lambda x: x[1].priority,
+        )
+        if local_threads_by_priority:
+            top_thread_id = (
+                0
+                if priority1 >= local_threads_by_priority[0][1].priority
+                else local_threads_by_priority[0][0]
+            )
+            backup_thread_id = local_threads_by_priority[0][0]
+        return top_thread_id, backup_thread_id, local_threads_by_priority
+
     def suggest(self, trial_id: str) -> Optional[Dict]:
         """choose thread, suggest a valid config"""
         print(f"suggest {trial_id}, {len(self._points_to_evaluate)}")
         prune_attr = None
         if self._init_used and not self._points_to_evaluate:
-            choice, backup = self._select_thread()
+            choice, backup, local_threads_by_priority = self._select_thread()
             if choice < 0:
                 print(f"skipping choice={choice}")
                 return None  # timeout
@@ -1020,17 +1065,25 @@ class ConditionalBlendSearch(BlendSearch):
                 #    )  # tell GS there is an error
                 self._use_rs = False
                 use_backup = False
+                # TODO consider improving backup to use a thread with the same estimator?
                 if not choice:
                     j = 0
-                    estimator = None
+                    estimator = config["Estimator"]
+                    new_backup = next(
+                        (
+                            thread_id
+                            for thread_id, thread in local_threads_by_priority
+                            if thread._search_alg.space["Estimator"] == estimator
+                        ),
+                        None,
+                    )
+                    backup = new_backup if new_backup else backup
                     try:
                         for i in range(499):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
-                            if estimator is None:
-                                estimator = config["Estimator"]
-                            elif config["Estimator"] != estimator:
+                            if config["Estimator"] != estimator:
                                 continue
                             prune_attr = config.get(self._ls.prune_attr, None)
                             config[self._ls.prune_attr] = prune_attr
@@ -1039,7 +1092,7 @@ class ConditionalBlendSearch(BlendSearch):
                                 config,
                                 min(
                                     1 + ((j + 1) * (1 / 50)),
-                                    2,
+                                    3,
                                 ),
                             ):
                                 use_backup = True
@@ -1072,7 +1125,7 @@ class ConditionalBlendSearch(BlendSearch):
                         self._trial_proposed_by[trial_id] = choice
                     else:
                         config = self._search_thread_pool[backup].suggest(trial_id)
-                        print(f"{trial_id} backup choice suggestion: {config}")
+                        print(f"{trial_id} backup {backup} choice suggestion: {config}")
                         prune_attr = config.get(self._ls.prune_attr, None)
                         skip = self._should_skip(backup, trial_id, config)
                         if skip:
@@ -1301,12 +1354,12 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
-        if self.early_stopping and self.X_.shape[0] > 4001:
+        if self.early_stopping and self.X_.shape[0] > 10001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 2000 / self.X_.shape[0])
+            min_dist = max(min_dist, 5000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = min_dist

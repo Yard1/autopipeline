@@ -10,7 +10,7 @@ from pandas.api.types import (
 )
 
 from fastai.tabular.core import df_shrink, add_datepart
-from pandas.core.dtypes.common import is_categorical_dtype
+from pandas.core.dtypes.common import is_bool_dtype, is_categorical_dtype
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -107,7 +107,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             return col
 
         col_unqiue = col.unique()
-        if (
+        if is_bool_dtype(col.dtype) or (
             not is_numeric_dtype(col.dtype)
             or is_integer_dtype(col.dtype)
             and len(col_unqiue) <= 20

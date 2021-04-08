@@ -32,7 +32,7 @@ class LogisticRegression(LinearModelEstimator):
     _default_tuning_grid = {
         "C": UniformDistribution(0.01, 10, cost_related=False),
         "l1_ratio": UniformDistribution(0, 1, cost_related=False),
-        "class_weight": CategoricalDistribution([None, "balanced"]),
+        "class_weight": CategoricalDistribution([None, "balanced"], cost_related=False),
     }
     _default_tuning_grid_extended = {}
 

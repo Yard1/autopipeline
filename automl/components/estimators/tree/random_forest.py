@@ -234,18 +234,22 @@ class RandomForestClassifier(TreeEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_rf_n_estimators),
-        "randomization_type": CategoricalDistribution(["rf", "et"]),
-        "criterion": CategoricalDistribution(["gini", "entropy"]),
-        "min_samples_split": IntUniformDistribution(2, 20),
-        "min_samples_leaf": IntUniformDistribution(1, 20),
+        "randomization_type": CategoricalDistribution(["rf", "et"], cost_related=False),
+        "criterion": CategoricalDistribution(["gini", "entropy"], cost_related=False),
+        "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
+        "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
         "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_impurity_decrease": UniformDistribution(1e-10, 0.1, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.1, log=True),
+        "min_impurity_decrease": UniformDistribution(
+            1e-10, 0.1, log=True, cost_related=False
+        ),
+        "min_weight_fraction_leaf": UniformDistribution(
+            1e-10, 0.1, log=True, cost_related=False
+        ),
         "class_weight": CategoricalDistribution(
-            [None, "balanced", "balanced_subsample"]
+            [None, "balanced", "balanced_subsample"], cost_related=False
         ),
     }
 
@@ -283,16 +287,20 @@ class RandomForestRegressor(TreeEstimator):
 
     _default_tuning_grid = {
         "n_estimators": FunctionDistribution(get_rf_n_estimators),
-        "randomization_type": CategoricalDistribution(["rf", "et"]),
-        #"criterion": CategoricalDistribution(["mse", "mae"]),
-        "min_samples_split": IntUniformDistribution(2, 20),
-        "min_samples_leaf": IntUniformDistribution(1, 20),
+        "randomization_type": CategoricalDistribution(["rf", "et"], cost_related=False),
+        # "criterion": CategoricalDistribution(["mse", "mae"]),
+        "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
+        "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
         "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_impurity_decrease": UniformDistribution(1e-10, 0.1, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.1, log=True),
+        "min_impurity_decrease": UniformDistribution(
+            1e-10, 0.1, log=True, cost_related=False
+        ),
+        "min_weight_fraction_leaf": UniformDistribution(
+            1e-10, 0.1, log=True, cost_related=False
+        ),
     }
 
     _problem_types = {

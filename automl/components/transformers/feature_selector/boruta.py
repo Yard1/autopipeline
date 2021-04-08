@@ -20,7 +20,7 @@ from sklearn.base import clone, is_classifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_random_state
 
-from .utils import lightgbm_rf_config as _lightgbm_rf_config
+from .utils import lightgbm_fs_config as _lightgbm_rf_config
 from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
 from ...component import ComponentLevel

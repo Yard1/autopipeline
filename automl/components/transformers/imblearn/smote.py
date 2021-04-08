@@ -1,3 +1,5 @@
+import pandas as pd
+
 from imblearn.over_sampling import (
     SMOTE as _SMOTE,
     SMOTEN as _SMOTEN,

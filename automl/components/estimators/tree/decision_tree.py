@@ -27,7 +27,7 @@ class DecisionTreeClassifier(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": "sqrt",
+        "max_features": 0.2,
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
@@ -36,16 +36,20 @@ class DecisionTreeClassifier(TreeEstimator):
     }
 
     _default_tuning_grid = {
-        "criterion": CategoricalDistribution(["gini", "entropy"]),
+        "criterion": CategoricalDistribution(["gini", "entropy"], cost_related=False),
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_samples_split": IntUniformDistribution(2, 20),
-        "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
+        "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
+        "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
+        "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
-        "min_impurity_decrease": UniformDistribution(1e-10, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.5, log=True),
-        "class_weight": CategoricalDistribution([None, "balanced"]),
+        "min_impurity_decrease": UniformDistribution(
+            1e-10, 0.5, log=True, cost_related=False
+        ),
+        "min_weight_fraction_leaf": UniformDistribution(
+            1e-10, 0.5, log=True, cost_related=False
+        ),
+        "class_weight": CategoricalDistribution([None, "balanced"], cost_related=False),
     }
 
     _problem_types = {
@@ -68,7 +72,7 @@ class DecisionTreeRegressor(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": None,
+        "max_features": 1.0,
         "random_state": None,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
@@ -76,16 +80,22 @@ class DecisionTreeRegressor(TreeEstimator):
     }
 
     _default_tuning_grid = {
-        "criterion": CategoricalDistribution(["mse", "friedman_mse", "mae", "poisson"]),
+        "criterion": CategoricalDistribution(
+            ["mse", "friedman_mse", "mae", "poisson"], cost_related=False
+        ),
         "max_depth": FunctionDistribution(estimate_max_depth),
-        "min_samples_split": IntUniformDistribution(2, 20),
-        "min_samples_leaf": IntUniformDistribution(1, 20),
-        "max_features": CategoricalDistribution([None, "sqrt", "log2"]),
+        "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
+        "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
+        "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
-        "min_impurity_decrease": UniformDistribution(1e-10, 0.5, log=True),
-        "min_weight_fraction_leaf": UniformDistribution(1e-10, 0.5, log=True),
-  }
+        "min_impurity_decrease": UniformDistribution(
+            1e-10, 0.5, log=True, cost_related=False
+        ),
+        "min_weight_fraction_leaf": UniformDistribution(
+            1e-10, 0.5, log=True, cost_related=False
+        ),
+    }
 
     _problem_types = {
         ProblemType.REGRESSION,
