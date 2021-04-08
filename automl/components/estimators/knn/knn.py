@@ -20,7 +20,7 @@ class KNeighborsClassifier(KNNEstimator):
     }
 
     _default_tuning_grid = {
-        "n_neighbors": IntUniformDistribution(1, 40, log=True),
+        "n_neighbors": IntUniformDistribution(1, 40, log=True, cost_related=False),
         "weights": CategoricalDistribution(["uniform", "distance"]),
     }
     _default_tuning_grid_extended = {}
@@ -41,7 +41,7 @@ class KNeighborsRegressor(KNNEstimator):
     }
 
     _default_tuning_grid = {
-        "n_neighbors": IntUniformDistribution(1, 40, log=True),
+        "n_neighbors": IntUniformDistribution(1, 40, log=True, cost_related=False),
         "weights": CategoricalDistribution(["uniform", "distance"]),
     }
     _default_tuning_grid_extended = {}

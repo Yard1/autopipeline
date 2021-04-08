@@ -109,7 +109,7 @@ class LinearSVC(SVM):
         "penalty_loss": CategoricalDistribution(
             ["l2-squared_hinge", "l1-squared_hinge", "l2-hinge"]
         ),
-        "C": UniformDistribution(0.01, 10),
+        "C": UniformDistribution(0.01, 10, cost_related=False),
     }
     _default_tuning_grid_extended = {}
 
@@ -169,8 +169,8 @@ class LinearSVR(SVM):
         "loss": CategoricalDistribution(
             ["epsilon_insensitive", "squared_epsilon_insensitive"]
         ),
-        "C": UniformDistribution(0.01, 10),  # consider log like in autosklearn?
-        "epsilon": UniformDistribution(0.001, 1, log=True),
+        "C": UniformDistribution(0.01, 10, cost_related=False),  # consider log like in autosklearn?
+        "epsilon": UniformDistribution(0.001, 1, log=True, cost_related=False),
     }
     _default_tuning_grid_extended = {}
 

@@ -15,7 +15,7 @@ from .....search.distributions import (
 from ....component import ComponentLevel
 from .....problems import ProblemType
 
-# tuning inspired by https://github.com/microsoft/FLAML/blob/main/flaml/model.py
+# tuning based on https://github.com/microsoft/FLAML/blob/main/flaml/model.py
 
 
 def get_lgbm_n_estimators(config, space):
@@ -57,7 +57,7 @@ class LGBMClassifier(GradientBoosterEstimator):
     _default_tuning_grid_extended = {
         "subsample": UniformDistribution(0.1, 1.0),
         "colsample_bytree": UniformDistribution(0.01, 1.0),
-        "reg_alpha": UniformDistribution(1/1024, 1/1024, log=True),
+        "reg_alpha": UniformDistribution(1/1024, 1024, log=True),
         "reg_lambda": UniformDistribution(1/1024, 1024, log=True),
         "min_child_samples": IntUniformDistribution(2, 2**7, log=True),
         "class_weight": CategoricalDistribution([None, "balanced"]),
@@ -103,7 +103,7 @@ class LGBMRegressor(GradientBoosterEstimator):
     _default_tuning_grid_extended = {
         "subsample": UniformDistribution(0.1, 1.0),
         "colsample_bytree": UniformDistribution(0.01, 1.0),
-        "reg_alpha": UniformDistribution(1/1024, 1/1024, log=True),
+        "reg_alpha": UniformDistribution(1/1024, 1024, log=True),
         "reg_lambda": UniformDistribution(1/1024, 1024, log=True),
         "min_child_samples": IntUniformDistribution(2, 2**7, log=True),
     }

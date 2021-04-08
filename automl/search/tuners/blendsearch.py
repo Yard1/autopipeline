@@ -668,7 +668,10 @@ class ConditionalBlendSearch(BlendSearch):
         self._force_gs_after = 40
 
         init_config = self._get_all_default_values(
-            space, get_categorical=False, use_extended=use_extended
+            space,
+            get_categorical=False,
+            use_extended=use_extended,
+            only_cost_related=True,
         )
         tune_space, _ = get_all_tunable_params(
             space, to_str=True, use_extended=use_extended
@@ -729,7 +732,11 @@ class ConditionalBlendSearch(BlendSearch):
         return {"Estimator": self._conditional_space["Estimator"]}
 
     def _get_all_default_values(
-        self, pipeline_blueprint, get_categorical=True, use_extended=False
+        self,
+        pipeline_blueprint,
+        get_categorical=True,
+        use_extended=False,
+        only_cost_related=False,
     ) -> dict:
         default_grid = {
             k: v
@@ -742,6 +749,8 @@ class ConditionalBlendSearch(BlendSearch):
             for v2 in v.values:
                 for k3, v3 in v2.get_tuning_grid(use_extended=use_extended).items():
                     if not get_categorical and isinstance(v3, CategoricalDistribution):
+                        continue
+                    if only_cost_related and not v3.cost_related:
                         continue
                     name = v2.get_hyperparameter_key_suffix(k, k3)
                     default_values[name] = v3.default

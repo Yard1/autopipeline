@@ -46,8 +46,8 @@ class ElasticNet(LinearModelEstimator):
     }
 
     _default_tuning_grid = {
-        "alpha": UniformDistribution(0.01, 10),
-        "l1_ratio": UniformDistribution(0, 1),
+        "alpha": UniformDistribution(0.01, 10, cost_related=False),
+        "l1_ratio": UniformDistribution(0, 1, cost_related=False),
     }
     _default_tuning_grid_extended = {}
 

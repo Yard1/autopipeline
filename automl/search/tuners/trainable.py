@@ -169,6 +169,7 @@ class SklearnTrainable(Trainable):
         is_early_stopping_on = prune_attr and prune_attr < 1.0
 
         if is_early_stopping_on:
+            # TODO is this stratifying?
             subsample_cv = _SubsampleMetaSplitter(
                 base_cv=self.cv,
                 fraction=prune_attr,

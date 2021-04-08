@@ -67,10 +67,13 @@ class UniformDistribution(Distribution):
         If True, the distribution will be log-uniform.
     """
 
-    def __init__(self, lower: float, upper: float, log: bool = False):
+    def __init__(
+        self, lower: float, upper: float, log: bool = False, cost_related: bool = True
+    ):
         self.lower = lower
         self.upper = upper
         self.log = log
+        self.cost_related = cost_related
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -153,10 +156,13 @@ class IntUniformDistribution(Distribution):
         If True, the distribution will be log-uniform.
     """
 
-    def __init__(self, lower: int, upper: int, log: bool = False):
+    def __init__(
+        self, lower: int, upper: int, log: bool = False, cost_related: bool = True
+    ):
         self.lower = lower
         self.upper = upper
         self.log = log
+        self.cost_related = cost_related
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -250,10 +256,17 @@ class DiscreteUniformDistribution(Distribution):
     `get_skopt()` will return a standard uniform distribution.
     """
 
-    def __init__(self, lower: int, upper: int, q: Optional[float] = None):
+    def __init__(
+        self,
+        lower: int,
+        upper: int,
+        q: Optional[float] = None,
+        cost_related: bool = True,
+    ):
         self.lower = lower
         self.upper = upper
         self.q = q
+        self.cost_related = cost_related
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -327,7 +340,7 @@ class CategoricalDistribution(Distribution):
 
     None_str = "!None"
 
-    def __init__(self, values):
+    def __init__(self, values, cost_related: bool = True):
         self.values = [x if x is not None else self.None_str for x in values]
         try:
             self.values = list(set(self.values))
@@ -337,6 +350,7 @@ class CategoricalDistribution(Distribution):
                 if x not in new_values:
                     new_values.append(x)
             self.values = new_values
+        self.cost_related = cost_related
 
     @property
     def default(self):
@@ -400,14 +414,16 @@ class CategoricalDistribution(Distribution):
 
 
 class FunctionDistribution(Distribution):
-    def __init__(self, function):
+    def __init__(self, function, cost_related: bool = True):
         self.function = function
+        self.cost_related = cost_related
 
     def _validate_default(self, default):
         return True
 
     def __call__(self, config, stage):
         dist = self.function(config, stage)
+        dist.cost_related = self.cost_related
         try:
             dist.default = self.default
         except KeyError:

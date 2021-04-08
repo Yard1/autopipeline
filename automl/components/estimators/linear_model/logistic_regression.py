@@ -1,5 +1,8 @@
 import numpy as np
-from sklearn.linear_model import LogisticRegression as _LogisticRegression, LogisticRegressionCV as _LogisticRegressionCV
+from sklearn.linear_model import (
+    LogisticRegression as _LogisticRegression,
+    LogisticRegressionCV as _LogisticRegressionCV,
+)
 from .linear_model_estimator import LinearModelEstimator
 from ....problems import ProblemType
 from ....search.distributions import UniformDistribution, CategoricalDistribution
@@ -27,8 +30,8 @@ class LogisticRegression(LinearModelEstimator):
     }
 
     _default_tuning_grid = {
-        "C": UniformDistribution(0.01, 10),
-        "l1_ratio": UniformDistribution(0, 1),
+        "C": UniformDistribution(0.01, 10, cost_related=False),
+        "l1_ratio": UniformDistribution(0, 1, cost_related=False),
         "class_weight": CategoricalDistribution([None, "balanced"]),
     }
     _default_tuning_grid_extended = {}
