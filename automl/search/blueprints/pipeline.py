@@ -56,15 +56,13 @@ def create_pipeline_blueprint(
         ),
     }
     imbalance = {"AutoSMOTE": AutoSMOTE()}
-    numeric_imputers = {
-        "SimpleNumericImputer": SimpleNumericImputer(),
+    imputers = {
+        "CombinedSimpleImputer": CombinedSimpleImputer(),
+        "IterativeImputer": IterativeImputer(),
     }
     scalers_normalizers = {
         "CombinedScalerTransformer": CombinedScalerTransformer(),
         "MinMaxScaler": MinMaxScaler(),
-    }
-    categorical_imputers = {
-        "SimpleCategoricalImputer": SimpleCategoricalImputer(),
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
@@ -89,11 +87,11 @@ def create_pipeline_blueprint(
     }
     knn_transformers = {
         "KNNTransformer": KNNTransformer(),
-        #"NCATransformer": NCATransformer(),
+        # "NCATransformer": NCATransformer(),
     }
     estimators = {
-        #"DecisionTreeClassifier": DecisionTreeClassifier(),
-        #"DecisionTreeRegressor": DecisionTreeRegressor(),
+        # "DecisionTreeClassifier": DecisionTreeClassifier(),
+        # "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
         "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
         "LogisticRegression_EN": LogisticRegression(l1_ratio=0.5),
@@ -113,9 +111,8 @@ def create_pipeline_blueprint(
     components = {
         **passthrough,
         **imbalance,
-        **numeric_imputers,
+        **imputers,
         **scalers_normalizers,
-        **categorical_imputers,
         **categorical_encoders,
         **oridinal_encoder,
         **feature_selectors,
@@ -129,23 +126,7 @@ def create_pipeline_blueprint(
             "FeatureSelector",
             [components["Passthrough"]] + list(feature_selectors.values()),
         ),
-        (
-            "ColumnImputation",
-            ColumnTransformer(
-                transformers=[
-                    (
-                        "CategoricalImputer",
-                        list(categorical_imputers.values()),
-                        categorical_selector,
-                    ),
-                    (
-                        "NumericImputer",
-                        list(numeric_imputers.values()),
-                        numeric_selector,
-                    ),
-                ],
-            ),
-        ),
+        ("Imputer", list(imputers.values())),
         ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
         (
             "ColumnOrdinal",

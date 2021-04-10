@@ -7,6 +7,7 @@ from ...components.component import ComponentConfig, Component
 from ...search.stage import AutoMLStage
 from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
+from ...search.distributions.distributions import CategoricalDistribution
 
 from ..utils import call_component_if_needed, MultimetricScorerWithErrorScore
 
@@ -69,6 +70,8 @@ def get_conditions(
         conditions_spec[k] = defaultdict(dict)
         for choice in v.values:
             for k2, v2 in choice.get_tuning_grid(use_extended=use_extended).items():
+                if isinstance(v2, CategoricalDistribution) and len(v2.values) <= 1:
+                    continue
                 name = choice.get_hyperparameter_key_suffix(k, k2)
                 choice_key = str(choice) if to_str else choice
                 conditions_spec[k][choice_key][name] = True
@@ -135,6 +138,8 @@ def get_all_tunable_params(
     for k, v in space.items():
         for v2 in v.values:
             for k3, v3 in v2.get_tuning_grid(use_extended=use_extended).items():
+                if isinstance(v3, CategoricalDistribution) and len(v3.values) <= 1:
+                    continue
                 name = v2.get_hyperparameter_key_suffix(k, k3)
                 hyperparams[name] = v3
         if to_str:

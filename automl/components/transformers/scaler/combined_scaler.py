@@ -55,7 +55,7 @@ class CombinedScalerTransformer(Scaler):
     _component_class = PandasCombinedScalerTransformer
     _default_parameters = {
         "sparse_threshold": 0.3,
-        "n_jobs": None,
+        "n_jobs": 1,
         "transformer_weights": None,
         "verbose": False,
     }

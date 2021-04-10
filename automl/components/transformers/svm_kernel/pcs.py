@@ -1,4 +1,5 @@
 from sklearn.kernel_approximation import PolynomialCountSketch as _PolynomialCountSketch
+from sklearn.preprocessing import MinMaxScaler, Normalizer
 
 from .utils import GammaMixin
 from .svm_kernel import SVMKernel
@@ -24,7 +25,8 @@ class PolynomialCountSketchDynamicNComponents(GammaMixin, _PolynomialCountSketch
         n_features = X.shape[1]
         self._n_components = self.n_components
         self.n_components = max(self.n_components, 10 * n_features)
-        r = super().fit(X, y=y)
+        self.normalizer_ = Normalizer()
+        r = super().fit(self.normalizer_.fit_transform(X), y=y)
         new_n_components = self.n_components
         self.n_components = self._n_components
         self._n_components = new_n_components
@@ -33,7 +35,7 @@ class PolynomialCountSketchDynamicNComponents(GammaMixin, _PolynomialCountSketch
     def transform(self, X):
         old_n_components = self.n_components
         self.n_components = self._n_components
-        r = super().transform(X)
+        r = super().transform(self.normalizer_.transform(X))
         self.n_components = old_n_components
         return r
 

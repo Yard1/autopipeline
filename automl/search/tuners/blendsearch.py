@@ -89,6 +89,7 @@ class PatchedFLOW2(FLOW2):
         limit_space_to_init_config: bool = False,
         conditional_space=None,
         cost_attr="time_total_s",
+        tol=0.0001,
     ):
         """Constructor
 
@@ -173,10 +174,11 @@ class PatchedFLOW2(FLOW2):
             self._init_search()
         if self.prune_attr and self.prune_attr not in self.space and self.max_resource:
             self.signature_space.append(prune_attr)
+        self._tol = tol
 
     def _init_search(self):
         super()._init_search()
-        self.dir = max(self.dim - 2, 4)  # max number of trials without improvement
+        self.dir = max(self.dim//3, 4)  # max number of trials without improvement
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -271,6 +273,7 @@ class PatchedFLOW2(FLOW2):
             conditional_space=conditional_space,
             limit_space_to_init_config=limit_space_to_init_config,
             cost_attr=self.cost_attr,
+            tol=self._tol,
         )
         flow2.best_obj = obj * self.metric_op  # minimize internally
         flow2.cost_incumbent = cost
@@ -287,7 +290,7 @@ class PatchedFLOW2(FLOW2):
             and self._num_complete4incumbent > 0
             and self.cost_incumbent
             and self._resource
-            and self._resource < self.max_resource
+            and np.around(self._resource, 2) < self.max_resource
             and (
                 self._cost_complete4incumbent
                 >= self.cost_incumbent * self.resource_multiple_factor
@@ -341,7 +344,7 @@ class PatchedFLOW2(FLOW2):
             obj = result.get(self._metric)
             if obj:
                 obj *= self.metric_op
-                if self.best_obj is None or obj < self.best_obj:
+                if self.best_obj is None or obj < self.best_obj * (1+self._tol):
                     self.best_obj, self.best_config = obj, self._configs[trial_id]
                     self.incumbent = self.normalize(self.best_config)
                     self.cost_incumbent = result.get(self.cost_attr)
@@ -356,7 +359,7 @@ class PatchedFLOW2(FLOW2):
                     if self.step > self.step_ub:
                         self.step = self.step_ub
                     self._iter_best_config = self.trial_count
-                    return
+                return
         proposed_by = self._proposed_by.get(trial_id)
         if proposed_by == self.incumbent:
             # proposed by current incumbent and no better
@@ -379,7 +382,7 @@ class PatchedFLOW2(FLOW2):
             ):
                 self._num_allowed4incumbent = 2
             if self._num_complete4incumbent >= self.dir and (
-                not self._resource or self._resource >= self.max_resource
+                not self._resource or np.around(self._resource, 2) >= self.max_resource
             ):
                 print(f"step={self.step}, lb={self.step_lower_bound} _K={self._K}")
                 # check stuck condition if using max resource
@@ -619,7 +622,7 @@ class ConditionalBlendSearch(BlendSearch):
         self._time_attr = time_attr
 
         self._seed = seed
-        self._force_gs_after = 100
+        self._force_gs_after = 1000
 
         init_config = self._get_all_default_values(
             space,
@@ -679,6 +682,7 @@ class ConditionalBlendSearch(BlendSearch):
             resources_per_trial.get("mem") if resources_per_trial else None
         )
         self._reached_max_prune_attr = not bool(prune_attr)
+        self._diversification_multipliers = {}
         self._init_search()
 
     @property
@@ -755,6 +759,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
+            self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -779,6 +784,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
+            self._diversification_multipliers,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
@@ -823,15 +829,15 @@ class ConditionalBlendSearch(BlendSearch):
                     ],
                     key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
                 )
-                median_trial = clean_sorted_evaluted_trials[
-                    len(clean_sorted_evaluted_trials) // 2
+                cutoff_trial = clean_sorted_evaluted_trials[
+                    len(clean_sorted_evaluted_trials) // 4
                 ]
-                self._points_to_evaluate_trials.pop(median_trial[0])
+                self._points_to_evaluate_trials.pop(cutoff_trial[0])
                 self._on_trial_complete(
-                    trial_id=median_trial[0],
-                    result=median_trial[1],
-                    error=median_trial[2],
-                    condition_kwargs=median_trial[3],
+                    trial_id=cutoff_trial[0],
+                    result=cutoff_trial[1],
+                    error=cutoff_trial[2],
+                    condition_kwargs=cutoff_trial[3],
                 )
                 for trial in self._points_to_evaluate_trials.values():
                     self._on_trial_complete(
@@ -997,19 +1003,30 @@ class ConditionalBlendSearch(BlendSearch):
         top_thread_id = backup_thread_id = 0
         priority1 = self._search_thread_pool[0].priority
         # print(f"priority of thread 0={priority1}, obj_best1={self._search_thread_pool[0].obj_best1}")
+        #diversification_multiplier = 0.99
+        print(f"diversification: {self._diversification_multipliers}")
         local_threads_by_priority = sorted(
             [
-                (thread_id, thread)
+                (
+                    thread_id,
+                    thread,
+                    thread.priority
+                    #* (
+                    #    diversification_multiplier
+                    #    ** self._diversification_multipliers.get(thread_id, 0)
+                    #),
+                )
                 for thread_id, thread in self._search_thread_pool.items()
                 if thread_id and thread.can_suggest
             ],
             reverse=True,
-            key=lambda x: x[1].priority,
+            key=lambda x: x[2],
         )
+        print(local_threads_by_priority)
         if local_threads_by_priority:
             top_thread_id = (
                 0
-                if priority1 >= local_threads_by_priority[0][1].priority
+                if priority1 >= local_threads_by_priority[0][2]
                 else local_threads_by_priority[0][0]
             )
             backup_thread_id = local_threads_by_priority[0][0]
@@ -1037,6 +1054,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._use_rs = False
             config = self._search_thread_pool[choice].suggest(trial_id)
             prune_attr = config.get(self._ls.prune_attr, None)
+            estimator = config["Estimator"]
             print(f"{trial_id} main choice suggestion: {config}")
             skip = self._should_skip(choice, trial_id, config)
             if skip:
@@ -1068,11 +1086,10 @@ class ConditionalBlendSearch(BlendSearch):
                 # TODO consider improving backup to use a thread with the same estimator?
                 if not choice:
                     j = 0
-                    estimator = config["Estimator"]
                     new_backup = next(
                         (
                             thread_id
-                            for thread_id, thread in local_threads_by_priority
+                            for thread_id, thread, priority in local_threads_by_priority
                             if thread._search_alg.space["Estimator"] == estimator
                         ),
                         None,
@@ -1157,6 +1174,7 @@ class ConditionalBlendSearch(BlendSearch):
             ) = self._has_config_been_already_tried(config)
             self._result[config_signature] = {}
             self._result[enforced_config_signature] = {}
+
         else:  # use init config
             init_config = (
                 self._points_to_evaluate.pop(0)
@@ -1189,12 +1207,25 @@ class ConditionalBlendSearch(BlendSearch):
         # logger.info(f"config={config}")
         if prune_attr:
             config[self._ls.prune_attr] = prune_attr
+
         self._suggested_configs[trial_id] = config
         if prune_attr:
             print(f"{trial_id} suggest prune_attr: {prune_attr}")
             assert prune_attr
-            if np.around(prune_attr, 1) >= 1.0:
+            if np.around(prune_attr, 2) >= 1.0:
                 self._reached_max_prune_attr = True
+
+        # final_choice = self._trial_proposed_by.get(trial_id, 0)
+        # if final_choice and self._reached_max_prune_attr:
+        #     if final_choice not in self._diversification_multipliers:
+        #         self._diversification_multipliers[final_choice] = 0
+        #     else:
+        #         self._diversification_multipliers[final_choice] += max((len(self._search_thread_pool)-1)/2, 1.5)
+        # for k in self._diversification_multipliers.keys():
+        #     self._diversification_multipliers[k] = max(
+        #         self._diversification_multipliers[k]-0.5, 0
+        #     )
+
         clean_config = {}
         print(f"{trial_id} suggestion before enforcement: {config}")
         try:
@@ -1311,7 +1342,9 @@ class ConditionalBlendSearch(BlendSearch):
                     self._ls_bound_max[key] += self._ls.STEPSIZE
                     self._ls_bound_min[key] -= self._ls.STEPSIZE
         for id in todelete:
+            print(f"THREAD CLEANER deleting {id}")
             del self._search_thread_pool[id]
+            self._diversification_multipliers.pop(id, None)
 
 
 class BlendSearchTuner(RayTuneTuner):
@@ -1433,7 +1466,7 @@ class BlendSearchTuner(RayTuneTuner):
         target_count = int(
             np.median([count for estimator, count in most_common_estimators])
         )
-        target_count = max(target_count, 2)
+        target_count = min(target_count, 10)
         extra_params = []
 
         for estimator, count in most_common_estimators:

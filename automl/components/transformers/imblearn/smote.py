@@ -12,6 +12,7 @@ from .imblearn import ImblearnSampler
 from ..transformer import DataType
 from ...component import ComponentLevel
 from ....problems import ProblemType
+from ....search.distributions import IntUniformDistribution
 
 
 class PandasAutoSMOTE(BaseEstimator):
@@ -115,3 +116,7 @@ class AutoSMOTE(ImblearnSampler):
     }
     _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
+
+    _default_tuning_grid = {
+        "k_neighbors": IntUniformDistribution(2, 20, log=True, cost_related=False),
+    }

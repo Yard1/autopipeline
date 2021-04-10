@@ -250,8 +250,6 @@ class Pipeline(Flow):
             recursively_call_tuning_grid_funcs(step, config=config, stage=stage)
 
     def __copy__(self):
-        # self.spam is to be ignored, it is calculated anew for the copy
-        # create a new copy of ourselves *reusing* self.bar
         new = type(self)(tuning_grid=self.tuning_grid, **self.parameters)
         new.components = self.components.copy()
         new.components = [
