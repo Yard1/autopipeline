@@ -89,7 +89,7 @@ class PatchedFLOW2(FLOW2):
         limit_space_to_init_config: bool = False,
         conditional_space=None,
         cost_attr="time_total_s",
-        tol=0.0001,
+        tol=0.001,
     ):
         """Constructor
 
@@ -178,7 +178,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = max(self.dim//3, 4)  # max number of trials without improvement
+        self.dir = max(self.dim // 4, 3)  # max number of trials without improvement
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -344,7 +344,9 @@ class PatchedFLOW2(FLOW2):
             obj = result.get(self._metric)
             if obj:
                 obj *= self.metric_op
-                if self.best_obj is None or obj < self.best_obj * (1+self._tol):
+                if self.best_obj is None or obj < self.best_obj - np.abs(
+                    self.best_obj * self._tol
+                ):
                     self.best_obj, self.best_config = obj, self._configs[trial_id]
                     self.incumbent = self.normalize(self.best_config)
                     self.cost_incumbent = result.get(self.cost_attr)
@@ -359,7 +361,7 @@ class PatchedFLOW2(FLOW2):
                     if self.step > self.step_ub:
                         self.step = self.step_ub
                     self._iter_best_config = self.trial_count
-                return
+                    return
         proposed_by = self._proposed_by.get(trial_id)
         if proposed_by == self.incumbent:
             # proposed by current incumbent and no better
@@ -384,13 +386,15 @@ class PatchedFLOW2(FLOW2):
             if self._num_complete4incumbent >= self.dir and (
                 not self._resource or np.around(self._resource, 2) >= self.max_resource
             ):
-                print(f"step={self.step}, lb={self.step_lower_bound} _K={self._K}")
+                print(
+                    f"step={self.step}, lb={self.step_lower_bound} _oldK={self._iter_best_config} _K={self.trial_count + 1}"
+                )
                 # check stuck condition if using max resource
                 if self.step >= self.step_lower_bound:
                     # decrease step size
-                    self._oldK = self._K if self._K else self._iter_best_config
+                    self._oldK = self._iter_best_config
                     self._K = self.trial_count + 1
-                    self.step *= (self._oldK / self._K) ** 3
+                    self.step *= (self._oldK / self._K) ** 2
                 self._num_complete4incumbent -= 2
                 if self._num_allowed4incumbent < 2:
                     self._num_allowed4incumbent = 2
@@ -435,6 +439,13 @@ class SharingSearchThread(SearchThread):
             assert max_prune_attr
         self.max_prune_attr = max_prune_attr
         self.resources = [1.0]
+
+    def __repr__(self) -> str:
+        if self._is_ls:
+            return (
+                f"SharingSearchThread with FLOW2 {self._search_alg.space['Estimator']}"
+            )
+        return f"SharingSearchThread with {self._search_alg}"
 
     def on_trial_complete(
         self,
@@ -682,7 +693,7 @@ class ConditionalBlendSearch(BlendSearch):
             resources_per_trial.get("mem") if resources_per_trial else None
         )
         self._reached_max_prune_attr = not bool(prune_attr)
-        self._diversification_multipliers = {}
+        #self._diversification_multipliers = {}
         self._init_search()
 
     @property
@@ -759,7 +770,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
-            self._diversification_multipliers,
+            #self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
             pickle.dump(save_object, outputFile)
@@ -784,7 +795,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
-            self._diversification_multipliers,
+            #self._diversification_multipliers,
         ) = save_object
 
     def restore_from_dir(self, checkpoint_dir: str):
@@ -830,7 +841,7 @@ class ConditionalBlendSearch(BlendSearch):
                     key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
                 )
                 cutoff_trial = clean_sorted_evaluted_trials[
-                    len(clean_sorted_evaluted_trials) // 4
+                    min(len(clean_sorted_evaluted_trials) - 1, 2)
                 ]
                 self._points_to_evaluate_trials.pop(cutoff_trial[0])
                 self._on_trial_complete(
@@ -1003,18 +1014,18 @@ class ConditionalBlendSearch(BlendSearch):
         top_thread_id = backup_thread_id = 0
         priority1 = self._search_thread_pool[0].priority
         # print(f"priority of thread 0={priority1}, obj_best1={self._search_thread_pool[0].obj_best1}")
-        #diversification_multiplier = 0.99
-        print(f"diversification: {self._diversification_multipliers}")
+        # diversification_multiplier = 0.99
+        # print(f"diversification: {self._diversification_multipliers}")
         local_threads_by_priority = sorted(
             [
                 (
                     thread_id,
                     thread,
                     thread.priority
-                    #* (
+                    # * (
                     #    diversification_multiplier
                     #    ** self._diversification_multipliers.get(thread_id, 0)
-                    #),
+                    # ),
                 )
                 for thread_id, thread in self._search_thread_pool.items()
                 if thread_id and thread.can_suggest
@@ -1344,7 +1355,7 @@ class ConditionalBlendSearch(BlendSearch):
         for id in todelete:
             print(f"THREAD CLEANER deleting {id}")
             del self._search_thread_pool[id]
-            self._diversification_multipliers.pop(id, None)
+            #self._diversification_multipliers.pop(id, None)
 
 
 class BlendSearchTuner(RayTuneTuner):
