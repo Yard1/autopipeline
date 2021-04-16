@@ -4,7 +4,10 @@ import pandas as pd
 import ray.exceptions
 from joblib import Parallel
 
-from sklearn.ensemble import StackingClassifier, StackingRegressor
+from sklearn.ensemble import (
+    StackingClassifier as _StackingClassifier,
+    StackingRegressor as _StackingRegressor,
+)
 from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
@@ -14,8 +17,10 @@ from sklearn.base import is_classifier, clone
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
+from .ensemble import Ensemble
 from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_method
 from ....utils.estimators import clone_with_n_jobs_1
+from ....problems import ProblemType
 from ...preprocessing import PrepareDataFrame
 
 import logging
@@ -23,7 +28,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # TODO consider RFE for LogisticRegression
-class PandasStackingClassifier(StackingClassifier):
+class PandasStackingClassifier(_StackingClassifier):
     def fit(
         self,
         X,
@@ -221,7 +226,7 @@ class PandasStackingClassifier(StackingClassifier):
         return df
 
 
-class PandasStackingRegressor(StackingRegressor):
+class PandasStackingRegressor(_StackingRegressor):
     def fit(
         self,
         X,
@@ -415,3 +420,25 @@ class PandasStackingRegressor(StackingRegressor):
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df
+
+
+class StackingClassifier(Ensemble):
+    _component_class = PandasStackingClassifier
+
+    _default_parameters = {}
+
+    _default_tuning_grid = {}
+    _default_tuning_grid_extended = {}
+
+    _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
+
+
+class StackingRegressor(Ensemble):
+    _component_class = PandasStackingRegressor
+
+    _default_parameters = {}
+
+    _default_tuning_grid = {}
+    _default_tuning_grid_extended = {}
+
+    _problem_types = {ProblemType.REGRESSION}

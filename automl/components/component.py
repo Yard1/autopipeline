@@ -53,6 +53,7 @@ class Component(ABC):
         ProblemType.MULTICLASS,
     }
     _component_level = ComponentLevel.COMMON
+    _consider_for_initial_combinations = True
 
     _automl_id_sign = "\u200B"
     _allow_duplicates = False

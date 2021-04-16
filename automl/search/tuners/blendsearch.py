@@ -1504,6 +1504,7 @@ class BlendSearchTuner(RayTuneTuner):
         self._add_extra_random_trials_to_default_grid()
 
         # this is just to ensure constant order
+        # TODO: make sure that extra trials are at the end
         self._shuffle_default_grid()
 
         blend_search = ConditionalBlendSearch(

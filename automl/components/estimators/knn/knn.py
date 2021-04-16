@@ -3,6 +3,7 @@ from sklearn.neighbors import (
     KNeighborsRegressor as _KNeighborsRegressor,
 )
 from .knn_estimator import KNNEstimator
+from ...component import ComponentLevel
 from ....problems import ProblemType
 from ....search.distributions import IntUniformDistribution, CategoricalDistribution
 
@@ -24,7 +25,7 @@ class KNeighborsClassifier(KNNEstimator):
         "weights": CategoricalDistribution(["uniform", "distance"], cost_related=False),
     }
     _default_tuning_grid_extended = {}
-
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
 
@@ -45,5 +46,5 @@ class KNeighborsRegressor(KNNEstimator):
         "weights": CategoricalDistribution(["uniform", "distance"], cost_related=False),
     }
     _default_tuning_grid_extended = {}
-
+    _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.REGRESSION}

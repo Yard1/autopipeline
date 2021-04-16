@@ -265,8 +265,9 @@ class SklearnTrainable(Trainable):
             with set_param_context(
                 estimator,
                 cloned_estimators=fitted_estimator_list,
+                # TODO: look into why setting n_jobs to >1 here leads to way slower results
                 **{
-                    k: self.N_JOBS
+                    k: 1
                     for k, v in estimator.get_params().items()
                     if k.endswith("n_jobs")
                 },
@@ -305,14 +306,14 @@ class SklearnTrainable(Trainable):
         if store is not None:
             try:
                 store.put.remote(
-                    self.trial_id, "fold_predictions", ray.put(combined_predictions)
+                    self.trial_id, "fold_predictions", combined_predictions
                 )
             except ray.exceptions.ObjectStoreFullError:
                 pass
             if fitted_estimator is not None:
                 try:
                     store.put.remote(
-                        self.trial_id, "fitted_estimators", ray.put(fitted_estimator)
+                        self.trial_id, "fitted_estimators", fitted_estimator
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass

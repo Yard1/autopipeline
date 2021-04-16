@@ -111,7 +111,7 @@ class Tuner(ABC):
 
     def _get_default_components(self, pipeline_blueprint) -> dict:
         default_grid = {
-            k: v.values
+            k: [component for component in v.values if component._consider_for_initial_combinations]
             for k, v in pipeline_blueprint.get_all_distributions(
                 use_extended=self.use_extended
             ).items()
@@ -322,6 +322,7 @@ class RayTuneTuner(Tuner):
 
             logger.debug("getting estimators from ray object store")
             trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
+            # TODO: is this an anti pattern?
             fitted_estimators = [
                 RayStore.decompress(
                     ray.get(

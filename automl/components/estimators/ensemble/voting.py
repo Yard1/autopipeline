@@ -6,20 +6,26 @@ from joblib import Parallel
 from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
-from sklearn.ensemble import VotingClassifier, VotingRegressor
+from sklearn.ensemble import (
+    VotingClassifier as _VotingClassifier,
+    VotingRegressor as _VotingRegressor,
+)
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 
+from .ensemble import Ensemble
 from .utils import fit_single_estimator_if_not_fitted, call_method
 from ....utils.estimators import clone_with_n_jobs_1
+from ....problems import ProblemType
+
 
 class DummyClassifier(ClassifierMixin, BaseEstimator):
     def __init__(self, id, preds, pred_probas) -> None:
         self.id = id
         self.preds = preds
         self.pred_probas = pred_probas
-    
+
     def fit(self, X, y):
         return self
 
@@ -31,16 +37,18 @@ class DummyClassifier(ClassifierMixin, BaseEstimator):
 
 
 # TODO consider accumulation as in _BaseForest to avoid storing all preds
-class PandasVotingClassifier(VotingClassifier):
+class PandasVotingClassifier(_VotingClassifier):
     def fit(self, X, y, sample_weight=None, refit_estimators=True):
         check_classification_targets(y)
         if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:
-            raise NotImplementedError('Multilabel and multi-output'
-                                      ' classification is not supported.')
+            raise NotImplementedError(
+                "Multilabel and multi-output" " classification is not supported."
+            )
 
-        if self.voting not in ('soft', 'hard'):
-            raise ValueError("Voting must be 'soft' or 'hard'; got (voting=%r)"
-                             % self.voting)
+        if self.voting not in ("soft", "hard"):
+            raise ValueError(
+                "Voting must be 'soft' or 'hard'; got (voting=%r)" % self.voting
+            )
 
         self.le_ = LabelEncoder().fit(y)
         self.classes_ = self.le_.classes_
@@ -167,7 +175,8 @@ class PandasVotingClassifier(VotingClassifier):
         )
         return avg
 
-class PandasVotingRegressor(VotingRegressor):
+
+class PandasVotingRegressor(_VotingRegressor):
     def fit(self, X, y, sample_weight=None, refit_estimators=True):
         """Get common fit operations."""
         names, clfs = self._validate_estimators()
@@ -240,8 +249,7 @@ class PandasVotingRegressor(VotingRegressor):
             Predicted class labels.
         """
         check_is_fitted(self)
-        return np.average(self._predict(X), axis=1,
-                          weights=self._weights_not_none)
+        return np.average(self._predict(X), axis=1, weights=self._weights_not_none)
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
@@ -255,3 +263,25 @@ class PandasVotingRegressor(VotingRegressor):
         )
 
         return np.asarray(predictions).T
+
+
+class VotingClassifier(Ensemble):
+    _component_class = PandasVotingClassifier
+
+    _default_parameters = {}
+
+    _default_tuning_grid = {}
+    _default_tuning_grid_extended = {}
+
+    _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
+
+
+class VotingRegressor(Ensemble):
+    _component_class = PandasVotingRegressor
+
+    _default_parameters = {}
+
+    _default_tuning_grid = {}
+    _default_tuning_grid_extended = {}
+
+    _problem_types = {ProblemType.REGRESSION}

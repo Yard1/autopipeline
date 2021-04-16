@@ -5,7 +5,7 @@ import os
 import json
 from unittest.mock import patch
 import contextlib
-import collections
+import time
 
 from sklearn.base import BaseEstimator, clone
 from sklearn.model_selection._validation import _score, _check_multimetric_scoring
@@ -60,12 +60,19 @@ def score_test(
         check_is_fitted(estimator)
     except NotFittedError:
         refit = True
+    try:
+        print(f"estimator {estimator.__class__.__name__} n_jobs: {estimator.n_jobs}")
+    except Exception:
+        pass
     if refit:
+        st = time.time()
         estimator = clone(estimator)
         estimator.fit(X, y)
+        print(f"fitting on train took {time.time()-st}")
     scoring = MultimetricScorerWithErrorScore(
         error_score=error_score, **_check_multimetric_scoring(estimator, scoring)
     )
+    st = time.time()
     scores = _score(
         estimator,
         X_test,
@@ -73,6 +80,7 @@ def score_test(
         scoring,
         error_score="raise",
     )
+    print(f"scoring took {time.time()-st}")
     return scores, estimator
 
 

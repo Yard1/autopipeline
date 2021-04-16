@@ -1,7 +1,7 @@
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
-from typing import Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,7 +24,15 @@ from ray.util.joblib import register_ray
 register_ray()
 
 
-from ..ensemble import EnsembleStrategy, RoundRobin, RoundRobinEstimator
+from ..ensemble import (
+    EnsembleStrategy,
+    RoundRobin,
+    RoundRobinEstimator,
+    EnsembleCreator,
+    VotingByMetricEnsembleCreator,
+    VotingEnsembleCreator,
+    StackingEnsembleCreator,
+)
 from ..utils import ray_context, optimized_precision, score_test
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
@@ -60,8 +68,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-STACK_NAME = "Stack"
-
 
 class Trainer:
     def __init__(
@@ -74,12 +80,10 @@ class Trainer:
         tuner: Tuner = BlendSearchTuner,
         tuning_time: int = 600,
         target_metric=None,
-        best_percentile: int = 15,  # TODO: Move to EnsembleStrategy
-        max_stacking_size: int = 10,  # TODO: Move to EnsembleStrategy
-        stacking_strategy: Optional[EnsembleStrategy] = None,
+        secondary_tuning_strategy: Optional[EnsembleStrategy] = None,
+        main_stacking_ensemble: Optional[StackingEnsembleCreator] = None,
+        secondary_ensembles: Optional[List[EnsembleCreator]] = None,
         stacking_level: int = 0,
-        max_voting_size: int = 100,  # TODO: Move to EnsembleStrategy
-        voting_strategy: Optional[EnsembleStrategy] = None,
         return_test_scores_during_tuning: bool = True,
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
@@ -97,12 +101,30 @@ class Trainer:
         self.random_state = random_state
         self.early_stopping = early_stopping
         self.cache = cache
-        self.best_percentile = best_percentile
-        self.max_stacking_size = max_stacking_size
-        self.stacking_strategy = stacking_strategy or RoundRobinEstimator()
+        self.secondary_tuning_strategy = (
+            secondary_tuning_strategy or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=15)
+        )
         self.stacking_level = stacking_level
-        self.max_voting_size = max_voting_size
-        self.voting_strategy = voting_strategy or RoundRobinEstimator()
+        self.main_stacking_ensemble = main_stacking_ensemble or StackingEnsembleCreator(
+            ensemble_strategy=RoundRobinEstimator(
+                configurations_to_select=10, percentile_threshold=15
+            ),
+            problem_type=self.problem_type,
+        )
+        self.secondary_ensembles = secondary_ensembles or [
+            VotingEnsembleCreator(
+                ensemble_strategy=RoundRobinEstimator(
+                    configurations_to_select=100, percentile_threshold=15
+                ),
+                problem_type=self.problem_type,
+            ),
+            VotingByMetricEnsembleCreator(
+                ensemble_strategy=RoundRobinEstimator(
+                    configurations_to_select=100, percentile_threshold=15
+                ),
+                problem_type=self.problem_type,
+            ),
+        ]
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None
@@ -111,6 +133,10 @@ class Trainer:
         self._displays = {
             "tuner_plot_display": IPythonDisplay("tuner_plot_display"),
         }
+
+    @property
+    def main_stacking_ensemble_name(self):
+        return self.main_stacking_ensemble._ensemble_name
 
     @property
     def last_tuner_(self):
@@ -241,45 +267,19 @@ class Trainer:
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
         )
 
-        if "dataset_fraction" in results_df.columns:
-            results_df = results_df[
-                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
-            ]  # TODO make dynamic, add a warning if 100% of resource is not reached
-        percentile = self.best_percentile
+        # if "dataset_fraction" in results_df.columns:
+        #     results_df = results_df[
+        #         results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
+        #     ]  # TODO make dynamic, add a warning if 100% of resource is not reached
 
         if self.secondary_tuner is not None:
-            self._run_secondary_tuning(
-                X, y, pipeline_blueprint, percentile, groups=groups
-            )
+            self._run_secondary_tuning(X, y, pipeline_blueprint, groups=groups)
 
-        self.ensemble_results_.append({})
-        self.ensembles_.append({})
-        self._create_voting_by_metric_ensemble(
+        X_stack, X_test_stack = self._create_ensembles(
             X,
             y,
             results,
             results_df,
-            percentile,
-            pipeline_blueprint,
-            X_test=X_test,
-            y_test=y_test,
-        )
-        self._create_voting_ensemble(
-            X,
-            y,
-            results,
-            results_df,
-            percentile,
-            pipeline_blueprint,
-            X_test=X_test,
-            y_test=y_test,
-        )
-        X_stack, X_test_stack = self._create_stacking_ensemble(
-            X,
-            y,
-            results,
-            results_df,
-            percentile,
             pipeline_blueprint,
             X_test=X_test,
             y_test=y_test,
@@ -301,83 +301,57 @@ class Trainer:
             groups=groups,
         )
 
-    def _create_stacking_ensemble(
+    def _create_ensembles(
         self,
         X,
         y,
         results,
         results_df,
-        percentile,
         pipeline_blueprint,
         X_test=None,
         y_test=None,
-        final_estimator=None,
     ):
-        """
-        Creates a classic stacking ensemble
-        """
-        ensemble_name = STACK_NAME
-        if self.problem_type == ProblemType.REGRESSION:
-            metric = self.scoring_dict[self.target_metric]
-            final_estimator = (
-                final_estimator
-                or ElasticNetCV(
-                    random_state=self.random_state,
-                    cv=KFold(shuffle=True, random_state=self.random_state),
-                )()
-            )
-            ensemble_class = PandasStackingRegressor
-        elif self.problem_type.is_classification():
-            metric = self.scoring_dict["balanced_accuracy"]  # TODO fix after adding op as a scorer
-            final_estimator = (
-                final_estimator
-                or LogisticRegressionCV(
-                    scoring=metric,
-                    random_state=self.random_state,
-                    cv=StratifiedKFold(shuffle=True, random_state=self.random_state),
-                )()
-            )
-            ensemble_class = PandasStackingClassifier
-        else:
-            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+        ensemble_config = {
+            "X": X,
+            "y": y,
+            "results": results,
+            "results_df": results_df,
+            "pipeline_blueprint": pipeline_blueprint,
+            "metric_name": self.default_metric_name,
+            "metric": self.scoring_dict[self.target_metric]
+            if self.problem_type == ProblemType.REGRESSION
+            else self.scoring_dict["balanced_accuracy"],
+            "random_state": self.random_state,
+            "current_stacking_level": self.current_stacking_level,
+            "X_test": X_test,
+            "y_test": y_test,
+            "fold_predictions": self.last_tuner_.fold_predictions_,
+            "refit_estimators": False,
+            "cv": self.cv_,
+        }
+        (
+            main_stacking_ensemble_fitted,
+            X_stack,
+            X_test_stack,
+        ) = self.main_stacking_ensemble.fit_ensemble(**ensemble_config)
+        fitted_ensembles = {
+            ensemble._ensemble_name: ensemble.fit_ensemble(**ensemble_config)
+            for ensemble in self.secondary_ensembles
+        }
+        fitted_ensembles[
+            self.main_stacking_ensemble._ensemble_name
+        ] = main_stacking_ensemble_fitted
 
-        trial_ids_for_ensembling = self._select_trial_ids_for_stacking(
-            results, results_df, pipeline_blueprint, percentile
-        )
-        trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
-        estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
-        if not estimators:
-            raise ValueError("No estimators selected for stacking!")
-        logger.debug(f"creating stacking classifier with {len(estimators)}")
-        ensemble = ensemble_class(
-            estimators=estimators,
-            final_estimator=final_estimator,
-            cv=self.cv_,
-            n_jobs=None,
-        )
-        logger.debug("ensemble created")
-        gc.collect()
-        logger.debug("fitting ensemble")
-        print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
-        ensemble.fit(
-            X,
-            y,
-            predictions=[
-                self.last_tuner_.fold_predictions_[k] for k in trial_ids_for_ensembling
-            ],
-            refit_estimators=False,
-        )
-        X_stack = ensemble.stacked_predictions_
-        self.ensembles_[-1][ensemble_name] = ensemble
-        self._score_ensemble(
-            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
-        )
-        ensemble.n_jobs = None
-        if X_test is not None:
-            X_test_stack = ensemble.transform(X_test)
-        else:
-            X_test_stack = None
+        self.ensemble_results_.append({})
+        self.ensembles_.append(fitted_ensembles)
+        for ensemble_name, ensemble in fitted_ensembles.items():
+            self._score_ensemble(
+                ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
+            )
+            try:
+                ensemble.set_params(n_jobs=None)
+            except Exception:
+                pass
 
         return X_stack, X_test_stack
 
@@ -455,177 +429,6 @@ class Trainer:
         )
         return np.append(res.x, 1 - np.sum(res.x))
 
-    def _create_voting_by_metric_ensemble(
-        self,
-        X,
-        y,
-        results,
-        results_df,
-        percentile,
-        pipeline_blueprint,
-        X_test=None,
-        y_test=None,
-    ):
-        """
-        Creates a voting ensemble.
-        """
-        ensemble_name = "VotingByMetric"
-        # TODO support user defined metrics better
-        metric_name = self.default_metric_name
-        if self.problem_type == ProblemType.REGRESSION:
-            weight_function = (
-                lambda trial: trial["metrics"][metric_name]
-                if trial["metrics"][metric_name] > 0.5
-                else 0
-            )
-            ensemble_class = PandasVotingRegressor
-            ensemble_args = {}
-        elif self.problem_type.is_classification():
-            if self.problem_type == ProblemType.BINARY:
-                weight_function = (
-                    lambda trial: trial["metrics"][metric_name]
-                    if trial["metrics"][metric_name] > 0.5
-                    else 0
-                )
-            else:
-                weight_function = (
-                    lambda trial: trial["metrics"][metric_name]
-                    if trial["metrics"][metric_name] > 0
-                    else 0
-                )
-            ensemble_class = PandasVotingClassifier
-            ensemble_args = {"voting": "hard"}
-        else:
-            raise ValueError(f"Unknown ProblemType {self.problem_type}")
-
-        trial_ids_for_ensembling = self._select_trial_ids_for_voting(
-            results, results_df, pipeline_blueprint, percentile
-        )
-        trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
-        logger.debug(f"creating voting classifier with {self.max_voting_size}")
-        weights = [weight_function(trial) for trial in trials_for_ensembling]
-        trials_for_ensembling = [
-            results[k]
-            for idx, k in enumerate(trial_ids_for_ensembling)
-            if weights[idx] > 0
-        ]
-        weights = [weight for weight in weights if weight > 0]
-        estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
-        if not estimators:
-            raise ValueError("No estimators selected for ensembling!")
-        logger.debug(f"final number of estimators: {len(estimators)}")
-        ensemble = ensemble_class(
-            estimators=estimators,
-            n_jobs=None,
-            weights=weights,
-            **ensemble_args,
-        )
-        logger.debug("ensemble created")
-        gc.collect()
-        logger.debug("fitting ensemble")
-        print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
-        ensemble.fit(
-            X,
-            y,
-            refit_estimators=False,
-        )
-        self.ensembles_[-1][ensemble_name] = ensemble
-        self._score_ensemble(
-            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
-        )
-        ensemble.n_jobs = None
-
-    def _create_voting_ensemble(
-        self,
-        X,
-        y,
-        results,
-        results_df,
-        percentile,
-        pipeline_blueprint,
-        X_test=None,
-        y_test=None,
-    ):
-        """
-        Creates a voting ensemble.
-        """
-        ensemble_name = "VotingUniform"
-        metric_name = self.default_metric_name
-        if self.problem_type == ProblemType.REGRESSION:
-            weight_function = (
-                lambda trial: 1
-                if trial["metrics"][metric_name] > 0.5
-                else 0
-            )
-            ensemble_class = PandasVotingRegressor
-            ensemble_args = {}
-        elif self.problem_type.is_classification():
-            if self.problem_type == ProblemType.BINARY:
-                weight_function = (
-                    lambda trial: 1
-                    if trial["metrics"][metric_name] > 0.5
-                    else 0
-                )
-            else:
-                weight_function = (
-                    lambda trial: 1
-                    if trial["metrics"][metric_name] > 0
-                    else 0
-                )
-            ensemble_class = PandasVotingClassifier
-            ensemble_args = {"voting": "hard"}
-        else:
-            raise ValueError(f"Unknown ProblemType {self.problem_type}")
-
-        trial_ids_for_ensembling = self._select_trial_ids_for_voting(
-            results, results_df, pipeline_blueprint, percentile
-        )
-        trials_for_ensembling = [results[k] for k in trial_ids_for_ensembling]
-        logger.debug(f"creating voting classifier with {self.max_voting_size}")
-        weights = [weight_function(trial) for trial in trials_for_ensembling]
-        trials_for_ensembling = [
-            results[k]
-            for idx, k in enumerate(trial_ids_for_ensembling)
-            if weights[idx] > 0
-        ]
-        estimators = self._get_estimators_for_ensemble(trials_for_ensembling)
-        if not estimators:
-            raise ValueError("No estimators selected for ensembling!")
-        logger.debug(f"final number of estimators: {len(estimators)}")
-        ensemble = ensemble_class(
-            estimators=estimators,
-            n_jobs=None,
-            **ensemble_args,
-        )
-        logger.debug("ensemble created")
-        gc.collect()
-        logger.debug("fitting ensemble")
-        print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
-        ensemble.fit(
-            X,
-            y,
-            refit_estimators=False,
-        )
-        self.ensembles_[-1][ensemble_name] = ensemble
-        self._score_ensemble(
-            ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
-        )
-        ensemble.n_jobs = None
-
-    def _get_estimators_for_ensemble(self, trials_for_ensembling):
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-            io.StringIO()
-        ):
-            return [
-                (
-                    f"meta-{self.current_stacking_level}_{trial_result['trial_id']}",
-                    deepcopy(trial_result["estimator"]),
-                )
-                for trial_result in trials_for_ensembling
-            ]
-
     def _score_ensemble(self, ensemble, ensemble_name, X, y, X_test=None, y_test=None):
         if X_test is None:
             return
@@ -661,12 +464,13 @@ class Trainer:
     def _create_final_stack(self):
         # TODO change isinstance
         if len(self.ensembles_) <= 1:
-            return self.ensembles_[-1][STACK_NAME]
+            return self.ensembles_[-1][self.main_stacking_ensemble_name]
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
         ):
             cloned_ensembles = [
-                deepcopy(ensembles[STACK_NAME]) for ensembles in self.ensembles_
+                deepcopy(ensembles[self.main_stacking_ensemble_name])
+                for ensembles in self.ensembles_
             ]
         for idx in range(0, len(cloned_ensembles) - 1):
             cloned_ensembles[idx].passthrough = True
@@ -674,7 +478,8 @@ class Trainer:
             cloned_ensembles[idx].final_estimator_ = cloned_ensembles[idx + 1]
         return cloned_ensembles[0]
 
-    def _run_secondary_tuning(self, X, y, pipeline_blueprint, percentile, groups=None):
+    def _run_secondary_tuning(self, X, y, pipeline_blueprint, groups=None):
+        raise NotImplementedError()
         groupby_list = [
             f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
         ]
@@ -750,29 +555,6 @@ class Trainer:
         if cache:
             estimator.memory = dynamic_memory_factory(cache)  # TODO make dynamic
         return estimator
-
-    # TODO refactor those, use objects
-    def _select_trial_ids_for_stacking(
-        self, results: dict, results_df: pd.DataFrame, pipeline_blueprint, percentile
-    ) -> list:
-        return self.stacking_strategy.select_trial_ids(
-            results=results,
-            results_df=results_df,
-            configurations_to_select=self.max_stacking_size,
-            pipeline_blueprint=pipeline_blueprint,
-            percentile_threshold=percentile,
-        )
-
-    def _select_trial_ids_for_voting(
-        self, results: dict, results_df: pd.DataFrame, pipeline_blueprint, percentile
-    ) -> list:
-        return self.voting_strategy.select_trial_ids(
-            results=results,
-            results_df=results_df,
-            configurations_to_select=self.max_voting_size,
-            pipeline_blueprint=pipeline_blueprint,
-            percentile_threshold=percentile,
-        )
 
     def get_ensemble_by_id(self, ensemble_id):
         check_is_fitted(self)

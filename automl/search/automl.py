@@ -376,7 +376,7 @@ class AutoML(BaseEstimator):
 
     # TODO unify with above
     def _get_ensemble_result(
-        self, ensemble, ensemble_name, test_metrics, stacking_level: int = 0
+        self, ensemble, ensemble_name: str, test_metrics: dict, stacking_level: int = 0
     ):
         d = {
             "Id": f"{stacking_level}_{ensemble_name}",
@@ -401,7 +401,8 @@ class AutoML(BaseEstimator):
                 [
                     self._get_result(result, stacking_level)
                     for trial_id, result in results.items()
-                    if result.get("dataset_fraction", 1.0) >= 1.0
+                    if not show_full_trials_only
+                    or result.get("dataset_fraction", 1.0) >= 1.0
                 ]
             )
         for stacking_level, ensembles in enumerate(self.trainer_.ensembles_):

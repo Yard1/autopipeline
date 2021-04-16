@@ -44,6 +44,8 @@ def get_cv_predictions(
     fit_params=None,
     verbose=0,
 ):
+    if predictions and not len(predictions) == len(estimators):
+        raise ValueError(f"Length of predictions ({len(predictions)}) must be the same as the length of estimators ({len(estimators)}).")
     predictions_new = []
     fit_params = fit_params or {}
     for i, est_meth in enumerate(zip(estimators, stack_methods)):
@@ -55,7 +57,7 @@ def get_cv_predictions(
         else:
             prediction = {}
 
-        if meth in prediction:
+        if prediction and meth in prediction:
             predictions_new.append(prediction[meth])
         else:
             print(f"doing cv for {est}.{meth}")
