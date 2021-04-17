@@ -8,13 +8,17 @@ logger = logging.getLogger(__name__)
 
 
 class EnsembleStrategy(ABC):
-    def __init__(self, configurations_to_select: int, percentile_threshold:int) -> None:
+    def __init__(
+        self, configurations_to_select: int, percentile_threshold: int
+    ) -> None:
         self.configurations_to_select = configurations_to_select
-        self.percentile_threshold=percentile_threshold
+        self.percentile_threshold = percentile_threshold
         super().__init__()
 
     def select_trial_ids(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,
@@ -25,6 +29,8 @@ class EnsembleStrategy(ABC):
 class RoundRobin(EnsembleStrategy):
     def select_trial_ids(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,
@@ -72,6 +78,8 @@ class RoundRobin(EnsembleStrategy):
 class RoundRobinEstimator(EnsembleStrategy):
     def select_trial_ids(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,
@@ -117,16 +125,32 @@ class RoundRobinEstimator(EnsembleStrategy):
 class EnsembleBest(EnsembleStrategy):
     def select_trial_ids(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,
     ) -> list:
-        return None
+        if "dataset_fraction" in results_df.columns:
+            results_df = results_df[
+                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
+            ]  # TODO make dynamic, add a warning if 100% of resource is not reached
+        if self.configurations_to_select < 0:
+            return [x for x in set(results) if x in results_df.index]
+        percentile = np.percentile(
+            results_df["mean_validation_score"], self.percentile_threshold
+        )
+        sorted_results = results_df[
+            results_df["mean_validation_score"] >= percentile
+        ].sort_values(by="mean_validation_score", ascending=False)
+        return list(sorted_results.index[: self.configurations_to_select])
 
 
 class OneRoundRobinThenEnsembleBest(EnsembleStrategy):
     def select_trial_ids(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,

@@ -80,6 +80,7 @@ class VotingEnsembleCreator(EnsembleCreator):
             for idx, k in enumerate(self.trial_ids_for_ensembling_)
             if weights[idx] > 0
         ]
+        weights = [weight for weight in weights if weight > 0]
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level
         )

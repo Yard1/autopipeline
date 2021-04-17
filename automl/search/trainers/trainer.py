@@ -27,13 +27,16 @@ register_ray()
 from ..ensemble import (
     EnsembleStrategy,
     RoundRobin,
+    EnsembleBest,
     RoundRobinEstimator,
     EnsembleCreator,
     VotingByMetricEnsembleCreator,
     VotingEnsembleCreator,
     StackingEnsembleCreator,
+    SelectFromModelStackingEnsembleCreator,
 )
-from ..utils import ray_context, optimized_precision, score_test
+from ..utils import ray_context, score_test
+from ..metrics.metrics import optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
@@ -102,7 +105,8 @@ class Trainer:
         self.early_stopping = early_stopping
         self.cache = cache
         self.secondary_tuning_strategy = (
-            secondary_tuning_strategy or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=15)
+            secondary_tuning_strategy
+            or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=15)
         )
         self.stacking_level = stacking_level
         self.main_stacking_ensemble = main_stacking_ensemble or StackingEnsembleCreator(
@@ -121,6 +125,12 @@ class Trainer:
             VotingByMetricEnsembleCreator(
                 ensemble_strategy=RoundRobinEstimator(
                     configurations_to_select=100, percentile_threshold=15
+                ),
+                problem_type=self.problem_type,
+            ),
+            SelectFromModelStackingEnsembleCreator(
+                ensemble_strategy=EnsembleBest(
+                    configurations_to_select=200, percentile_threshold=1
                 ),
                 problem_type=self.problem_type,
             ),
@@ -333,7 +343,9 @@ class Trainer:
             main_stacking_ensemble_fitted,
             X_stack,
             X_test_stack,
-        ) = self.main_stacking_ensemble.fit_ensemble(**ensemble_config)
+        ) = self.main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
+            **ensemble_config
+        )
         fitted_ensembles = {
             ensemble._ensemble_name: ensemble.fit_ensemble(**ensemble_config)
             for ensemble in self.secondary_ensembles
@@ -352,7 +364,6 @@ class Trainer:
                 ensemble.set_params(n_jobs=None)
             except Exception:
                 pass
-
         return X_stack, X_test_stack
 
     def _get_optimal_voting_ensemble_weights(

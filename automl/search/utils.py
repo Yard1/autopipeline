@@ -6,45 +6,17 @@ import json
 from unittest.mock import patch
 import contextlib
 import time
+import traceback
 
 from sklearn.base import BaseEstimator, clone
 from sklearn.model_selection._validation import _score, _check_multimetric_scoring
 from sklearn.utils.validation import check_is_fitted, NotFittedError
 
 from sklearn.metrics._scorer import (
-    _MultimetricScorer,
-    partial,
-    _cached_call,
     _BaseScorer,
 )
+from .metrics.scorers import MultimetricScorerWithErrorScore
 from ..components.component import Component
-
-
-class MultimetricScorerWithErrorScore(_MultimetricScorer):
-    def __init__(self, error_score="raise", **scorers):
-        self._error_score = error_score
-        self._scorers = scorers
-
-    def __call__(self, estimator, *args, **kwargs):
-        """Evaluate predicted target values."""
-        scores = {}
-        cache = {} if self._use_cache(estimator) else None
-        cached_call = partial(_cached_call, cache)
-
-        for name, scorer in self._scorers.items():
-            try:
-                if isinstance(scorer, _BaseScorer):
-                    score = scorer._score(cached_call, estimator, *args, **kwargs)
-                else:
-                    score = scorer(estimator, *args, **kwargs)
-            except Exception as e:
-                if self._error_score == "raise":
-                    raise e
-                else:
-                    score = self._error_score
-            scores[name] = score
-        return scores
-
 
 def score_test(
     estimator: BaseEstimator,
@@ -89,17 +61,6 @@ def call_component_if_needed(possible_component, **kwargs):
         return possible_component(**kwargs)
     else:
         return possible_component
-
-
-# TODO make this better
-def optimized_precision(accuracy, recall, specificity):
-    """
-    Ranawana, Romesh & Palade, Vasile. (2006). Optimized Precision - A New Measure for Classifier Performance Evaluation. 2254 - 2261. 10.1109/CEC.2006.1688586.
-    """
-    try:
-        return accuracy - (np.abs(specificity - recall) / (specificity + recall))
-    except Exception:
-        return accuracy
 
 
 def flatten_iterable(x: list) -> list:

@@ -37,6 +37,7 @@ class PandasStackingClassifier(_StackingClassifier):
         fit_final_estimator=True,
         refit_estimators=True,
         predictions=None,
+        save_predictions=False,
     ):
         """Fit the estimators.
 
@@ -59,7 +60,7 @@ class PandasStackingClassifier(_StackingClassifier):
         self : object
         """
         logger.debug("fitting stack", flush=True)
-        self.preprocesser_ = PrepareDataFrame(find_id_column=False, copy_X=False)
+        self.preprocessor_ = PrepareDataFrame(find_id_column=False, copy_X=False)
         self.stacked_predictions_ = None
         self._le = LabelEncoder().fit(y)
         self.classes_ = self._le.classes_
@@ -135,7 +136,9 @@ class PandasStackingClassifier(_StackingClassifier):
             fit_params=fit_params,
             verbose=self.verbose,
         )
-        X_meta = self._concatenate_predictions(X, predictions)
+        X_meta = self._concatenate_predictions(
+            X, predictions, save_predictions=save_predictions
+        )
         # else:
         #    X_meta = X
         # Only not None or not 'drop' estimators will be used in transform.
@@ -174,7 +177,7 @@ class PandasStackingClassifier(_StackingClassifier):
 
         return self._concatenate_predictions(X, predictions)
 
-    def _concatenate_predictions(self, X, predictions):
+    def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
         possibly the input dataset `X`.
 
@@ -216,11 +219,12 @@ class PandasStackingClassifier(_StackingClassifier):
         ]
         meta_df = pd.concat(X_meta, axis=1)
         try:
-            self.stacked_predictions_ = self.preprocesser_.transform(meta_df)
-        except NotFittedError:
-            self.stacked_predictions_ = self.preprocesser_.fit_transform(meta_df)
-        self.stacked_predictions_.index = X.index
-        df = self.stacked_predictions_
+            df = self.preprocessor_.transform(meta_df)
+        except Exception:
+            df = self.preprocessor_.fit_transform(meta_df)
+        df.index = X.index
+        if save_predictions:
+            self.stacked_predictions_ = df
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df
@@ -235,6 +239,7 @@ class PandasStackingRegressor(_StackingRegressor):
         fit_final_estimator=True,
         refit_estimators=True,
         predictions=None,
+        save_predictions=False,
     ):
         """Fit the estimators.
 
@@ -257,7 +262,7 @@ class PandasStackingRegressor(_StackingRegressor):
         self : object
         """
         logger.debug("fitting stack", flush=True)
-        self.preprocesser_ = PrepareDataFrame(find_id_column=False, copy_X=False)
+        self.preprocessor_ = PrepareDataFrame(find_id_column=False, copy_X=False)
         self.stacked_predictions_ = None
         names, all_estimators = self._validate_estimators()
         # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
@@ -331,7 +336,9 @@ class PandasStackingRegressor(_StackingRegressor):
             fit_params=fit_params,
             verbose=self.verbose,
         )
-        X_meta = self._concatenate_predictions(X, predictions)
+        X_meta = self._concatenate_predictions(
+            X, predictions, save_predictions=save_predictions
+        )
         # else:
         #    X_meta = X
         # Only not None or not 'drop' estimators will be used in transform.
@@ -370,7 +377,7 @@ class PandasStackingRegressor(_StackingRegressor):
 
         return self._concatenate_predictions(X, predictions)
 
-    def _concatenate_predictions(self, X, predictions):
+    def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
         possibly the input dataset `X`.
 
@@ -412,11 +419,12 @@ class PandasStackingRegressor(_StackingRegressor):
         ]
         meta_df = pd.concat(X_meta, axis=1)
         try:
-            self.stacked_predictions_ = self.preprocesser_.transform(meta_df)
-        except NotFittedError:
-            self.stacked_predictions_ = self.preprocesser_.fit_transform(meta_df)
-        self.stacked_predictions_.index = X.index
-        df = self.stacked_predictions_
+            df = self.preprocessor_.transform(meta_df)
+        except Exception:
+            df = self.preprocessor_.fit_transform(meta_df)
+        df.index = X.index
+        if save_predictions:
+            self.stacked_predictions_ = df
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df

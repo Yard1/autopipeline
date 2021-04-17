@@ -23,6 +23,7 @@ from sklearn.utils.validation import check_random_state
 from .utils import lightgbm_fs_config as _lightgbm_rf_config
 from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
+from ..transformer import DataType
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -73,12 +74,14 @@ class BorutaSHAP(BorutaPy):
         self.estimator_ = clone(self.estimator)
         self._is_classification_ = is_classifier(self.estimator_)
 
-        if self._is_classification_ and self._is_lightgbm:
-            self.estimator_.set_params(
-                colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1]
-            )
+        # if self._is_classification_ and self._is_lightgbm:
+        #     self.estimator_.set_params(
+        #         colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1]
+        #     )
 
         X = X.apply(categorical_column_to_int_categories)
+        if DataType.is_categorical(y.dtype):
+            y = categorical_column_to_int_categories(y).astype(np.uint8)
 
         # check input params
         self._check_params(X, y)

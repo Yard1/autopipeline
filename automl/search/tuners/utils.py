@@ -9,7 +9,7 @@ from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
 from ...search.distributions.distributions import CategoricalDistribution
 
-from ..utils import call_component_if_needed, MultimetricScorerWithErrorScore
+from ..utils import call_component_if_needed
 
 
 def remove_component_suffix(key: str) -> str:

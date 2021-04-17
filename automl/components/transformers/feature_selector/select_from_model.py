@@ -26,6 +26,7 @@ from .feature_selector import FeatureSelector
 from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ...component import ComponentLevel, ComponentConfig
+from ..transformer import DataType
 from ...estimators.tree.tree_estimator import TreeEstimator
 from ....problems import ProblemType
 from ....search.stage import AutoMLStage
@@ -84,12 +85,12 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
             self.estimator.set_params(random_state=self.random_state)
         except:
             pass
-        if (
-            self._is_classification_
-            and "LGBM" in str(self.estimator)
-            or "lightgbm" in str(type(self.estimator))
-        ):
-            self.estimator.set_params(colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1])
+        # if (
+        #     self._is_classification_
+        #     and "LGBM" in str(self.estimator)
+        #     or "lightgbm" in str(type(self.estimator))
+        # ):
+        #     self.estimator.set_params(colsample_bytree=np.sqrt(X.shape[1]) / X.shape[1])
 
         # set n_estimators
         if self.n_estimators == "auto":
@@ -99,6 +100,8 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         self.estimator.set_params(n_estimators=estimators)
 
         X = X.apply(categorical_column_to_int_categories)
+        if DataType.is_categorical(y.dtype):
+            y = categorical_column_to_int_categories(y).astype(np.uint8)
         super().fit(X=X, y=y, **fit_params)
         self.shap_imp_ = self._get_shap_imp(X, self.estimator_)
         return self

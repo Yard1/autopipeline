@@ -142,7 +142,7 @@ class PandasVotingClassifier(_VotingClassifier):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = Parallel(n_jobs=self.n_jobs)(
+        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
             delayed(call_method)(
                 est,
                 "predict",
@@ -156,7 +156,7 @@ class PandasVotingClassifier(_VotingClassifier):
     def _collect_probas(self, X):
         """Collect results from clf.predict calls."""
 
-        predictions = Parallel(n_jobs=self.n_jobs)(
+        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
             delayed(call_method)(
                 est,
                 "predict_proba",
@@ -253,7 +253,7 @@ class PandasVotingRegressor(_VotingRegressor):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = Parallel(n_jobs=self.n_jobs)(
+        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
             delayed(call_method)(
                 est,
                 "predict",

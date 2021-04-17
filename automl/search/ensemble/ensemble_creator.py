@@ -53,11 +53,15 @@ class EnsembleCreator(ABC):
 
     def select_trial_ids_for_ensemble(
         self,
+        X: pd.DataFrame,
+        y: pd.Series,
         results: dict,
         results_df: pd.DataFrame,
         pipeline_blueprint,
     ) -> List[BaseEstimator]:
         self.trial_ids_for_ensembling_ = self.ensemble_strategy.select_trial_ids(
+            X=X,
+            y=y,
             results=results,
             results_df=results_df,
             pipeline_blueprint=pipeline_blueprint,
@@ -78,6 +82,6 @@ class EnsembleCreator(ABC):
         X_test: Optional[pd.DataFrame] = None,
         y_test: Optional[pd.Series] = None,
         **kwargs,
-    ) -> Union[BaseEstimator, Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]]:
+    ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)
-        self.select_trial_ids_for_ensemble(results, results_df, pipeline_blueprint)
+        self.select_trial_ids_for_ensemble(X, y, results, results_df, pipeline_blueprint)

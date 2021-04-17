@@ -23,7 +23,9 @@ register_ray()
 import lz4.frame
 
 from .utils import treat_config
-from ..utils import optimized_precision, score_test
+from ..utils import score_test
+from ..metrics.scorers import make_scorer_with_error_score
+from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
@@ -157,8 +159,11 @@ class SklearnTrainable(Trainable):
     def step(self):
         # forward-compatbility
         logger.debug("training")
-        with joblib.parallel_backend("ray"):
-            return self._train()
+        if self.N_JOBS > 1:
+            with joblib.parallel_backend("ray"):
+                return self._train()
+
+        return self._train()
 
     def _make_scoring_dict(self):
         scoring = self.scoring.copy()
@@ -166,13 +171,17 @@ class SklearnTrainable(Trainable):
         def dummy_score(y_true, y_pred):
             return 0
 
-        dummy_pred_scorer = make_scorer(dummy_score, greater_is_better=True)
+        dummy_pred_scorer = make_scorer_with_error_score(dummy_score, greater_is_better=True, error_score=0)
         scoring["dummy_pred_scorer"] = dummy_pred_scorer
         if self.problem_type.is_classification():
-            dummy_pred_proba_scorer = make_scorer(
-                dummy_score, greater_is_better=True, needs_proba=True
+            dummy_pred_proba_scorer = make_scorer_with_error_score(
+                dummy_score, greater_is_better=True, needs_proba=True, error_score=0
             )
             scoring["dummy_pred_proba_scorer"] = dummy_pred_proba_scorer
+            dummy_decision_function_scorer = make_scorer_with_error_score(
+                dummy_score, greater_is_better=True, needs_threshold=True, error_score=0
+            )
+            scoring["dummy_decision_function_scorer"] = dummy_decision_function_scorer
         return scoring
 
     @classmethod

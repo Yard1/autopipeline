@@ -975,7 +975,7 @@ class ConditionalBlendSearch(BlendSearch):
                 elif value < admissible_min[key]:
                     admissible_min[key] = value
 
-    def _valid(self, config: Dict, step_multiplier=1) -> bool:
+    def _valid(self, config: dict, step_multiplier=1) -> bool:
         """config validator"""
         normalized_config = self._ls.normalize(config)
         step_size = self._ls.STEPSIZE * step_multiplier
@@ -993,6 +993,23 @@ class ConditionalBlendSearch(BlendSearch):
                     )
                     return False
         return True
+
+    def _make_config_valid(self, config: dict):
+        normalized_config = self._ls.normalize(config)
+        step_size = self._ls.STEPSIZE
+        enforced_values = {}
+        for key in self._gs_admissible_min:
+            if key in config:
+                value = normalized_config[key]
+                # logger.info(
+                #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
+                if (
+                    value + step_size < self._gs_admissible_min[key]
+                ):
+                    enforced_values[key] = min(0, self._gs_admissible_min[key] - step_size)
+                elif value > self._gs_admissible_max[key] + step_size:
+                    enforced_values[key] = max(1, self._gs_admissible_max[key] + step_size)
+        return {**config, **self._ls.denormalize(enforced_values)}
 
     def _select_thread(self) -> Tuple:
         """thread selector; use can_suggest to check LS availability"""
@@ -1066,6 +1083,7 @@ class ConditionalBlendSearch(BlendSearch):
             config = self._search_thread_pool[choice].suggest(trial_id)
             prune_attr = config.get(self._ls.prune_attr, None)
             estimator = config["Estimator"]
+            retried_GS = False
             print(f"{trial_id} main choice suggestion: {config}")
             skip = self._should_skip(choice, trial_id, config)
             if skip:
@@ -1107,7 +1125,8 @@ class ConditionalBlendSearch(BlendSearch):
                     )
                     backup = new_backup if new_backup else backup
                     try:
-                        for i in range(499):
+                        retried_GS = True
+                        for i in range(199):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
@@ -1120,7 +1139,7 @@ class ConditionalBlendSearch(BlendSearch):
                                 config,
                                 min(
                                     1 + ((j + 1) * (1 / 50)),
-                                    3,
+                                    2,
                                 ),
                             ):
                                 use_backup = True
@@ -1131,6 +1150,7 @@ class ConditionalBlendSearch(BlendSearch):
                                 break
                             j += 1
                     except TypeError:
+                        retried_GS = False
                         use_backup = True
                 else:
                     use_backup = True
@@ -1143,26 +1163,46 @@ class ConditionalBlendSearch(BlendSearch):
                         print(f"Marked {trial_id} as an error")
                     except Exception as e:
                         print(f"Couldn't mark {trial_id} as an error, {e}")
-                    if choice == backup:
-                        # use CFO's init point
-                        print("use CFO's init point")
-                        init_config = self._ls.init_config
-                        config = self._ls.complete_config(
-                            init_config, self._ls_bound_min, self._ls_bound_max
-                        )
+                    if retried_GS:
+                        print("forcing config to be valid")
+                        config.pop(None, None)
+                        config = self._make_config_valid(config)
+                        assert config["Estimator"] == estimator
+                        config[self._ls.prune_attr] = self._ls.min_resource
                         self._trial_proposed_by[trial_id] = choice
-                    else:
-                        config = self._search_thread_pool[backup].suggest(trial_id)
-                        print(f"{trial_id} backup {backup} choice suggestion: {config}")
-                        prune_attr = config.get(self._ls.prune_attr, None)
-                        skip = self._should_skip(backup, trial_id, config)
+                        skip = self._should_skip(choice, trial_id, config)
                         if skip:
                             print(
                                 f"{trial_id} skipping choice={choice}, config={config}"
                             )
-                            return None
-                        self._trial_proposed_by[trial_id] = backup
-                        choice = backup
+                            retried_GS = False
+                    if not retried_GS:
+                        if choice == backup:
+                            # use CFO's init point
+                            print("use CFO's init point")
+                            init_config = self._ls.init_config
+                            config = self._ls.complete_config(
+                                init_config, self._ls_bound_min, self._ls_bound_max
+                            )
+                            skip = self._should_skip(choice, trial_id, config)
+                            if skip:
+                                print(
+                                    f"{trial_id} skipping choice={choice}, config={config}"
+                                )
+                                return None
+                            self._trial_proposed_by[trial_id] = choice
+                        else:
+                            config = self._search_thread_pool[backup].suggest(trial_id)
+                            print(f"{trial_id} backup {backup} choice suggestion: {config}")
+                            prune_attr = config.get(self._ls.prune_attr, None)
+                            skip = self._should_skip(backup, trial_id, config)
+                            if skip:
+                                print(
+                                    f"{trial_id} skipping choice={choice}, config={config}"
+                                )
+                                return None
+                            self._trial_proposed_by[trial_id] = backup
+                            choice = backup
             if not choice:  # global search
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
