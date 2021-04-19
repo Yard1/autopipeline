@@ -5,7 +5,7 @@ import numpy as np
 import gc
 from abc import ABC
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from ...components.estimators.linear_model import (
@@ -14,6 +14,7 @@ from ...components.estimators.linear_model import (
     ElasticNetCV,
     ElasticNet,
 )
+from ...components.transformers.misc.drop_columns import PandasSelectColumns
 from ...components.estimators.estimator import Estimator
 from ...components.estimators.ensemble import StackingClassifier, StackingRegressor
 from ...components.transformers.feature_selector import (
@@ -56,13 +57,13 @@ class StackingEnsembleCreator(EnsembleCreator):
         if self.problem_type == ProblemType.REGRESSION:
             self.final_estimator_ = self.final_estimator or ElasticNet(
                 random_state=random_state,
-                #cv=KFold(shuffle=True, random_state=random_state),
+                # cv=KFold(shuffle=True, random_state=random_state),
             )
         elif self.problem_type.is_classification():
             self.final_estimator_ = self.final_estimator or LogisticRegression(
-                #scoring=metric,
+                # scoring=metric,
                 random_state=random_state,
-                #cv=StratifiedKFold(shuffle=True, random_state=random_state),
+                # cv=StratifiedKFold(shuffle=True, random_state=random_state),
             )
         else:
             raise ValueError(f"Unknown ProblemType {self.problem_type}")
@@ -246,9 +247,9 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                     (
                         "FinalEstimator",
                         self.final_estimator
-                        or ElasticNetCV(
+                        or ElasticNet(
                             random_state=random_state,
-                            cv=KFold(shuffle=True, random_state=random_state),
+                            # cv=KFold(shuffle=True, random_state=random_state),
                         ),
                     ),
                 ]
@@ -266,9 +267,9 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                         "FinalEstimator",
                         self.final_estimator
                         or LogisticRegression(
-                            #scoring=metric,
+                            # scoring=metric,
                             random_state=random_state,
-                            #cv=StratifiedKFold(shuffle=True, random_state=random_state),
+                            # cv=StratifiedKFold(shuffle=True, random_state=random_state),
                         ),
                     ),
                 ]
@@ -320,7 +321,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         print(indices_to_keep)
         estimator_names_to_remove = {
             name
-            for name, estimator in ensemble.estimators
+            for name, _ in ensemble.estimators
             if name not in estimator_names_to_keep
         }
         print(estimator_names_to_remove)
@@ -341,6 +342,10 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             for i, stack_method in enumerate(ensemble.stack_method_)
             if i in indices_to_keep
         ]
-        ensemble.final_estimator = ensemble.final_estimator._final_estimator
-        ensemble.final_estimator_ = ensemble.final_estimator_._final_estimator
+        print(ensemble.final_estimator_)
+        ensemble.final_estimator_ = ensemble.final_estimator_.steps[0] = (
+            ensemble.final_estimator_.steps[0][0],
+            PandasSelectColumns(columns_selected),
+        )
+        ensemble.final_estimator = clone(ensemble.final_estimator_)
         return ensemble, X_stack, X_stack_test

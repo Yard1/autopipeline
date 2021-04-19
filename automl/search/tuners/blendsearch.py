@@ -535,7 +535,7 @@ class SharingSearchThread(SearchThread):
                     print(
                         f"Optuna has {len(self._search_alg._ot_study.trials)} ({len(self._search_alg._ot_study.get_trials(deepcopy=False, states=(TrialState.COMPLETE, TrialState.PRUNED)))} usable) trials in memory"
                     )
-                    return
+                    #return
             except Exception as e:
                 logger.debug(
                     f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
@@ -545,6 +545,7 @@ class SharingSearchThread(SearchThread):
                 )
 
         if update_results and result and not error:
+            print(f"updating results {trial_id} {self._search_alg}, searcher metric {self._search_alg.metric} {result[self._search_alg.metric]}")
             if self.cost_attr in result:
                 self.cost_last = result[self.cost_attr]
                 self.cost_total += self.cost_last
@@ -840,10 +841,7 @@ class ConditionalBlendSearch(BlendSearch):
                     ],
                     key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
                 )
-                # calculate priority here instead?
-                cutoff_trial = clean_sorted_evaluted_trials[
-                    min(len(clean_sorted_evaluted_trials) - 1, 2)
-                ]
+                cutoff_trial = clean_sorted_evaluted_trials[len(clean_sorted_evaluted_trials)//4]
                 self._points_to_evaluate_trials.pop(cutoff_trial[0])
                 self._on_trial_complete(
                     trial_id=cutoff_trial[0],
@@ -859,6 +857,10 @@ class ConditionalBlendSearch(BlendSearch):
                         condition_kwargs=trial[3],
                     )
                 self._points_to_evaluate_trials = None
+                #self._last_global_search = np.inf
+                #_, _, local_threads_by_priority = self._select_thread()
+                #for thread_id, _, _ in local_threads_by_priority[2:]:
+                #    del self._search_thread_pool[thread_id] 
             else:
                 return self._on_trial_complete(
                     trial_id=trial_id,
@@ -877,7 +879,7 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
-        thread_id = self._trial_proposed_by.get(trial_id)
+        thread_id = self._trial_proposed_by[trial_id]
         condition_kwargs = condition_kwargs or {}
         create_condition = (
             result
@@ -1051,6 +1053,7 @@ class ConditionalBlendSearch(BlendSearch):
             reverse=True,
             key=lambda x: x[2],
         )
+        print(f"global search priority: {priority1}")
         print(local_threads_by_priority)
         if local_threads_by_priority:
             top_thread_id = (
@@ -1116,18 +1119,18 @@ class ConditionalBlendSearch(BlendSearch):
                 # TODO consider improving backup to use a thread with the same estimator?
                 if not choice:
                     j = 0
-                    new_backup = next(
-                        (
-                            thread_id
-                            for thread_id, thread, priority in local_threads_by_priority
-                            if thread._search_alg.space["Estimator"] == estimator
-                        ),
-                        None,
-                    )
-                    backup = new_backup if new_backup else backup
+                    # new_backup = next(
+                    #     (
+                    #         thread_id
+                    #         for thread_id, thread, priority in local_threads_by_priority
+                    #         if thread._search_alg.space["Estimator"] == estimator
+                    #     ),
+                    #     None,
+                    # )
+                    # backup = new_backup if new_backup else backup
                     try:
-                        retried_GS = True
-                        for i in range(199):
+                        retried_GS = False
+                        for i in range(19):
                             config = self._search_thread_pool[choice].suggest(
                                 trial_id, reask=True
                             )
@@ -1138,10 +1141,6 @@ class ConditionalBlendSearch(BlendSearch):
                             skip = self._should_skip(choice, trial_id, config)
                             if skip or not self._valid(
                                 config,
-                                min(
-                                    1 + ((j + 1) * (1 / 50)),
-                                    2,
-                                ),
                             ):
                                 use_backup = True
                             else:
@@ -1165,6 +1164,7 @@ class ConditionalBlendSearch(BlendSearch):
                     except Exception as e:
                         print(f"Couldn't mark {trial_id} as an error, {e}")
                     if retried_GS:
+                        choice = 0
                         print("forcing config to be valid")
                         config.pop(None, None)
                         config = self._make_config_valid(config)
@@ -1301,7 +1301,7 @@ class ConditionalBlendSearch(BlendSearch):
             return None
         if prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr
-        print(f"{trial_id} final suggestion: {clean_config}")
+        print(f"{trial_id} final suggestion by {self._trial_proposed_by[trial_id]}: {clean_config}")
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
@@ -1379,10 +1379,12 @@ class ConditionalBlendSearch(BlendSearch):
         for id in self._search_thread_pool:
             if id and id != thread_id:
                 if self._inferior(id, thread_id):
+                    print(f"thread {id} is inferior to {thread_id}")
                     todelete.add(id)
         for id in self._search_thread_pool:
             if id and id != thread_id:
                 if self._inferior(thread_id, id):
+                    print(f"thread {thread_id} is inferior to {id}")
                     todelete.add(thread_id)
                     break
         # logger.info(f"thead {thread_id}.converged="

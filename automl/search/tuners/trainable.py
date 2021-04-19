@@ -308,7 +308,11 @@ class SklearnTrainable(Trainable):
             ret["dataset_fraction"] = prune_attr
 
         if self.cache_results:
-            store = ray.get_actor("object_store")
+            try:
+                store = ray.get_actor("object_store")
+            except ValueError as e:
+                logger.warning(e)
+                store = None
         else:
             store = None
 
