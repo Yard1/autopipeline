@@ -840,6 +840,7 @@ class ConditionalBlendSearch(BlendSearch):
                     ],
                     key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
                 )
+                # calculate priority here instead?
                 cutoff_trial = clean_sorted_evaluted_trials[
                     min(len(clean_sorted_evaluted_trials) - 1, 2)
                 ]

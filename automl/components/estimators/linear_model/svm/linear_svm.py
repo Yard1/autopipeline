@@ -24,7 +24,7 @@ class LinearSVCCombinedPenaltyLossDynamicDual(_LinearSVC):
         class_weight=None,
         verbose=0,
         random_state=None,
-        max_iter=1000,
+        max_iter=200,
     ):
         self.dual = True
         self.tol = tol
@@ -102,7 +102,7 @@ class LinearSVC(SVM):
         "class_weight": None,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 1000,
+        "max_iter": 200,
     }
 
     _default_tuning_grid = {
@@ -129,7 +129,7 @@ class LinearSVRDynamicDual(_LinearSVR):
         intercept_scaling=1.0,
         verbose=0,
         random_state=None,
-        max_iter=1000,
+        max_iter=200,
     ):
         self.tol = tol
         self.C = C
@@ -162,7 +162,7 @@ class LinearSVR(SVM):
         "intercept_scaling": 1,
         "verbose": 0,
         "random_state": None,
-        "max_iter": 1000,
+        "max_iter": 200,
     }
 
     _default_tuning_grid = {

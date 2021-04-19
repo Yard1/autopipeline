@@ -65,7 +65,7 @@ def create_pipeline_blueprint(
         "MinMaxScaler": MinMaxScaler(),
     }
     categorical_encoders = {
-        "OneHotEncoder": OneHotEncoder(),
+        #"OneHotEncoder": OneHotEncoder(),
         "CatBoostEncoderBinary": CatBoostEncoderBinary(),
         "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),

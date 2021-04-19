@@ -8,7 +8,12 @@ from abc import ABC
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold, StratifiedKFold
 
-from ...components.estimators.linear_model import LogisticRegressionCV, ElasticNetCV
+from ...components.estimators.linear_model import (
+    LogisticRegressionCV,
+    LogisticRegression,
+    ElasticNetCV,
+    ElasticNet,
+)
 from ...components.estimators.estimator import Estimator
 from ...components.estimators.ensemble import StackingClassifier, StackingRegressor
 from ...components.transformers.feature_selector import (
@@ -49,15 +54,15 @@ class StackingEnsembleCreator(EnsembleCreator):
 
     def _configure_ensemble(self, metric_name: str, metric, random_state):
         if self.problem_type == ProblemType.REGRESSION:
-            self.final_estimator_ = self.final_estimator or ElasticNetCV(
+            self.final_estimator_ = self.final_estimator or ElasticNet(
                 random_state=random_state,
-                cv=KFold(shuffle=True, random_state=random_state),
+                #cv=KFold(shuffle=True, random_state=random_state),
             )
         elif self.problem_type.is_classification():
-            self.final_estimator_ = self.final_estimator or LogisticRegressionCV(
-                scoring=metric,
+            self.final_estimator_ = self.final_estimator or LogisticRegression(
+                #scoring=metric,
                 random_state=random_state,
-                cv=StratifiedKFold(shuffle=True, random_state=random_state),
+                #cv=StratifiedKFold(shuffle=True, random_state=random_state),
             )
         else:
             raise ValueError(f"Unknown ProblemType {self.problem_type}")
@@ -260,10 +265,10 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                     (
                         "FinalEstimator",
                         self.final_estimator
-                        or LogisticRegressionCV(
-                            scoring=metric,
+                        or LogisticRegression(
+                            #scoring=metric,
                             random_state=random_state,
-                            cv=StratifiedKFold(shuffle=True, random_state=random_state),
+                            #cv=StratifiedKFold(shuffle=True, random_state=random_state),
                         ),
                     ),
                 ]

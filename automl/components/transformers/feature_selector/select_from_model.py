@@ -101,7 +101,7 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
 
         X = X.apply(categorical_column_to_int_categories)
         if DataType.is_categorical(y.dtype):
-            y = categorical_column_to_int_categories(y).astype(np.uint8)
+            y = categorical_column_to_int_categories(y).astype(np.uint16)
         super().fit(X=X, y=y, **fit_params)
         self.shap_imp_ = self._get_shap_imp(X, self.estimator_)
         return self

@@ -81,7 +81,7 @@ class BorutaSHAP(BorutaPy):
 
         X = X.apply(categorical_column_to_int_categories)
         if DataType.is_categorical(y.dtype):
-            y = categorical_column_to_int_categories(y).astype(np.uint8)
+            y = categorical_column_to_int_categories(y).astype(np.uint16)
 
         # check input params
         self._check_params(X, y)

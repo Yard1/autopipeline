@@ -113,7 +113,7 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
                 )
                 prediction = (
                     pd.Series(prediction, index=missing_indices_list, name=col)
-                    .astype("uint8")
+                    .astype("uint16")
                     .astype(self.dtypes_[col])
                 )
 

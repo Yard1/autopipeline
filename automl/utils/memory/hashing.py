@@ -9,7 +9,7 @@ import pickle
 from joblib.hashing import Hasher, NumpyHasher
 
 from pandas.util import hash_pandas_object, hash_array
-from pandas.core.util.hashing import _default_hash_key, hash_tuples, combine_hash_arrays
+from pandas.core.util.hashing import _default_hash_key, hash_tuples, _combine_hash_arrays
 from pandas.core.dtypes.generic import (
     ABCDataFrame,
     ABCIndexClass,
@@ -75,7 +75,7 @@ def fast_hash_pandas_object(
                 for _ in [None]
             )
             arrays = itertools.chain([h], index_iter)
-            h = combine_hash_arrays(arrays, 2)
+            h = _combine_hash_arrays(arrays, 2)
 
     elif isinstance(obj, ABCDataFrame):
         hashes = (hash_array(series._values) for _, series in obj.items())
@@ -96,7 +96,7 @@ def fast_hash_pandas_object(
             # keep `hashes` specifically a generator to keep mypy happy
             _hashes = itertools.chain(hashes, index_hash_generator)
             hashes = (x for x in _hashes)
-        h = combine_hash_arrays(hashes, num_items)
+        h = _combine_hash_arrays(hashes, num_items)
 
     else:
         raise TypeError(f"Unexpected type for hashing {type(obj)}")
@@ -207,7 +207,7 @@ class xxPandasHasher(xxNumpyHasher):
             # https://github.com/numpy/numpy/issues/4983. The
             # workaround is to view the array as bytes before
             # taking the memoryview.
-            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint8)))
+            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint16)))
 
             # We store the class, to be able to distinguish between
             # Objects with the same binary content, but different

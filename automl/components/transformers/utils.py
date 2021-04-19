@@ -3,12 +3,13 @@ import numpy as np
 from .transformer import DataType
 
 
-def categorical_column_to_int_categories(col, int_dtype: type = np.uint8):
+def categorical_column_to_int_categories(col, int_dtype: type = np.uint16):
     if DataType.is_categorical(col.dtype):
         col = col.copy()
-        col.cat.categories = np.arange(
+        cats = np.arange(
             start=0, stop=len(col.cat.categories), dtype=int_dtype
         )
+        col.cat.rename_categories(cats, inplace=True)
     return col
 
 

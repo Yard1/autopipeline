@@ -34,7 +34,7 @@ class DynamicMemorizedFunc(MemorizedFunc):
         compress=False,
         verbose=1,
         timestamp=None,
-        min_time_to_cache=10,
+        min_time_to_cache=1,
     ):
         super().__init__(
             func=func,
@@ -226,7 +226,7 @@ class DynamicMemory(Memory):
         verbose=0,
         bytes_limit=None,
         backend_options=None,
-        min_time_to_cache=2,
+        min_time_to_cache=1,
     ):
         super().__init__(
             location=location,
