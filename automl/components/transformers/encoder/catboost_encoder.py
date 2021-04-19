@@ -199,7 +199,7 @@ class CatBoostEncoderBinary(Encoder):
                 "return_df": True,
                 "handle_unknown": "value",
                 "handle_missing": "value",
-                "random_state": None,
+                "random_state": 0,
                 "sigma": None,
                 "a": 1,
             }
@@ -236,7 +236,7 @@ class CatBoostEncoderMulticlass(Encoder):
                     "return_df": True,
                     "handle_unknown": "value",
                     "handle_missing": "value",
-                    "random_state": None,
+                    "random_state": 0,
                     "sigma": None,
                     "a": 1,
                 }
@@ -273,7 +273,7 @@ class CatBoostEncoderRegression(Encoder):
                 "return_df": True,
                 "handle_unknown": "value",
                 "handle_missing": "value",
-                "random_state": None,
+                "random_state": 0,
                 "sigma": None,
                 "a": 1,
             }

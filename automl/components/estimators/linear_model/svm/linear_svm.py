@@ -101,7 +101,7 @@ class LinearSVC(SVM):
         "intercept_scaling": 1,
         "class_weight": None,
         "verbose": 0,
-        "random_state": None,
+        "random_state": 0,
         "max_iter": 200,
     }
 
@@ -161,7 +161,7 @@ class LinearSVR(SVM):
         "fit_intercept": True,
         "intercept_scaling": 1,
         "verbose": 0,
-        "random_state": None,
+        "random_state": 0,
         "max_iter": 200,
     }
 

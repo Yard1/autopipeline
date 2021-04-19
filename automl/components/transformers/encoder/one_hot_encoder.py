@@ -70,4 +70,16 @@ class OneHotEncoder(Encoder):
                 config.estimator is None
                 or not isinstance(config.estimator, TreeEstimator)
             )
+            and (
+                config.X is None
+                or sum(
+                    [
+                        len(config.X[col].cat.categories)
+                        if len(config.X[col].cat.categories) > 2
+                        else 1
+                        for col in config.X.select_dtypes("category")
+                    ]
+                )
+                <= config.X.shape[1]
+            )
         )

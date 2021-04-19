@@ -47,7 +47,7 @@ class PolynomialCountSketch(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "n_components": 500,
-        "random_state": None,
+        "random_state": 0,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
     _component_level = ComponentLevel.RARE

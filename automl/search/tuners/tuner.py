@@ -111,7 +111,11 @@ class Tuner(ABC):
 
     def _get_default_components(self, pipeline_blueprint) -> dict:
         default_grid = {
-            k: [component for component in v.values if component._consider_for_initial_combinations]
+            k: [
+                component
+                for component in v.values
+                if component._consider_for_initial_combinations
+            ]
             for k, v in pipeline_blueprint.get_all_distributions(
                 use_extended=self.use_extended
             ).items()

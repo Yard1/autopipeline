@@ -211,7 +211,7 @@ class SklearnTrainable(Trainable):
 
         estimator.set_params(memory=memory)
 
-        is_early_stopping_on = prune_attr and np.around(prune_attr, 2) < 1.0
+        is_early_stopping_on = prune_attr and prune_attr < 1.0
 
         if is_early_stopping_on:
             subsample_cv = _SubsampleMetaSplitterWithStratify(
@@ -269,6 +269,7 @@ class SklearnTrainable(Trainable):
         test_metrics = None
         fitted_estimator = None
         fitted_estimator_list = []
+        # TODO save predictions here too
         if self.X_test_ is not None and not is_early_stopping_on:
             logger.debug("scoring test")
             with set_param_context(

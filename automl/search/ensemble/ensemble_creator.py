@@ -6,6 +6,7 @@ from typing import List, Optional, Union, Tuple
 import pandas as pd
 import numpy as np
 from abc import ABC
+import gc
 
 from sklearn.base import BaseEstimator
 
@@ -43,13 +44,15 @@ class EnsembleCreator(ABC):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
         ):
-            return [
+            ret = [
                 (
                     f"meta-{current_stacking_level}_{trial_result['trial_id']}",
                     deepcopy(trial_result["estimator"]),
                 )
                 for trial_result in trials_for_ensembling
             ]
+        gc.collect()
+        return ret
 
     def select_trial_ids_for_ensemble(
         self,
@@ -85,3 +88,4 @@ class EnsembleCreator(ABC):
     ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)
         self.select_trial_ids_for_ensemble(X, y, results, results_df, pipeline_blueprint)
+        gc.collect()

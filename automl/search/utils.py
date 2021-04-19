@@ -82,11 +82,6 @@ class ray_context:
         "ignore_reinit_error": True,
         "configure_logging": False,
         "include_dashboard": True,
-        "_system_config": {
-            "object_spilling_config": json.dumps(
-                {"type": "filesystem", "params": {"directory_path": "/tmp/ray_spill"}},
-            )
-        }
         # "local_mode": True,
         # "num_cpus": 8,
     }

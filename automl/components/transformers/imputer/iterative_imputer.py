@@ -257,7 +257,7 @@ class IterativeImputer(Imputer):
         "classifier": "LGBMClassifier",
         "max_iter": 10,
         "verbose": 0,
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": 1,
     }
     _component_level = ComponentLevel.UNCOMMON

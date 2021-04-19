@@ -23,7 +23,7 @@ class SGDClassifier(SVM):
         "verbose": 0,
         "epsilon": 0.1,
         "n_jobs": None,
-        "random_state": None,
+        "random_state": 0,
         "learning_rate": "optimal",
         "eta0": 0.0,
         "power_t": 0.5,

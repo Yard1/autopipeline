@@ -44,7 +44,7 @@ class LGBMClassifier(GradientBoosterEstimator):
         "colsample_bytree": 1.0,
         "reg_alpha": 1 / 1024,
         "reg_lambda": 1.0,
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": 1,
         "silent": True,
     }
@@ -92,7 +92,7 @@ class LGBMRegressor(GradientBoosterEstimator):
         "colsample_bytree": 1.0,
         "reg_alpha": 1 / 1024,
         "reg_lambda": 1.0,
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": 1,
         "silent": True,
     }

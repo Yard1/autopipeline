@@ -188,7 +188,7 @@ class SHAPSelectFromModelClassification(FeatureSelector):
         "max_features": None,
         "importance_getter": "auto",
         "n_estimators": "auto",
-        "random_state": None,
+        "random_state": 0,
     }
     _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
@@ -218,7 +218,7 @@ class SHAPSelectFromModelRegression(FeatureSelector):
         "max_features": None,
         "importance_getter": "auto",
         "n_estimators": "auto",
-        "random_state": None,
+        "random_state": 0,
     }
     _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.REGRESSION}

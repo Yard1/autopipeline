@@ -30,7 +30,7 @@ class NystroemRBF(SVMKernel):
         "degree": 3,
         "kernel_params": None,
         "n_components": 500,
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
@@ -58,7 +58,7 @@ class NystroemSigmoid(SVMKernel):
         "degree": 3,
         "kernel_params": None,
         "n_components": 500,
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}

@@ -40,7 +40,7 @@ class ElasticNet(LinearModelEstimator):
         "tol": 1e-4,
         "warm_start": False,
         "positive": False,
-        "random_state": None,
+        "random_state": 0,
         "selection": "random",
         "copy_X": True,
     }
@@ -73,7 +73,7 @@ class ElasticNetCV(LinearModelEstimator):
         "verbose": 0,
         "n_jobs": None,
         "positive": False,
-        "random_state": None,
+        "random_state": 0,
         "selection": "random",
         "copy_X": True,
     }

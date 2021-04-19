@@ -17,7 +17,7 @@ class QuantileTransformer(Scaler):
         "output_distribution": "normal",
         "ignore_implicit_zeros": False,
         "subsample": 1e5,
-        "random_state": None,
+        "random_state": 0,
         "copy": True,
     }
     _allowed_dtypes = {DataType.NUMERIC}

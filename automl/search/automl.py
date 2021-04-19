@@ -304,14 +304,20 @@ class AutoML(BaseEstimator):
         check_is_fitted(self)
         return self.get_pipeline_by_id(self.best_id_)
 
-    def get_pipeline_by_id(self, id, refit: bool = False):
+    def get_pipeline_by_id(self, id, refit: Union[bool, str] = False):
         check_is_fitted(self)
         pipeline = deepcopy(self.trainer_.get_ensemble_or_pipeline_by_id(id))
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
             with ray_context(), joblib.parallel_backend("ray"):
-                pipeline.fit(self.X_, self.y_)
+                if refit == "on_test":
+                    pipeline.fit(
+                        pd.concat((self.X_, self.X_test_)),
+                        pd.concat((self.y_, self.y_test_)),
+                    )
+                else:
+                    pipeline.fit(self.X_, self.y_)
         pipeline.steps = self.X_steps_ + pipeline.steps
         return pipeline
 

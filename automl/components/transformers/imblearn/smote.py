@@ -111,7 +111,7 @@ class AutoSMOTE(ImblearnSampler):
     _default_parameters = {
         "k_neighbors": 5,
         "sampling_strategy": "auto",
-        "random_state": None,
+        "random_state": 0,
         "n_jobs": None,
     }
     _component_level = ComponentLevel.UNCOMMON

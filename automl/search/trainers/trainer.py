@@ -207,8 +207,8 @@ class Trainer:
         return get_cv_for_problem_type(problem_type, n_splits=cv)
 
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
-        categorical_columns = X.select_dtypes(include="category")
-        numeric_columns = X.select_dtypes(exclude="category")
+        categorical_columns = list(X.select_dtypes(include="category").columns)
+        numeric_columns = list(X.select_dtypes(exclude="category").columns)
         pipeline_blueprint = create_pipeline_blueprint(
             problem_type=self.problem_type,
             categorical_columns=categorical_columns,
