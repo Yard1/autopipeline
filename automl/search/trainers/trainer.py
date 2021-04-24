@@ -19,9 +19,10 @@ import io
 
 import joblib
 import ray
-from ray.util.joblib import register_ray
+from ...utils.joblib_backend import register_ray_caching
+from ...utils.joblib_backend.ray_backend import multiprocessing_cache
 
-register_ray()
+register_ray_caching()
 
 
 from ..ensemble import (
@@ -285,6 +286,11 @@ class Trainer:
         if self.secondary_tuner is not None:
             self._run_secondary_tuning(X, y, pipeline_blueprint, groups=groups)
 
+        gc.collect()
+
+        #with ray_context(
+        #    global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
+        #), joblib.parallel_backend("ray_caching"):
         X_stack, X_test_stack = self._create_ensembles(
             X,
             y,
@@ -301,6 +307,7 @@ class Trainer:
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
         self.meta_columns_.extend(X_stack.columns)
+        multiprocessing_cache.clear()
         return self._fit_one_layer(
             pd.concat((X, X_stack), axis=1),
             y,
@@ -600,8 +607,5 @@ class Trainer:
         self.ensemble_results_ = []
         self.meta_columns_ = []
 
-        with ray_context(
-            global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
-        ), joblib.parallel_backend("ray"):
-            self._fit_one_layer(X, y, X_test=X_test, y_test=y_test, groups=groups)
+        self._fit_one_layer(X, y, X_test=X_test, y_test=y_test, groups=groups)
         return self

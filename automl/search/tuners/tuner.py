@@ -14,6 +14,8 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._search import ParameterGrid
 
+from .with_parameters import with_parameters
+
 from .trainable import SklearnTrainable, RayStore
 from .utils import get_all_tunable_params
 from ..utils import ray_context
@@ -308,7 +310,7 @@ class RayTuneTuner(Tuner):
         tune_kwargs["run_or_experiment"] = type(
             "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
         )
-        tune_kwargs["run_or_experiment"] = tune.with_parameters(
+        tune_kwargs["run_or_experiment"] = with_parameters(
             tune_kwargs["run_or_experiment"], **params
         )
         gc.collect()
@@ -326,35 +328,34 @@ class RayTuneTuner(Tuner):
 
             logger.debug("getting estimators from ray object store")
             trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
-            # TODO: is this an anti pattern?
-            fitted_estimators = [
-                RayStore.decompress(
-                    ray.get(
-                        object_store.get.remote(
-                            key, "fitted_estimators", pop=True, decompress=False
-                        )
+            fitted_estimators = ray.get(
+                [
+                    object_store.get.remote(
+                        key, "fitted_estimators", pop=True, decompress=False
                     )
-                )
-                for key in trial_ids
-            ]
+                    for key in trial_ids
+                ]
+            )
+            fitted_estimators = [RayStore.decompress(val) for val in fitted_estimators]
             self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
 
             logger.debug("getting fold predictions from ray object store")
             trial_ids = ray.get(object_store.get_all_keys.remote("fold_predictions"))
-            fold_predictions = [
-                RayStore.decompress(
-                    ray.get(
-                        object_store.get.remote(
-                            key, "fold_predictions", pop=True, decompress=False
-                        )
+            fold_predictions = ray.get(
+                [
+                    object_store.get.remote(
+                        key, "fold_predictions", pop=True, decompress=False
                     )
-                )
-                for key in trial_ids
-            ]
+                    for key in trial_ids
+                ]
+            )
+
+            fold_predictions = [RayStore.decompress(val) for val in fold_predictions]
             fold_predictions = dict(zip(trial_ids, fold_predictions))
             for key in self.analysis_.results.keys():
                 self.fold_predictions_[key] = fold_predictions.get(key, {})
 
+            ray.kill(object_store)
             del object_store
 
             gc.collect()

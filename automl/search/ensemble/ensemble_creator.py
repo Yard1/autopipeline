@@ -47,7 +47,8 @@ class EnsembleCreator(ABC):
             ret = [
                 (
                     f"meta-{current_stacking_level}_{trial_result['trial_id']}",
-                    deepcopy(trial_result["estimator"]),
+                    #deepcopy(trial_result["estimator"]),
+                    trial_result["estimator"]
                 )
                 for trial_result in trials_for_ensembling
             ]

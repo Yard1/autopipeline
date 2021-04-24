@@ -296,7 +296,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         assert "fold_predictions" in kwargs
         assert "refit_estimators" in kwargs
         assert "cv" in kwargs
-        super().fit_ensemble(
+        super(StackingEnsembleCreator, self).fit_ensemble(
             X,
             y,
             results,
@@ -348,10 +348,12 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         except ValueError as e:
             # this is hacky but means we don't have to overwrite sklearn
             # SelectFromModel
-            if "'max_features' should be" in str(e):
+            print(str(e))
+            if "max_features" in str(e):
                 max_features_to_set = int(
                     re.search(r"should be \d+ and (\d+)", str(e)).group(1)
                 )
+                print(f"Setting max_features to {max_features_to_set}")
                 ensemble.final_estimator.set_params(
                     SelectEstimators__max_features=max_features_to_set
                 )

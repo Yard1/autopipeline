@@ -31,6 +31,9 @@ xxhash = "*"
 lz4 = "*"
 ipywidgets = "*"
 plotly = "*"
+tabulate = "*"
+tensorboardx = "*"
+deeptables = {extras = ["gpu"],version = "*"}
 
 [requires]
 python_version = "3.8"

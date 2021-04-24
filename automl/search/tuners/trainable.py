@@ -2,31 +2,42 @@ import numpy as np
 import gc
 from copy import deepcopy
 from collections import defaultdict
+from sklearn.base import clone
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.metrics import make_scorer
+from sklearn.model_selection._validation import (
+    indexable,
+    check_cv,
+    is_classifier,
+    check_scoring,
+    _check_multimetric_scoring,
+    _insert_error_scores,
+    _normalize_score_results,
+    _aggregate_score_dicts,
+    _fit_and_score,
+)
 from sklearn.utils import resample, _safe_indexing
 
 import ray
 import ray.exceptions
 
+import joblib
+
 from ray.tune import Trainable
 from ray.tune.resources import Resources
 import ray.cloudpickle as cpickle
 
-import joblib
-from ray.util.joblib import register_ray
-
-register_ray()
-
 import lz4.frame
 
+from ...utils.joblib_backend import register_ray_caching
 from .utils import treat_config
 from ..utils import score_test
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
+from ...utils.types import array_shrink
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 from ...utils.estimators import set_param_context
@@ -70,6 +81,16 @@ class _SubsampleMetaSplitterWithStratify(_SubsampleMetaSplitter):
             yield train_idx, test_idx
 
 
+def compress(value, **kwargs):
+    if "compression_level" not in kwargs:
+        kwargs["compression_level"] = 9
+    return lz4.frame.compress(cpickle.dumps(value), **kwargs)
+
+
+def decompress(value):
+    return cpickle.loads(lz4.frame.decompress(value))
+
+
 @ray.remote
 class RayStore(object):
     @staticmethod
@@ -94,8 +115,10 @@ class RayStore(object):
             return v
         return RayStore.decompress(v)
 
-    def put(self, key, store_name, value):
-        self.values[store_name][key] = RayStore.compress(value)
+    def put(self, key, store_name, value, compress=True):
+        self.values[store_name][key] = RayStore.compress(value) if compress else value
+        if compress:
+            del value
 
     def get_all_keys(self, store_name) -> list:
         return list(self.values[store_name].keys())
@@ -106,6 +129,8 @@ class RayStore(object):
         ]
         return r
 
+ray_fit_and_score = ray.remote(_fit_and_score)
+ray_score_test = ray.remote(num_returns=2)(score_test)
 
 # TODO break this up into a class for classification and for regression
 # TODO save all split scores
@@ -119,8 +144,9 @@ class SklearnTrainable(Trainable):
 
     N_JOBS = 1
 
-    def setup(self, config, **params):
+    def setup(self, config, refs, **params):
         # forward-compatbility
+        self.refs = refs[0]
         self._setup(config, **params)
 
     def _setup(self, config, **params):
@@ -157,13 +183,14 @@ class SklearnTrainable(Trainable):
         self.estimator_config = config
 
     def step(self):
+
         # forward-compatbility
         logger.debug("training")
-        if self.N_JOBS > 1:
-            with joblib.parallel_backend("ray"):
-                return self._train()
+        register_ray_caching()
+        r = self._train()
 
-        return self._train()
+        gc.collect()
+        return r
 
     def _make_scoring_dict(self):
         scoring = self.scoring.copy()
@@ -171,7 +198,9 @@ class SklearnTrainable(Trainable):
         def dummy_score(y_true, y_pred):
             return 0
 
-        dummy_pred_scorer = make_scorer_with_error_score(dummy_score, greater_is_better=True, error_score=0)
+        dummy_pred_scorer = make_scorer_with_error_score(
+            dummy_score, greater_is_better=True, error_score=0
+        )
         scoring["dummy_pred_scorer"] = dummy_pred_scorer
         if self.problem_type.is_classification():
             dummy_pred_proba_scorer = make_scorer_with_error_score(
@@ -192,6 +221,91 @@ class SklearnTrainable(Trainable):
             gpu=0,
             extra_cpu=cls.N_JOBS,
         )
+
+    def _cross_validate(
+        self,
+        estimator,
+        X,
+        y=None,
+        *,
+        groups=None,
+        scoring=None,
+        cv=None,
+        n_jobs=None,
+        verbose=0,
+        fit_params=None,
+        pre_dispatch="2*n_jobs",
+        return_train_score=False,
+        return_estimator=False,
+        error_score=np.nan,
+    ):
+        """Fast cross validation with Ray"""
+        X, y, groups = indexable(X, y, groups)
+
+        cv = check_cv(cv, y, classifier=is_classifier(estimator))
+
+        if callable(scoring):
+            scorers = scoring
+        elif scoring is None or isinstance(scoring, str):
+            scorers = check_scoring(estimator, scoring)
+        else:
+            scorers = _check_multimetric_scoring(estimator, scoring)
+
+        # TODO do this better - we want the prefix to be dynamic
+        prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
+
+        # We clone the estimator to make sure that all the folds are
+        # independent, and that it is pickle-able.
+        results_futures = [
+            ray_fit_and_score.remote(
+                clone(estimator),
+                self.refs[prefix + "X_"],
+                self.refs[prefix + "y_"],
+                scorers,
+                train,
+                test,
+                verbose,
+                None,
+                fit_params,
+                return_train_score=return_train_score,
+                return_times=True,
+                return_estimator=return_estimator,
+                error_score=error_score,
+            )
+            for train, test in cv.split(X, y, groups)
+        ]
+
+        results = ray.get(results_futures)
+        for future in results_futures:
+            del future
+        del results_futures
+
+        # For callabe scoring, the return type is only know after calling. If the
+        # return type is a dictionary, the error scores can now be inserted with
+        # the correct key.
+        if callable(scoring):
+            _insert_error_scores(results, error_score)
+
+        results = _aggregate_score_dicts(results)
+
+        ret = {}
+        ret["fit_time"] = results["fit_time"]
+        ret["score_time"] = results["score_time"]
+
+        if return_estimator:
+            ret["estimator"] = results["estimator"]
+
+        test_scores_dict = _normalize_score_results(results["test_scores"])
+        if return_train_score:
+            train_scores_dict = _normalize_score_results(results["train_scores"])
+
+        for name in test_scores_dict:
+            ret["test_%s" % name] = test_scores_dict[name]
+            if return_train_score:
+                key = "train_%s" % name
+                ret[key] = train_scores_dict[name]
+
+        return ret
 
     def _train(self):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -224,10 +338,15 @@ class SklearnTrainable(Trainable):
         else:
             subsample_cv = self.cv
 
-        estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
+        if self.cache_results and not is_early_stopping_on:
+            estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
+        else:
+            estimator_subclassed = estimator
+
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
-        scores = cross_validate(
+        # with joblib.parallel_backend("ray_caching"):
+        scores = self._cross_validate(
             estimator_subclassed,
             self.X_,
             self.y_,
@@ -253,7 +372,10 @@ class SklearnTrainable(Trainable):
         combined_predictions = {}
         if self.cache_results and not is_early_stopping_on:
             combined_predictions = {
-                k: np.concatenate([x._saved_preds[k] for x in scores["estimator"]])
+                k: array_shrink(
+                    np.concatenate([x._saved_preds[k] for x in scores["estimator"]]),
+                    int2uint=True,
+                )
                 for k in scores["estimator"][0]._saved_preds.keys()
             }
 
@@ -261,6 +383,8 @@ class SklearnTrainable(Trainable):
             metrics["optimized_precision"] = optimized_precision(
                 metrics["accuracy"], metrics["recall"], metrics["specificity"]
             )
+
+        del scores
 
         gc.collect()
 
@@ -282,7 +406,7 @@ class SklearnTrainable(Trainable):
                     if k.endswith("n_jobs")
                 },
             ):
-                test_metrics, fitted_estimator = score_test(
+                test_ret = ray_score_test.remote(
                     estimator,
                     self.X_,
                     self.y_,
@@ -290,6 +414,7 @@ class SklearnTrainable(Trainable):
                     self.y_test_,
                     self.scoring,
                 )
+                test_metrics, fitted_estimator = ray.get(test_ret)
                 fitted_estimator_list.append(fitted_estimator)
             fitted_estimator = fitted_estimator_list[0]
             if self.problem_type == ProblemType.BINARY:
@@ -320,19 +445,27 @@ class SklearnTrainable(Trainable):
         if store is not None:
             try:
                 store.put.remote(
-                    self.trial_id, "fold_predictions", combined_predictions
+                    self.trial_id,
+                    "fold_predictions",
+                    compress(combined_predictions),
+                    False,
                 )
             except ray.exceptions.ObjectStoreFullError:
                 pass
             if fitted_estimator is not None:
                 try:
                     store.put.remote(
-                        self.trial_id, "fitted_estimators", fitted_estimator
+                        self.trial_id,
+                        "fitted_estimators",
+                        compress(fitted_estimator),
+                        False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass
 
-        gc.collect()
+        del combined_predictions
+        del fitted_estimator
+
         logger.debug("done")
         return ret
 

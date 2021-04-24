@@ -1450,7 +1450,7 @@ class BlendSearchTuner(RayTuneTuner):
             min_dist = max(min_dist, 5000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
-            self._searcher_kwargs["min_resource"] = min_dist
+            self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)
             self._searcher_kwargs["max_resource"] = 1.0
             self._searcher_kwargs["reduction_factor"] = step
             logger.debug(self._searcher_kwargs["prune_attr"])

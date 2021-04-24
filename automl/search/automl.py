@@ -16,9 +16,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 
 import joblib
-from ray.util.joblib import register_ray
+from ..utils.joblib_backend import register_ray_caching
 
-register_ray()
+register_ray_caching()
 
 from .trainers.trainer import Trainer
 from .cv import get_cv_for_problem_type
@@ -310,7 +310,7 @@ class AutoML(BaseEstimator):
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
-            with ray_context(), joblib.parallel_backend("ray"):
+            with ray_context(), joblib.parallel_backend("ray_caching"):
                 if refit == "on_test":
                     pipeline.fit(
                         pd.concat((self.X_, self.X_test_)),
