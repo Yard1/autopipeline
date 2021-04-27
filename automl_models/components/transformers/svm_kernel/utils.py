@@ -1,5 +1,3 @@
-import pandas as pd
-from ....search.distributions import CategoricalDistribution
 from ...transformers.utils import categorical_column_to_int_categories
 
 

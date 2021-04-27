@@ -1,43 +1,17 @@
-from sklearn.kernel_approximation import PolynomialCountSketch as _PolynomialCountSketch
-from sklearn.preprocessing import MinMaxScaler, Normalizer
-
-from .utils import GammaMixin
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
-
 from ....search.distributions import (
     CategoricalDistribution,
-    UniformDistribution,
     IntUniformDistribution,
-    UniformDistribution,
-    FunctionDistribution,
 )
-
 from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ...estimators.linear_model.linear_model_estimator import LinearModelEstimator
 
-
-class PolynomialCountSketchDynamicNComponents(GammaMixin, _PolynomialCountSketch):
-    def fit(self, X, y=None):
-        n_features = X.shape[1]
-        self._n_components = self.n_components
-        self.n_components = max(self.n_components, 10 * n_features)
-        self.normalizer_ = Normalizer()
-        r = super().fit(self.normalizer_.fit_transform(X), y=y)
-        new_n_components = self.n_components
-        self.n_components = self._n_components
-        self._n_components = new_n_components
-        return r
-
-    def transform(self, X):
-        old_n_components = self.n_components
-        self.n_components = self._n_components
-        r = super().transform(self.normalizer_.transform(X))
-        self.n_components = old_n_components
-        return r
+from automl_models.components.transformers.svm_kernel.pcs import (
+    PolynomialCountSketchDynamicNComponents,
+)
 
 
 class PolynomialCountSketch(SVMKernel):

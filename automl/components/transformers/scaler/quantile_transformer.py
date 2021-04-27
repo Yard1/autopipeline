@@ -1,13 +1,10 @@
-from sklearn.preprocessing import QuantileTransformer as _QuantileTransformer
-
 from .scaler import Scaler
 from ..transformer import DataType
 from ...component import ComponentLevel
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
-
-class PandasQuantileTransformer(PandasDataFrameTransformerMixin, _QuantileTransformer):
-    pass
+from automl_models.components.transformers.scaler.quantile_transformer import (
+    PandasQuantileTransformer,
+)
 
 
 class QuantileTransformer(Scaler):

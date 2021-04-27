@@ -1,8 +1,7 @@
-from typing import Iterable
-from copy import copy
 from ..transformers.transformer import Transformer
 from ..component import ComponentLevel, ComponentConfig
 from ...search.stage import AutoMLStage
+
 
 class Flow(Transformer):
     _component_level = ComponentLevel.NECESSARY

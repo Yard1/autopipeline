@@ -5,7 +5,7 @@ from sklearn.linear_model import (
 )
 from .linear_model_estimator import LinearModelEstimator
 from ....problems import ProblemType
-from ....search.distributions import UniformDistribution, CategoricalDistribution
+from ....search.distributions import UniformDistribution
 
 
 class LinearRegression(LinearModelEstimator):

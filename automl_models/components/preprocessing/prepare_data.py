@@ -16,7 +16,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 import warnings
-from ...utils.exceptions import validate_type
+from ..utils import validate_type
 
 
 def _is_id_column(col):
@@ -31,7 +31,7 @@ def _is_id_column(col):
 def replace_inf_in_col(col):
     try:
         return col.replace([np.inf, -np.inf], None)  # TODO: ensure this actually works
-    except:
+    except Exception:
         return col
 
 
@@ -117,7 +117,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                     col, infer_datetime_format=True, utc=False, errors="raise"
                 )
                 col = col.astype(self._datetime_dtype)
-            except:
+            except Exception:
                 pass
             if col.name in self.ordinal_columns:
                 if set(col_unqiue) != set(self.ordinal_columns[col.name]):
@@ -129,7 +129,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                 ).cat.codes.replace(-1, None)
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))
-            except:
+            except Exception:
                 return col.astype("category")
 
         return col

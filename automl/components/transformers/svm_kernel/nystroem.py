@@ -1,24 +1,17 @@
-from sklearn.kernel_approximation import Nystroem
-
-from .utils import GammaMixin
 from .svm_kernel import SVMKernel
 from ..transformer import DataType
 from ...component import ComponentLevel
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ...estimators.linear_model.svm.svm import SVM
 from ....search.distributions import (
     CategoricalDistribution,
-    UniformDistribution,
-    IntUniformDistribution,
-    UniformDistribution,
-    FunctionDistribution,
 )
 
 
-class NystroemDynamicGamma(GammaMixin, Nystroem):
-    pass
+from automl_models.components.transformers.svm_kernel.nystroem import (
+    NystroemDynamicGamma,
+)
 
 
 class NystroemRBF(SVMKernel):

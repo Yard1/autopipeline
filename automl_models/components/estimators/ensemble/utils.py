@@ -1,5 +1,5 @@
 from copy import deepcopy
-from sklearn.base import clone
+from sklearn.base import clone, ClassifierMixin, BaseEstimator
 from sklearn.model_selection import cross_val_predict
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError
@@ -7,6 +7,23 @@ from sklearn.utils.validation import check_is_fitted, NotFittedError
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class DummyClassifier(ClassifierMixin, BaseEstimator):
+    def __init__(self, id, preds, pred_probas) -> None:
+        self.id = id
+        self.preds = preds
+        self.pred_probas = pred_probas
+
+    def fit(self, X, y):
+        return self
+
+    def predict(self, X):
+        return self.preds
+
+    def predict_proba(self, X):
+        return self.pred_probas
+
 
 def fit_single_estimator_if_not_fitted(
     estimator,
@@ -33,6 +50,7 @@ def fit_single_estimator_if_not_fitted(
             message=message,
         )
 
+
 def get_cv_predictions(
     X,
     y,
@@ -45,7 +63,9 @@ def get_cv_predictions(
     verbose=0,
 ):
     if predictions and not len(predictions) == len(estimators):
-        raise ValueError(f"Length of predictions ({len(predictions)}) must be the same as the length of estimators ({len(estimators)}).")
+        raise ValueError(
+            f"Length of predictions ({len(predictions)}) must be the same as the length of estimators ({len(estimators)})."
+        )
     predictions_new = []
     fit_params = fit_params or {}
     for i, est_meth in enumerate(zip(estimators, stack_methods)):

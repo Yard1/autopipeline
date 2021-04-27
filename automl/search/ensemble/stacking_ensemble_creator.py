@@ -4,10 +4,8 @@ import re
 import pandas as pd
 import numpy as np
 import gc
-from abc import ABC
 
-from sklearn.base import BaseEstimator, clone
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.base import BaseEstimator
 
 from ...components.estimators.linear_model import (
     LogisticRegressionCV,
@@ -15,7 +13,6 @@ from ...components.estimators.linear_model import (
     ElasticNetCV,
     ElasticNet,
 )
-from ...components.transformers.misc.drop_columns import PandasSelectColumns
 from ...components.estimators.estimator import Estimator
 from ...components.estimators.ensemble import StackingClassifier, StackingRegressor
 from ...components.transformers.feature_selector import (
@@ -26,6 +23,11 @@ from ...components.flow import Pipeline
 from .ensemble_creator import EnsembleCreator
 from .ensemble_strategy import EnsembleStrategy
 from ...problems.problem_type import ProblemType
+
+from automl_models.components.transformers.misc.select_columns import (
+    PandasSelectColumns,
+)
+
 
 import logging
 
@@ -260,7 +262,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                 steps=[
                     (
                         "SelectEstimators",
-                        SHAPSelectFromModelRegression(
+                        SHAPSelectFromModelClassification(
                             max_features=self.max_estimators, threshold="0.25*mean"
                         ),
                     ),

@@ -1,4 +1,3 @@
-from automl.components.transformers.knn.knn_transformer import NCATransformer
 import numpy as np
 
 from typing import Optional
@@ -7,7 +6,6 @@ from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
 from ...components.flow import (
     ColumnTransformer,
-    make_column_selector,
     Pipeline,
     TopPipeline,
 )
@@ -19,6 +17,8 @@ from ...components.estimators.linear_model.linear_model_estimator import (
 )
 from ...components.estimators.knn.knn_estimator import KNNEstimator
 from ...utils import validate_type
+
+from automl_models.components.flow.column_transformer import make_column_selector
 
 
 def _scaler_passthrough_condition(config, stage):

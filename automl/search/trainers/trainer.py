@@ -47,16 +47,6 @@ from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
-from ...components.estimators.ensemble.stack import (
-    PandasStackingClassifier,
-    PandasStackingRegressor,
-)
-from ...components.estimators.ensemble.voting import (
-    PandasVotingClassifier,
-    DummyClassifier,
-    PandasVotingRegressor,
-)
-from ...components.estimators.ensemble.des import DESSplitter, METADES, KNORAE
 from ...components.estimators.linear_model import LogisticRegressionCV, ElasticNetCV
 from ...problems.problem_type import ProblemType
 from ...search.tuners.trainable import SklearnTrainable
@@ -64,6 +54,16 @@ from ...utils import validate_type
 from ...utils.memory import dynamic_memory_factory
 
 from sklearn.metrics import matthews_corrcoef, recall_score, make_scorer
+from deslib.des import METADES
+
+from automl_models.components.estimators.ensemble import (
+    PandasStackingClassifier,
+    PandasStackingRegressor,
+    PandasVotingClassifier,
+    PandasVotingRegressor,
+    DummyClassifier,
+    DESSplitter
+)
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 specificity_scorer = make_scorer(recall_score, pos_label=0)

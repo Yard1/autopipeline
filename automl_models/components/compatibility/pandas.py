@@ -1,7 +1,6 @@
-import numpy as np
 from scipy.sparse import issparse
 import pandas as pd
-from ...utils import validate_type
+from ..utils import validate_type
 from ..transformers.utils import categorical_column_to_int_categories
 
 
@@ -15,7 +14,7 @@ class PandasSeriesTransformerMixin:
             X = X.squeeze(axis=1)
         try:
             self.name_ = X.name
-        except:
+        except Exception:
             self.name_ = None
         validate_type(X, "X", pd.Series)
         try:
@@ -59,7 +58,7 @@ class PandasDataFrameTransformerMixin:
             X = pd.DataFrame(X)
         try:
             self.columns_ = X.columns
-        except:
+        except Exception:
             self.columns_ = None
         validate_type(X, "X", pd.DataFrame)
         try:

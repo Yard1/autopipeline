@@ -18,21 +18,25 @@ from sklearn.compose import ColumnTransformer
 import joblib
 from ..utils.joblib_backend import register_ray_caching
 
-register_ray_caching()
-
 from .trainers.trainer import Trainer
 from .cv import get_cv_for_problem_type
 from ..components import DataType, ComponentLevel
 from ..problems import ProblemType
-from ..components import PrepareDataFrame, clean_df, LabelEncoder
+from ..components import LabelEncoder
 from ..utils import validate_type
 from .utils import flatten_iterable, get_obj_name
 from .utils import ray_context
+
+from automl_models.components.preprocessing.prepare_data import (
+    PrepareDataFrame,
+    clean_df,
+)
 
 import warnings
 import logging
 
 logger = logging.getLogger(__name__)
+register_ray_caching()
 
 
 # TODO: unique ID
@@ -82,7 +86,7 @@ class AutoML(BaseEstimator):
                 f"If cv is an int, it must be bigger than 2. Got {self.cv}."
             )
         if self.test_size < 0 or self.test_size > 0.9:
-            raise ValueError(f"test_size must be in range (0.0, 0.9)")
+            raise ValueError("test_size must be in range (0.0, 0.9)")
         if not is_float_dtype(self.float_dtype):
             raise TypeError(
                 f"Expected float_dtype to be a float dtype, got {type(self.float_dtype)}"

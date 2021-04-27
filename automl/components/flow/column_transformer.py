@@ -1,6 +1,5 @@
-from copy import deepcopy, copy
+from copy import copy
 
-from ._column_transformer import PandasColumnTransformer, make_column_selector
 from .flow import Flow
 from .utils import (
     recursively_remove_invalid_components,
@@ -11,6 +10,10 @@ from .utils import (
 )
 from ..component import ComponentConfig
 from ...search.stage import AutoMLStage
+
+from automl_models.components.flow.column_transformer import (
+    PandasColumnTransformer, make_column_selector
+)
 
 
 class ColumnTransformer(Flow):
