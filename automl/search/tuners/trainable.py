@@ -129,8 +129,70 @@ class RayStore(object):
         ]
         return r
 
-ray_fit_and_score = ray.remote(_fit_and_score)
-ray_score_test = ray.remote(num_returns=2)(score_test)
+
+@ray.remote
+def ray_fit_and_score(
+    estimator,
+    X,
+    y,
+    scorer,
+    train,
+    test,
+    verbose,
+    parameters,
+    fit_params,
+    return_train_score=False,
+    return_parameters=False,
+    return_n_test_samples=False,
+    return_times=False,
+    return_estimator=False,
+    split_progress=None,
+    candidate_progress=None,
+    error_score=np.nan,
+):
+    return _fit_and_score(
+        estimator=estimator,
+        X=X,
+        y=y,
+        scorer=scorer,
+        train=train,
+        test=test,
+        verbose=verbose,
+        parameters=parameters,
+        fit_params=fit_params,
+        return_train_score=return_train_score,
+        return_parameters=return_parameters,
+        return_n_test_samples=return_n_test_samples,
+        return_times=return_times,
+        return_estimator=return_estimator,
+        split_progress=split_progress,
+        candidate_progress=candidate_progress,
+        error_score=error_score,
+    )
+
+
+@ray.remote(num_returns=2)
+def ray_score_test(
+    estimator,
+    X,
+    y,
+    X_test,
+    y_test,
+    scoring,
+    refit: bool = True,
+    error_score=np.nan,
+):
+    return score_test(
+        estimator=estimator,
+        X=X,
+        y=y,
+        X_test=X_test,
+        y_test=y_test,
+        scoring=scoring,
+        refit=refit,
+        error_score=error_score,
+    )
+
 
 # TODO break this up into a class for classification and for regression
 # TODO save all split scores

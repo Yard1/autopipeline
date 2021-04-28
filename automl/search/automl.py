@@ -298,7 +298,7 @@ class AutoML(BaseEstimator):
 
         self.results_ = self._get_results()
         self.best_id_ = str(self.results_.index[0])
-        self._displays["results_display"].clear_all()
+        #self._displays["results_display"].clear_all()
         self._displays["results_display"].display(self.results_.head(20))
 
         return self

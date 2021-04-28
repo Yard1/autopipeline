@@ -21,8 +21,8 @@ from .....problems import ProblemType
 def get_lgbm_n_estimators(config, space):
     X = config.X
     if X is None:
-        return IntUniformDistribution(10, 100, log=True)
-    return IntUniformDistribution(10, min(1000, int(X.shape[0])), log=True)
+        return IntUniformDistribution(10, 200, log=True)
+    return IntUniformDistribution(10, min(8192, int(X.shape[0])), log=True)
 
 
 class LGBMClassifier(GradientBoosterEstimator):
@@ -33,7 +33,7 @@ class LGBMClassifier(GradientBoosterEstimator):
         "num_leaves": 31,
         "max_depth": -1,
         "learning_rate": 0.1,
-        "n_estimators": 100,
+        "n_estimators": 200,
         "subsample_for_bin": 200000,
         "class_weight": None,
         "min_split_gain": 0,
@@ -82,7 +82,7 @@ class LGBMRegressor(GradientBoosterEstimator):
         "num_leaves": 31,
         "max_depth": -1,
         "learning_rate": 0.1,
-        "n_estimators": 100,
+        "n_estimators": 200,
         "subsample_for_bin": 200000,
         "min_split_gain": 0,
         "min_child_weight": 1e-3,

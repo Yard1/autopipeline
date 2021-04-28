@@ -74,6 +74,8 @@ GlobalSearch = ConditionalOptunaSearch
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
+    #STEPSIZE = 0.15
+
     def __init__(
         self,
         init_config: dict,
@@ -280,8 +282,7 @@ class PatchedFLOW2(FLOW2):
         return flow2
 
     def _round(self, resource) -> float:
-        ''' round the resource to self.max_resource if close to it
-        '''
+        """round the resource to self.max_resource if close to it"""
         if resource * self.resource_multiple_factor > self.max_resource:
             return np.around(self.max_resource, 2)
         return np.around(resource, 2)
@@ -354,8 +355,7 @@ class PatchedFLOW2(FLOW2):
                 if self.best_obj is None or obj < self.best_obj - (
                     0
                     if not self._resource
-                    or self._resource
-                    < self._configs[trial_id][self.prune_attr]
+                    or self._resource < self._configs[trial_id][self.prune_attr]
                     else np.abs(self.best_obj * self._tol)
                 ):
                     self.best_obj, self.best_config = obj, self._configs[trial_id]
@@ -622,7 +622,7 @@ class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
     _FORCE_GS_AFTER = 1000
-    _MAX_GS_RETRIES = 49
+    _MAX_GS_RETRIES = 9
 
     def __init__(
         self,
@@ -928,13 +928,11 @@ class ConditionalBlendSearch(BlendSearch):
             (
                 _,
                 config_signature,
-                enforced_config_signature,
             ) = self._has_config_been_already_tried(config)
             if error:  # remove from result cache
                 del self._result[config_signature]
             else:  # add to result cache
                 self._result[config_signature] = result
-                self._result[enforced_config_signature] = result
             # update target metric if improved
             if (result[self._metric] - self._metric_target) * self._ls.metric_op < 0:
                 self._metric_target = result[self._metric]
@@ -962,6 +960,10 @@ class ConditionalBlendSearch(BlendSearch):
                 self._update_admissible_region(
                     config, self._ls_bound_min, self._ls_bound_max
                 )
+                print("\nGS BOUNDS UPDATE")
+                print(self._ls.denormalize(self._ls_bound_min))
+                print(self._ls.denormalize(self._ls_bound_max))
+                print("")
             # reset admissible region to ls bounding box
             self._gs_admissible_min.update(self._ls_bound_min)
             self._gs_admissible_max.update(self._ls_bound_max)
@@ -986,6 +988,7 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _update_admissible_region(self, config, admissible_min, admissible_max):
         # update admissible region
+        print(f"Updating admissible region: {config}")
         normalized_config = self._ls.normalize(config)
         for key in admissible_min:
             if key in config:
@@ -1008,15 +1011,17 @@ class ConditionalBlendSearch(BlendSearch):
                     value + step_size < self._gs_admissible_min[key]
                     or value > self._gs_admissible_max[key] + step_size
                 ):
-                    logger.debug(
+                    print(
                         f"normalized key {key} is invalid due to {value+ step_size} < {self._gs_admissible_min[key]} or {value} > {self._gs_admissible_max[key] + step_size}"
                     )
+                    # print(f"suggested config {config}")
+                    # print(f"valid config {self._make_config_valid(config)}")
                     return False
         return True
 
-    def _make_config_valid(self, config: dict):
+    def _make_config_valid(self, config: dict, step_multiplier=1):
         normalized_config = self._ls.normalize(config)
-        step_size = self._ls.STEPSIZE
+        step_size = self._ls.STEPSIZE * step_multiplier
         enforced_values = {}
         for key in self._gs_admissible_min:
             if key in config:
@@ -1024,21 +1029,24 @@ class ConditionalBlendSearch(BlendSearch):
                 # logger.info(
                 #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
                 if value + step_size < self._gs_admissible_min[key]:
-                    enforced_values[key] = min(
+                    enforced_values[key] = max(
                         0, self._gs_admissible_min[key] - step_size
                     )
                 elif value > self._gs_admissible_max[key] + step_size:
-                    enforced_values[key] = max(
+                    enforced_values[key] = min(
                         1, self._gs_admissible_max[key] + step_size
                     )
-        return {**config, **self._ls.denormalize(enforced_values)}
+        print(f"enforced values: {enforced_values}")
+        new_config = {**config, **self._ls.denormalize(enforced_values)}
+        return new_config
 
     def _select_thread(self) -> Tuple:
         """thread selector; use can_suggest to check LS availability"""
         # update priority
         min_eci = self._deadline - time.time()
+        print(f"DEADLINE: {min_eci}")
         if min_eci <= 0:
-            return -1, -1
+            return -1, -1, []
         max_speed = 0
         for thread in self._search_thread_pool.values():
             if thread.speed > max_speed:
@@ -1110,22 +1118,35 @@ class ConditionalBlendSearch(BlendSearch):
         prune_attr = config.get(self._ls.prune_attr, None)
         skip = self._should_skip(0, trial_id, config)
         estimator = config["Estimator"]
-        if not skip and self._valid(config, 1 + ((iter + 1) / self._MAX_GS_RETRIES)):
-            pass
-        elif retry:
+        last_estimator_config = config
+
+        if not skip and self._valid(
+            config,  # 1 + ((iter + 1) / self._MAX_GS_RETRIES)
+        ):
+            return config, prune_attr, 0, estimator
+        else:
             config, prune_attr = None, None
+
+        if retry:
             for i in range(self._MAX_GS_RETRIES):
+                config, prune_attr = None, None
                 config, prune_attr, _, _ = self._suggest_from_global_search(
                     trial_id, 1, retry=False, iter=i
                 )
                 if config and config["Estimator"] != estimator:
                     config, prune_attr = None, None
                 if config:
-                    break
-        elif not backup:
-            config, prune_attr, _ = self._force_suggestion_to_be_valid(
-                trial_id, config, 0
-            )
+                    return config, prune_attr, 0, estimator
+
+            if (
+                not backup
+                or self._search_thread_pool[backup]._search_alg.space["Estimator"]
+                != estimator
+            ):
+                self._mark_global_search_suggestion_as_an_error(trial_id)
+                config, prune_attr, _ = self._force_suggestion_to_be_valid(
+                    trial_id, last_estimator_config, 0, #step_multiplier=0.75
+                )
 
         return config, prune_attr, 0, estimator
 
@@ -1139,17 +1160,17 @@ class ConditionalBlendSearch(BlendSearch):
             print(f"Couldn't mark {trial_id} as an error, {e}")
 
     def _force_suggestion_to_be_valid(
-        self, trial_id: str, config: dict, thread_id: int
+        self,
+        trial_id: str,
+        config: dict,
+        thread_id: int,
+        step_multiplier=1,
     ):
         print("forcing config to be valid")
         config.pop(None, None)
-        config = self._make_config_valid(config)
+        config = self._make_config_valid(config, step_multiplier=step_multiplier)
         config[self._ls.prune_attr] = self._ls.min_resource
         prune_attr = config.get(self._ls.prune_attr, None)
-        skip = self._should_skip(thread_id, trial_id, config)
-
-        if skip:
-            return None, None, thread_id
 
         return config, prune_attr, thread_id
 
@@ -1193,7 +1214,10 @@ class ConditionalBlendSearch(BlendSearch):
                     prune_attr,
                     proposing_thread,
                     _,
-                ) = self._suggest_from_global_search(trial_id, backup)
+                ) = self._suggest_from_global_search(
+                    trial_id,
+                    backup,
+                )
                 # new_backup = next(
                 #     (
                 #         thread_id
@@ -1221,6 +1245,10 @@ class ConditionalBlendSearch(BlendSearch):
             if not config:
                 return None
 
+            config = self._clean_and_enforce_config(config, prune_attr)
+            if not config:
+                return None
+
             if not proposing_thread:  # global search
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
@@ -1234,6 +1262,10 @@ class ConditionalBlendSearch(BlendSearch):
                 self._update_admissible_region(
                     config, self._ls_bound_min, self._ls_bound_max
                 )
+                print("\nGS BOUNDS UPDATE")
+                print(self._ls.denormalize(self._ls_bound_min))
+                print(self._ls.denormalize(self._ls_bound_max))
+                print("")
                 self._gs_admissible_min.update(self._ls_bound_min)
                 self._gs_admissible_max.update(self._ls_bound_max)
 
@@ -1244,27 +1276,21 @@ class ConditionalBlendSearch(BlendSearch):
                 proposing_thread,
             ) = self._suggest_from_points_to_evaluate(trial_id)
 
+            config = self._clean_and_enforce_config(config, prune_attr)
+            if not config:
+                return None
+
         (
             result,
             config_signature,
-            enforced_config_signature,
         ) = self._has_config_been_already_tried(config)
 
         if result is not None:
             return None
 
         self._result[config_signature] = {}
-        self._result[enforced_config_signature] = {}
         self._suggested_configs[trial_id] = config
         self._trial_proposed_by[trial_id] = proposing_thread
-
-        # logger.info(f"config={config}")
-        if prune_attr:
-            config[self._ls.prune_attr] = prune_attr
-            print(f"{trial_id} suggest prune_attr: {prune_attr}")
-            assert prune_attr
-            if prune_attr >= 1.0:
-                self._reached_max_prune_attr = True
 
         # final_choice = self._trial_proposed_by.get(trial_id, 0)
         # if final_choice and self._reached_max_prune_attr:
@@ -1277,8 +1303,17 @@ class ConditionalBlendSearch(BlendSearch):
         #         self._diversification_multipliers[k]-0.5, 0
         #     )
 
-        clean_config = {}
-        # print(f"{trial_id} suggestion before enforcement: {config}")
+        print(f"{trial_id} final suggestion by {proposing_thread}: {config}")
+
+        return config
+
+    def _clean_and_enforce_config(self, config, prune_attr) -> dict:
+        if prune_attr:
+            config[self._ls.prune_attr] = prune_attr
+            print(f"suggest prune_attr: {prune_attr}")
+            assert prune_attr
+            if prune_attr >= 1.0:
+                self._reached_max_prune_attr = True
         try:
             clean_config = enforce_conditions_on_config(
                 config, self._conditional_space_estimators
@@ -1293,16 +1328,13 @@ class ConditionalBlendSearch(BlendSearch):
             clean_config = new_clean_config
             assert clean_config["Estimator"] == config["Estimator"]
         except:
-            print(f"{trial_id} Bad configuration suggested, trying again")
+            print(f"Bad configuration suggested, trying again")
             traceback.print_exc()
             print(self._conditional_space)
             print("")
             return None
-
         if prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr
-        print(f"{trial_id} final suggestion by {proposing_thread}: {clean_config}")
-
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
@@ -1313,21 +1345,9 @@ class ConditionalBlendSearch(BlendSearch):
                 config_signature,
                 None,
             )
-        enforced_config = enforce_conditions_on_config(
-            config, self._conditional_space, raise_exceptions=False
-        )
-        if self._ls.prune_attr:
-            if self._ls.prune_attr not in config:
-                prune_attr = self._ls.min_resource
-            else:
-                prune_attr = config[self._ls.prune_attr]
-            enforced_config[self._ls.prune_attr] = prune_attr
-        enforced_config_signature = self._ls.config_signature(enforced_config)
         result = None
         result = self._result.get(config_signature, None)
-        if result is None:
-            result = self._result.get(enforced_config_signature, None)
-        return result, config_signature, enforced_config_signature
+        return result, config_signature
 
     def _should_skip(self, choice, trial_id, config) -> bool:
         """if config is None or config's result is known or above mem threshold
@@ -1338,7 +1358,6 @@ class ConditionalBlendSearch(BlendSearch):
         (
             exists,
             config_signature,
-            enforced_config_signature,
         ) = self._has_config_been_already_tried(config)
         # check mem constraint
         if (
@@ -1354,8 +1373,6 @@ class ConditionalBlendSearch(BlendSearch):
         if exists is not None:
             if not self._use_rs:
                 result = self._result.get(config_signature)
-                if not result and enforced_config_signature:
-                    result = self._result.get(enforced_config_signature)
                 if result:
                     if choice:
                         self._search_thread_pool[choice].on_trial_complete(
@@ -1545,11 +1562,11 @@ class BlendSearchTuner(RayTuneTuner):
         #    self._searcher_kwargs["time_attr"] = "estimator_fit_time"
         logger.debug(self._searcher_kwargs)
 
-        self._add_extra_random_trials_to_default_grid()
+        # self._add_extra_random_trials_to_default_grid()
 
         # this is just to ensure constant order
         # TODO: make sure that extra trials are at the end
-        self._shuffle_default_grid()
+        # self._shuffle_default_grid()
 
         blend_search = ConditionalBlendSearch(
             space=self.pipeline_blueprint,
@@ -1560,6 +1577,7 @@ class BlendSearchTuner(RayTuneTuner):
             use_extended=self.use_extended,
             **self._searcher_kwargs,
         )
+        blend_search._deadline = self._tune_kwargs["time_budget_s"] + time.time()
 
         self._tune_kwargs["search_alg"] = ConcurrencyLimiter(
             blend_search,

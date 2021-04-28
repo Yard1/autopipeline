@@ -37,7 +37,7 @@ class DecisionTreeClassifier(TreeEstimator):
 
     _default_tuning_grid = {
         "criterion": CategoricalDistribution(["gini", "entropy"], cost_related=False),
-        "max_depth": FunctionDistribution(estimate_max_depth),
+        "max_depth": IntUniformDistribution(2, 15),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
         "max_features": UniformDistribution(0.1, 1.0),
@@ -83,7 +83,7 @@ class DecisionTreeRegressor(TreeEstimator):
         "criterion": CategoricalDistribution(
             ["mse", "friedman_mse", "mae", "poisson"], cost_related=False
         ),
-        "max_depth": FunctionDistribution(estimate_max_depth),
+        "max_depth": IntUniformDistribution(2, 15),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
         "max_features": UniformDistribution(0.1, 1.0),

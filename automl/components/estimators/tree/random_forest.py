@@ -56,7 +56,7 @@ class RandomForestClassifier(TreeEstimator):
         "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
-        "max_depth": FunctionDistribution(estimate_max_depth),
+        "max_depth": IntUniformDistribution(2, 15),
         "min_impurity_decrease": UniformDistribution(
             1e-10, 0.1, log=True, cost_related=False
         ),
@@ -109,7 +109,7 @@ class RandomForestRegressor(TreeEstimator):
         "max_features": UniformDistribution(0.1, 1.0),
     }
     _default_tuning_grid_extended = {
-        "max_depth": FunctionDistribution(estimate_max_depth),
+        "max_depth": IntUniformDistribution(2, 15),
         "min_impurity_decrease": UniformDistribution(
             1e-10, 0.1, log=True, cost_related=False
         ),
