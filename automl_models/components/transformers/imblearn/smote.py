@@ -7,7 +7,7 @@ from imblearn.over_sampling import (
 )
 from sklearn.base import BaseEstimator, clone
 
-from ...compatibility.pandas import categorical_columns_to_int_categories
+from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ..transformer import DataType
 from ...utils import validate_type
 
@@ -82,10 +82,14 @@ class PandasAutoSMOTE(BaseEstimator):
 
         sampler = self._get_sampler(X)
 
+        encoder = PandasOrdinalEncoder()
+
         Xt, yt = sampler.fit_resample(
-            categorical_columns_to_int_categories(X).reset_index(drop=True),
+            encoder.fit_transform(X).reset_index(drop=True),
             y.reset_index(drop=True),
         )
+
+        Xt = encoder.inverse_transform(Xt)
 
         if not isinstance(Xt, pd.DataFrame):
             Xt = pd.DataFrame(

@@ -120,10 +120,10 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             except Exception:
                 pass
             if col.name in self.ordinal_columns:
-                if set(col_unqiue) != set(self.ordinal_columns[col.name]):
-                    raise ValueError(
-                        f"Ordered values for column '{col.name}' are mismatched. Got {self.ordinal_columns[col.name]}, actual categories {col_unqiue}."
-                    )
+                # if set(col_unqiue) != set(self.ordinal_columns[col.name]):
+                #     raise ValueError(
+                #         f"Ordered values for column '{col.name}' are mismatched. Got {self.ordinal_columns[col.name]}, actual categories {col_unqiue}."
+                #     )
                 return col.astype(
                     pd.CategoricalDtype(self.ordinal_columns[col.name], ordered=True)
                 ).cat.codes.replace(-1, None)

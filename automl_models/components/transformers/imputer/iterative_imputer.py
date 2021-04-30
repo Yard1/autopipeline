@@ -75,13 +75,14 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
                 gamma_oldcat = gamma_newcat
 
             for col in self.nan_columns_:
-                if self.verbose > 1:
-                    print(f"Imputing column: {col}")
                 classification = True
                 model = self.classifiers_.get(col, None)
                 if model is None:
                     classification = False
                     model = self.regressors_[col]
+
+                if self.verbose > 1:
+                    print(f"Imputing column: {col}, classification: {classification}")
 
                 if fit:
                     X_without_missing = X_imputed.iloc[
@@ -103,7 +104,6 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
                 )
                 prediction = (
                     pd.Series(prediction, index=missing_indices_list, name=col)
-                    .astype("uint16")
                     .astype(self.dtypes_[col])
                 )
 
@@ -129,6 +129,10 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
             if self.classifiers_:
                 gamma_newcat = new_gamma_newcat / self.n_catmissing_
             if self.regressors_:
+                new_gamma_new = np.sum(new_gamma_new)
+                new_gamma_new_divisor = np.sum(new_gamma_new_divisor)
+                if new_gamma_new_divisor == 0:
+                    new_gamma_new_divisor = 1e-15
                 gamma_new = new_gamma_new / new_gamma_new_divisor
 
             if self.verbose > 0:

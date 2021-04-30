@@ -74,7 +74,7 @@ GlobalSearch = ConditionalOptunaSearch
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
-    #STEPSIZE = 0.15
+    STEPSIZE = 0.15
 
     def __init__(
         self,
@@ -1045,8 +1045,9 @@ class ConditionalBlendSearch(BlendSearch):
         # update priority
         min_eci = self._deadline - time.time()
         print(f"DEADLINE: {min_eci}")
-        if min_eci <= 0:
-            return -1, -1, []
+        #if min_eci <= 0:
+        #    time.sleep(1)
+        #    return -1, -1, []
         max_speed = 0
         for thread in self._search_thread_pool.values():
             if thread.speed > max_speed:
@@ -1459,12 +1460,12 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
-        if self.early_stopping and self.X_.shape[0] > 10001:
+        if self.early_stopping and self.X_.shape[0] > 100001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 5000 / self.X_.shape[0])
+            min_dist = max(min_dist, 50000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)
