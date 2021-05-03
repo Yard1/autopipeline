@@ -11,7 +11,7 @@ from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ..transformer import DataType
 from ...utils import validate_type
 
-
+# TODO consider caching for KNN inside SMOTE?
 class PandasAutoSMOTE(BaseEstimator):
     """Automatically choose which SMOTE to use based on features"""
 

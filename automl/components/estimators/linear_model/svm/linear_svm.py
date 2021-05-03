@@ -19,7 +19,7 @@ class LinearSVC(SVM):
         "multi_class": "ovr",
         "fit_intercept": True,
         "intercept_scaling": 1,
-        "class_weight": None,
+        "class_weight": "balanced",
         "verbose": 0,
         "random_state": 0,
         "max_iter": 200,
@@ -31,7 +31,9 @@ class LinearSVC(SVM):
         ),
         "C": UniformDistribution(0.01, 10, cost_related=False),
     }
-    _default_tuning_grid_extended = {}
+    _default_tuning_grid_extended = {
+        "class_weight": CategoricalDistribution(["balanced", None], cost_related=False)
+    }
 
     _component_level = ComponentLevel.UNCOMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}

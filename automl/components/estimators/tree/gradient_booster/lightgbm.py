@@ -35,7 +35,7 @@ class LGBMClassifier(GradientBoosterEstimator):
         "learning_rate": 0.1,
         "n_estimators": 200,
         "subsample_for_bin": 200000,
-        "class_weight": None,
+        "class_weight": "balanced",
         "min_split_gain": 0,
         "min_child_weight": 1e-3,
         "min_child_samples": 20,
@@ -50,13 +50,13 @@ class LGBMClassifier(GradientBoosterEstimator):
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "num_leaves": IntUniformDistribution(2, 256),
-        "learning_rate": UniformDistribution(1 / 1024, 0.3, log=True),
+        "n_estimators": FunctionDistribution(get_lgbm_n_estimators, cost_bounds="upper"),
+        "num_leaves": IntUniformDistribution(2, 256, cost_bounds="upper"),
+        "learning_rate": UniformDistribution(1 / 1024, 0.3, log=True, cost_bounds="lower"),
     }
     _default_tuning_grid_extended = {
-        "subsample": UniformDistribution(0.1, 1.0),
-        "colsample_bytree": UniformDistribution(0.01, 1.0),
+        "subsample": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
+        "colsample_bytree": UniformDistribution(0.01, 1.0, cost_bounds="upper"),
         "reg_alpha": UniformDistribution(1 / 1024, 1024, log=True, cost_related=False),
         "reg_lambda": UniformDistribution(1 / 1024, 1024, log=True, cost_related=False),
         "min_child_samples": IntUniformDistribution(
@@ -98,13 +98,13 @@ class LGBMRegressor(GradientBoosterEstimator):
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_lgbm_n_estimators),
-        "num_leaves": IntUniformDistribution(2, 256),
-        "learning_rate": UniformDistribution(1 / 1024, 0.3, log=True),
+        "n_estimators": FunctionDistribution(get_lgbm_n_estimators, cost_bounds="upper"),
+        "num_leaves": IntUniformDistribution(2, 256, cost_bounds="upper"),
+        "learning_rate": UniformDistribution(1 / 1024, 0.3, log=True, cost_bounds="lower"),
     }
     _default_tuning_grid_extended = {
-        "subsample": UniformDistribution(0.1, 1.0),
-        "colsample_bytree": UniformDistribution(0.01, 1.0),
+        "subsample": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
+        "colsample_bytree": UniformDistribution(0.01, 1.0, cost_bounds="upper"),
         "reg_alpha": UniformDistribution(1 / 1024, 1024, log=True, cost_related=False),
         "reg_lambda": UniformDistribution(1 / 1024, 1024, log=True, cost_related=False),
         "min_child_samples": IntUniformDistribution(
@@ -121,3 +121,4 @@ class LGBMRegressor(GradientBoosterEstimator):
 
 
 # TODO: add dart, goss
+# TODO add expert configs from LightAutoML https://github.com/sberbank-ai-lab/LightAutoML/blob/master/lightautoml/ml_algo/boost_lgbm.py

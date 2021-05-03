@@ -34,15 +34,20 @@ class CatBoostClassifierBinary(GradientBoosterEstimator):
         "task_type": "CPU",
         "verbose": False,
         "random_state": None,
+        "auto_class_weights": "Balanced",
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_catboost_n_estimators),
-        "max_depth": IntUniformDistribution(4, 10),
+        "n_estimators": FunctionDistribution(
+            get_catboost_n_estimators, cost_bounds="upper"
+        ),
+        "max_depth": IntUniformDistribution(4, 10, cost_bounds="upper"),
         # "learning_rate": UniformDistribution(lower=0.005, upper=0.2, log=True),
     }
     _default_tuning_grid_extended = {
-        # TODO add class_weight
+        "auto_class_weights": CategoricalDistribution(
+            ["Balanced", None], cost_related=False
+        )
     }
 
     _problem_types = {
@@ -63,15 +68,22 @@ class CatBoostClassifierMulticlass(GradientBoosterEstimator):
         "task_type": "CPU",
         "verbose": False,
         "random_state": None,
+        "auto_class_weights": "Balanced",
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_catboost_n_estimators),
-        "max_depth": IntUniformDistribution(4, 10),
-        "learning_rate": UniformDistribution(lower=0.005, upper=0.2, log=True),
+        "n_estimators": FunctionDistribution(
+            get_catboost_n_estimators, cost_bounds="upper"
+        ),
+        "max_depth": IntUniformDistribution(4, 10, cost_bounds="upper"),
+        "learning_rate": UniformDistribution(
+            lower=0.005, upper=0.2, log=True, cost_bounds="lower"
+        ),
     }
     _default_tuning_grid_extended = {
-        # TODO add class_weight
+        "auto_class_weights": CategoricalDistribution(
+            ["Balanced", None], cost_related=False
+        )
     }
 
     _problem_types = {
@@ -95,9 +107,13 @@ class CatBoostRegressor(GradientBoosterEstimator):
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_catboost_n_estimators),
-        "max_depth": IntUniformDistribution(4, 10),
-        "learning_rate": UniformDistribution(lower=0.005, upper=0.2, log=True),
+        "n_estimators": FunctionDistribution(
+            get_catboost_n_estimators, cost_bounds="upper"
+        ),
+        "max_depth": IntUniformDistribution(4, 10, cost_bounds="upper"),
+        "learning_rate": UniformDistribution(
+            lower=0.005, upper=0.2, log=True, cost_bounds="lower"
+        ),
     }
     _default_tuning_grid_extended = {}
 

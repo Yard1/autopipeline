@@ -65,15 +65,25 @@ class UniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     log: bool, default = False:
         If True, the distribution will be log-uniform.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
     """
 
     def __init__(
-        self, lower: float, upper: float, log: bool = False, cost_related: bool = True
+        self,
+        lower: float,
+        upper: float,
+        log: bool = False,
+        cost_related: bool = True,
+        cost_bounds: str = "both",
     ):
         self.lower = lower
         self.upper = upper
         self.log = log
         self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -154,15 +164,25 @@ class IntUniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     log: bool, default = False:
         If True, the distribution will be log-uniform.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
     """
 
     def __init__(
-        self, lower: int, upper: int, log: bool = False, cost_related: bool = True
+        self,
+        lower: int,
+        upper: int,
+        log: bool = False,
+        cost_related: bool = True,
+        cost_bounds: str = "both",
     ):
         self.lower = lower
         self.upper = upper
         self.log = log
         self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -249,6 +269,10 @@ class DiscreteUniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     q: float = None:
         Step. If None, will be equal to UniformDistribution.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
 
     Warnings
     --------
@@ -262,11 +286,13 @@ class DiscreteUniformDistribution(Distribution):
         upper: int,
         q: Optional[float] = None,
         cost_related: bool = True,
+        cost_bounds: str = "both",
     ):
         self.lower = lower
         self.upper = upper
         self.q = q
         self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -332,6 +358,10 @@ class CategoricalDistribution(Distribution):
     ----------
     values: list or other iterable
         Possible values.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
 
     Warnings
     --------
@@ -340,7 +370,7 @@ class CategoricalDistribution(Distribution):
 
     None_str = "!None"
 
-    def __init__(self, values, cost_related: bool = True):
+    def __init__(self, values, cost_related: bool = True, cost_bounds: str = "both"):
         self.values = [x if x is not None else self.None_str for x in values]
         try:
             self.values = list(set(self.values))
@@ -351,6 +381,7 @@ class CategoricalDistribution(Distribution):
                     new_values.append(x)
             self.values = new_values
         self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     @property
     def default(self):
@@ -414,16 +445,35 @@ class CategoricalDistribution(Distribution):
 
 
 class FunctionDistribution(Distribution):
-    def __init__(self, function, cost_related: bool = True):
+    """
+    Dynamic distribution from function.
+
+    Parameters
+    ----------
+    function: callable:
+        Callable that returns a Distribution.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
+
+    Warnings
+    --------
+    - `None` is not supported  as a value for ConfigSpace.
+    """
+
+    def __init__(self, function, cost_related: bool = True, cost_bounds: str = "both"):
         self.function = function
         self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         return True
 
     def __call__(self, config, stage):
-        dist = self.function(config, stage)
+        dist: Distribution = self.function(config, stage)
         dist.cost_related = self.cost_related
+        dist.cost_bounds = self.cost_bounds
         try:
             dist.default = self.default
         except KeyError:

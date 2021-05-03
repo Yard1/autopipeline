@@ -18,5 +18,5 @@ class AutoSMOTE(ImblearnSampler):
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
     _default_tuning_grid = {
-        "k_neighbors": IntUniformDistribution(2, 20, log=True, cost_related=False),
+        "k_neighbors": IntUniformDistribution(2, 40, log=True, cost_related=False),
     }

@@ -3,6 +3,11 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 
 
 class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier):
+    def get_params(self, deep=True):
+        r = super().get_params(deep=deep)
+        r["auto_class_weights"] = r.get("auto_class_weights", None)
+        return r
+
     def fit(
         self,
         X,

@@ -31,16 +31,16 @@ class DecisionTreeClassifier(TreeEstimator):
         "random_state": 0,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,
-        "class_weight": None,
+        "class_weight": "balanced",
         "ccp_alpha": 0.0,
     }
 
     _default_tuning_grid = {
         "criterion": CategoricalDistribution(["gini", "entropy"], cost_related=False),
-        "max_depth": IntUniformDistribution(2, 15),
+        "max_depth": IntUniformDistribution(2, 15, cost_bounds="upper"),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
-        "max_features": UniformDistribution(0.1, 1.0),
+        "max_features": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
     }
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(
@@ -83,10 +83,10 @@ class DecisionTreeRegressor(TreeEstimator):
         "criterion": CategoricalDistribution(
             ["mse", "friedman_mse", "mae", "poisson"], cost_related=False
         ),
-        "max_depth": IntUniformDistribution(2, 15),
+        "max_depth": IntUniformDistribution(2, 15, cost_bounds="upper"),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
-        "max_features": UniformDistribution(0.1, 1.0),
+        "max_features": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
     }
     _default_tuning_grid_extended = {
         "min_impurity_decrease": UniformDistribution(

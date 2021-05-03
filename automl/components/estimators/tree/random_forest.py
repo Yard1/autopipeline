@@ -40,7 +40,7 @@ class RandomForestClassifier(TreeEstimator):
         "bootstrap": True,
         "oob_score": False,
         "n_jobs": None,
-        "class_weight": None,
+        "class_weight": "balanced",
         "ccp_alpha": 0.0,
         "verbose": 0,
         "warm_start": False,
@@ -48,15 +48,15 @@ class RandomForestClassifier(TreeEstimator):
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_rf_n_estimators),
+        "n_estimators": FunctionDistribution(get_rf_n_estimators, cost_bounds="upper"),
         "randomization_type": CategoricalDistribution(["rf", "et"], cost_related=False),
         "criterion": CategoricalDistribution(["gini", "entropy"], cost_related=False),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
-        "max_features": UniformDistribution(0.1, 1.0),
+        "max_features": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
     }
     _default_tuning_grid_extended = {
-        "max_depth": IntUniformDistribution(2, 15),
+        "max_depth": IntUniformDistribution(2, 15, cost_bounds="upper"),
         "min_impurity_decrease": UniformDistribution(
             1e-10, 0.1, log=True, cost_related=False
         ),
@@ -101,15 +101,15 @@ class RandomForestRegressor(TreeEstimator):
     }
 
     _default_tuning_grid = {
-        "n_estimators": FunctionDistribution(get_rf_n_estimators),
+        "n_estimators": FunctionDistribution(get_rf_n_estimators, cost_bounds="upper"),
         "randomization_type": CategoricalDistribution(["rf", "et"], cost_related=False),
         # "criterion": CategoricalDistribution(["mse", "mae"]),
         "min_samples_split": IntUniformDistribution(2, 20, cost_related=False),
         "min_samples_leaf": IntUniformDistribution(1, 20, cost_related=False),
-        "max_features": UniformDistribution(0.1, 1.0),
+        "max_features": UniformDistribution(0.1, 1.0, cost_bounds="upper"),
     }
     _default_tuning_grid_extended = {
-        "max_depth": IntUniformDistribution(2, 15),
+        "max_depth": IntUniformDistribution(2, 15, cost_bounds="upper"),
         "min_impurity_decrease": UniformDistribution(
             1e-10, 0.1, log=True, cost_related=False
         ),
