@@ -82,7 +82,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             n_startup_trials=n_startup_trials,
             seed=seed,
             multivariate=True,
-            n_ei_candidates=128,
+            n_ei_candidates=64,
         )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "

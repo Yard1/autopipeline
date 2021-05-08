@@ -22,7 +22,11 @@ class VotingEnsembleCreator(EnsembleCreator):
 
     @property
     def ensemble_class(self) -> type:
-        return VotingClassifier if self.problem_type.is_classification() else VotingRegressor
+        return (
+            VotingClassifier
+            if self.problem_type.is_classification()
+            else VotingRegressor
+        )
 
     def _configure_ensemble(self, metric_name: str, metric, random_state):
         if self.problem_type == ProblemType.REGRESSION:
@@ -103,6 +107,12 @@ class VotingEnsembleCreator(EnsembleCreator):
             y,
             refit_estimators=False,
         )
+        test_predictions = kwargs.get("test_predictions", None)
+        if test_predictions:
+            ensemble._saved_test_predictions = [
+                test_predictions.get(trial["trial_id"], None)
+                for trial in trials_for_ensembling
+            ]
         return ensemble
 
 

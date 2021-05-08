@@ -17,6 +17,34 @@ from .utils import fit_single_estimator_if_not_fitted, call_method
 from ...utils import clone_with_n_jobs_1
 
 
+def _collect_predictions(obj, X, method):
+    if hasattr(obj, "_saved_test_predictions") and obj._saved_test_predictions:
+        saved_predictions = obj._saved_test_predictions
+    else:
+        saved_predictions = [None] * len(obj.estimators_)
+
+    assert len(saved_predictions) == len(obj.estimators_)
+
+    predictions = Parallel(n_jobs=obj.n_jobs, verbose=int(bool(obj.verbose)))(
+        delayed(call_method)(
+            est,
+            method,
+            X,
+        )
+        for i, est in enumerate(obj.estimators_)
+        if saved_predictions[i] is None or method not in saved_predictions[i]
+    )
+    predictions = list(predictions)
+
+    for i in range(len(saved_predictions)):
+        if saved_predictions[i] is None or method not in saved_predictions[i]:
+            saved_predictions[i] = predictions.pop(0)
+        else:
+            saved_predictions[i] = saved_predictions[i][method]
+
+    return saved_predictions
+
+
 # TODO consider accumulation as in _BaseForest to avoid storing all preds
 class PandasVotingClassifier(_VotingClassifier):
     def fit(self, X, y, sample_weight=None, refit_estimators=True):
@@ -123,28 +151,13 @@ class PandasVotingClassifier(_VotingClassifier):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
-            delayed(call_method)(
-                est,
-                "predict",
-                X,
-            )
-            for est in self.estimators_
-        )
+        predictions = _collect_predictions(self, X, "predict")
 
         return np.asarray(predictions).T
 
     def _collect_probas(self, X):
-        """Collect results from clf.predict calls."""
-
-        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
-            delayed(call_method)(
-                est,
-                "predict_proba",
-                X,
-            )
-            for est in self.estimators_
-        )
+        """Collect results from clf.predict_proba calls."""
+        predictions = _collect_predictions(self, X, "predict_proba")
 
         return np.asarray(predictions)
 
@@ -234,13 +247,6 @@ class PandasVotingRegressor(_VotingRegressor):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = Parallel(n_jobs=self.n_jobs, verbose=1 if self.verbose else 0)(
-            delayed(call_method)(
-                est,
-                "predict",
-                X,
-            )
-            for est in self.estimators_
-        )
+        predictions = _collect_predictions(self, X, "predict")
 
         return np.asarray(predictions).T

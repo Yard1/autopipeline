@@ -142,6 +142,14 @@ class StackingEnsembleCreator(EnsembleCreator):
             X_test_stack = ensemble.transform(X_test)
         else:
             X_test_stack = None
+
+        test_predictions = kwargs.get("test_predictions", None)
+        if test_predictions:
+            ensemble._saved_test_predictions = [
+                test_predictions.get(trial_id, None)
+                for trial_id in self.trial_ids_for_ensembling_
+            ]
+
         return ensemble, X_stack, X_test_stack
 
     def clear_stacked_predictions(self, ensemble):
@@ -424,4 +432,13 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             ensemble.final_estimator.steps[0][0],
             PandasSelectColumns(columns_selected),
         )
+
+        test_predictions = kwargs.get("test_predictions", None)
+        if test_predictions:
+            ensemble._saved_test_predictions = [
+                test_predictions.get(trial_id, None)
+                for i, trial_id in enumerate(self.trial_ids_for_ensembling_)
+                if i in indices_to_keep
+            ]
+
         return ensemble, X_stack, X_test_stack

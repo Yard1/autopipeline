@@ -401,9 +401,12 @@ class SklearnTrainable(Trainable):
             subsample_cv = self.cv
 
         if self.cache_results and not is_early_stopping_on:
-            estimator_subclassed = create_dynamically_subclassed_estimator(estimator)
+            (
+                estimator_subclassed,
+                original_type,
+            ) = create_dynamically_subclassed_estimator(estimator)
         else:
-            estimator_subclassed = estimator
+            estimator_subclassed, original_type = estimator, None
 
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
@@ -455,30 +458,45 @@ class SklearnTrainable(Trainable):
         test_metrics = None
         fitted_estimator = None
         fitted_estimator_list = []
-        # TODO save predictions here too
+        combined_test_predictions = {}
+
         if self.X_test_ is not None and not is_early_stopping_on:
             logger.debug("scoring test")
             with set_param_context(
-                estimator,
+                estimator_subclassed,
                 cloned_estimators=fitted_estimator_list,
                 # TODO: look into why setting n_jobs to >1 here leads to way slower results
                 **{
                     k: 1
-                    for k, v in estimator.get_params().items()
+                    for k, v in estimator_subclassed.get_params().items()
                     if k.endswith("n_jobs")
                 },
             ):
                 test_ret = ray_score_test.remote(
-                    estimator,
+                    estimator_subclassed,
                     self.X_,
                     self.y_,
                     self.X_test_,
                     self.y_test_,
-                    self.scoring,
+                    scoring_with_dummies,
                 )
                 test_metrics, fitted_estimator = ray.get(test_ret)
+                test_metrics = {
+                    k: v for k, v in test_metrics.items() if k in self.scoring
+                }
+                if self.cache_results:
+                    combined_test_predictions = {
+                        k: array_shrink(
+                            fitted_estimator._saved_preds[k],
+                            int2uint=True,
+                        )
+                        for k in fitted_estimator._saved_preds.keys()
+                    }
                 fitted_estimator_list.append(fitted_estimator)
             fitted_estimator = fitted_estimator_list[0]
+            if original_type is not None:
+                del fitted_estimator._saved_preds
+                fitted_estimator.__class__ = original_type
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],
@@ -524,9 +542,20 @@ class SklearnTrainable(Trainable):
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass
+            if combined_test_predictions:
+                try:
+                    store.put.remote(
+                        self.trial_id,
+                        "test_predictions",
+                        compress(combined_test_predictions),
+                        False,
+                    )
+                except ray.exceptions.ObjectStoreFullError:
+                    pass
 
         del combined_predictions
         del fitted_estimator
+        del combined_test_predictions
 
         logger.debug("done")
         return ret

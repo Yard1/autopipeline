@@ -74,7 +74,7 @@ GlobalSearch = ConditionalOptunaSearch
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
-    STEPSIZE = 0.15
+    #STEPSIZE = 0.15
 
     def __init__(
         self,
@@ -180,7 +180,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = max(self.dim // 4, 3)  # max number of trials without improvement
+        self.dir = 2  #max(self.dim // 4, 2)  # max number of trials without improvement
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -406,7 +406,7 @@ class PatchedFLOW2(FLOW2):
                     # decrease step size
                     self._oldK = self._iter_best_config
                     self._K = self.trial_count + 1
-                    self.step *= (self._oldK / self._K) ** 2
+                    self.step *= np.sqrt(self._oldK / self._K)
                 self._num_complete4incumbent -= 2
                 if self._num_allowed4incumbent < 2:
                     self._num_allowed4incumbent = 2
@@ -623,7 +623,7 @@ class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
     _FORCE_GS_AFTER = 1000
-    _MAX_GS_RETRIES = 9
+    _MAX_GS_RETRIES = 4
 
     def __init__(
         self,
@@ -877,6 +877,7 @@ class ConditionalBlendSearch(BlendSearch):
             )
         else:
             # TODO if we are caching and without early stopping, consider only estimator fit time for priority
+            # TODO when multiple pipelines have the same estimator, leave only the best (delete the threads)
             if self._points_to_evaluate_trials:
                 clean_sorted_evaluted_trials = sorted(
                     [
@@ -1208,6 +1209,9 @@ class ConditionalBlendSearch(BlendSearch):
                     0,  # step_multiplier=0.75
                 )
                 if self._should_skip(0, trial_id, config):
+                    self._update_admissible_region(
+                        config, self._gs_admissible_min, self._gs_admissible_max
+                    )
                     return None, None, 0, estimator
 
         return config, prune_attr, 0, estimator
@@ -1218,8 +1222,8 @@ class ConditionalBlendSearch(BlendSearch):
                 trial_id, result=None, state=TrialState.FAIL
             )
             print(f"Marked {trial_id} as an error")
-        except Exception as e:
-            print(f"Couldn't mark {trial_id} as an error, {e}")
+        except Exception:
+            print(f"Couldn't mark {trial_id} as an error, {traceback.format_exc()}")
 
     def _force_suggestion_to_be_valid(
         self,

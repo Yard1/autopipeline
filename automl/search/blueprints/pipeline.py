@@ -125,11 +125,11 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
+        ("Imputer", list(imputers.values())),
         (
             "FeatureSelector",
             [components["Passthrough"]] + list(feature_selectors.values()),
         ),
-        ("Imputer", list(imputers.values())),
         ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
         (
             "ColumnOrdinal",

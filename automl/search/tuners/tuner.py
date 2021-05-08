@@ -275,6 +275,56 @@ class RayTuneTuner(Tuner):
                 if str(v) in self._component_strings_:
                     conf[k] = str(v)
 
+    def _get_objects_from_ray_store(self, object_store):
+        self.fold_predictions_ = {}
+        self.test_predictions_ = {}
+        self.fitted_estimators_ = {}
+
+        logger.debug("getting estimators from ray object store")
+        trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
+        fitted_estimators = ray.get(
+            [
+                object_store.get.remote(
+                    key, "fitted_estimators", pop=True, decompress=False
+                )
+                for key in trial_ids
+            ]
+        )
+        fitted_estimators = [RayStore.decompress(val) for val in fitted_estimators]
+        self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
+
+        logger.debug("getting fold predictions from ray object store")
+        trial_ids = ray.get(object_store.get_all_keys.remote("fold_predictions"))
+        fold_predictions = ray.get(
+            [
+                object_store.get.remote(
+                    key, "fold_predictions", pop=True, decompress=False
+                )
+                for key in trial_ids
+            ]
+        )
+
+        fold_predictions = [RayStore.decompress(val) for val in fold_predictions]
+        fold_predictions = dict(zip(trial_ids, fold_predictions))
+        for key in self.analysis_.results.keys():
+            self.fold_predictions_[key] = fold_predictions.get(key, {})
+
+        logger.debug("getting test predictions from ray object store")
+        trial_ids = ray.get(object_store.get_all_keys.remote("test_predictions"))
+        test_predictions = ray.get(
+            [
+                object_store.get.remote(
+                    key, "test_predictions", pop=True, decompress=False
+                )
+                for key in trial_ids
+            ]
+        )
+
+        test_predictions = [RayStore.decompress(val) for val in test_predictions]
+        test_predictions = dict(zip(trial_ids, test_predictions))
+        for key in self.analysis_.results.keys():
+            self.test_predictions_[key] = test_predictions.get(key, {})
+
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         # TODO make this better
@@ -323,37 +373,7 @@ class RayTuneTuner(Tuner):
 
             gc.collect()
 
-            self.fold_predictions_ = {}
-            self.fitted_estimators_ = {}
-
-            logger.debug("getting estimators from ray object store")
-            trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
-            fitted_estimators = ray.get(
-                [
-                    object_store.get.remote(
-                        key, "fitted_estimators", pop=True, decompress=False
-                    )
-                    for key in trial_ids
-                ]
-            )
-            fitted_estimators = [RayStore.decompress(val) for val in fitted_estimators]
-            self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
-
-            logger.debug("getting fold predictions from ray object store")
-            trial_ids = ray.get(object_store.get_all_keys.remote("fold_predictions"))
-            fold_predictions = ray.get(
-                [
-                    object_store.get.remote(
-                        key, "fold_predictions", pop=True, decompress=False
-                    )
-                    for key in trial_ids
-                ]
-            )
-
-            fold_predictions = [RayStore.decompress(val) for val in fold_predictions]
-            fold_predictions = dict(zip(trial_ids, fold_predictions))
-            for key in self.analysis_.results.keys():
-                self.fold_predictions_[key] = fold_predictions.get(key, {})
+            self._get_objects_from_ray_store(object_store)
 
             ray.kill(object_store)
             del object_store

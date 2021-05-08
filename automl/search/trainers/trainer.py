@@ -62,7 +62,7 @@ from automl_models.components.estimators.ensemble import (
     PandasVotingClassifier,
     PandasVotingRegressor,
     DummyClassifier,
-    DESSplitter
+    DESSplitter,
 )
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
@@ -288,9 +288,9 @@ class Trainer:
 
         gc.collect()
 
-        #with ray_context(
+        # with ray_context(
         #    global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
-        #), joblib.parallel_backend("ray_caching"):
+        # ), joblib.parallel_backend("ray_caching"):
         X_stack, X_test_stack = self._create_ensembles(
             X,
             y,
@@ -301,6 +301,7 @@ class Trainer:
             y_test=y_test,
         )
         del self.last_tuner_.fold_predictions_
+        del self.last_tuner_.test_predictions_
         if self.current_stacking_level >= self.stacking_level:
             logger.debug("fitting final ensemble", flush=True)
             self.final_ensemble_ = self._create_final_stack()
@@ -343,6 +344,7 @@ class Trainer:
             "X_test": X_test,
             "y_test": y_test,
             "fold_predictions": self.last_tuner_.fold_predictions_,
+            "test_predictions": self.last_tuner_.test_predictions_,
             "refit_estimators": False,
             "cv": self.cv_,
         }
@@ -365,7 +367,12 @@ class Trainer:
         self.ensembles_.append(fitted_ensembles)
         for ensemble_name, ensemble in fitted_ensembles.items():
             self._score_ensemble(
-                ensemble, ensemble_name, X, y, X_test=X_test, y_test=y_test
+                ensemble,
+                ensemble_name,
+                X,
+                y,
+                X_test=X_test,
+                y_test=y_test,
             )
             try:
                 ensemble.set_params(n_jobs=None)
@@ -447,7 +454,15 @@ class Trainer:
         )
         return np.append(res.x, 1 - np.sum(res.x))
 
-    def _score_ensemble(self, ensemble, ensemble_name, X, y, X_test=None, y_test=None):
+    def _score_ensemble(
+        self,
+        ensemble,
+        ensemble_name,
+        X,
+        y,
+        X_test=None,
+        y_test=None,
+    ):
         if X_test is None:
             return
         logger.debug("scoring ensemble")
@@ -467,6 +482,8 @@ class Trainer:
                 scores["accuracy"], scores["recall"], scores["specificity"]
             )
         self.ensemble_results_[-1][ensemble_name] = scores
+        if hasattr(ensemble, "_saved_test_predictions"):
+            del ensemble._saved_test_predictions
 
     def _create_dynamic_ensemble(self, X, y):
         # TODO fix

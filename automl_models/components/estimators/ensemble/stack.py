@@ -24,7 +24,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# TODO consider RFE for LogisticRegression
+# TODO handle Repeated CV (here and in trainable)
 class PandasStackingClassifier(_StackingClassifier):
     def fit(
         self,
@@ -161,16 +161,36 @@ class PandasStackingClassifier(_StackingClassifier):
         """Concatenate and return the predictions of the estimators."""
         check_is_fitted(self)
 
+        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
+            saved_predictions = self._saved_test_predictions
+        else:
+            saved_predictions = [None] * len(self.estimators_)
+
+        assert len(saved_predictions) == len(self.estimators_)
+
         predictions = Parallel(n_jobs=self.n_jobs)(
             delayed(call_method)(
-                est,
-                meth,
+                est_meth[0],
+                est_meth[1],
                 X,
             )
-            for est, meth in zip(self.estimators_, self.stack_method_)
-            if est != "drop"
+            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
+            if est_meth[0] != "drop"
+            and saved_predictions[i] is None
+            or est_meth[1] not in saved_predictions[i]
         )
         predictions = list(predictions)
+
+        for i in range(len(saved_predictions)):
+            if (
+                saved_predictions[i] is None
+                or self.stack_method_[i] not in saved_predictions[i]
+            ):
+                saved_predictions[i] = predictions.pop(0)
+            else:
+                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
+
+        predictions = saved_predictions
 
         return self._concatenate_predictions(X, predictions)
 
@@ -210,8 +230,9 @@ class PandasStackingClassifier(_StackingClassifier):
                     X_meta_names.append(
                         [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
                     )
+        index = X.index if hasattr(X, "index") else None
         X_meta = [
-            pd.DataFrame(x, columns=X_meta_names[i], index=X.index)  # TODO: Better name
+            pd.DataFrame(x, columns=X_meta_names[i], index=index)  # TODO: Better name
             for i, x in enumerate(X_meta)
         ]
         meta_df = pd.concat(X_meta, axis=1)
@@ -219,7 +240,10 @@ class PandasStackingClassifier(_StackingClassifier):
             df = self.preprocessor_.transform(meta_df)
         except Exception:
             df = self.preprocessor_.fit_transform(meta_df)
-        df.index = X.index
+        try:
+            df.index = X.index
+        except:
+            pass
         if save_predictions:
             self.stacked_predictions_ = df
         if self.passthrough:
@@ -361,18 +385,36 @@ class PandasStackingRegressor(_StackingRegressor):
         """Concatenate and return the predictions of the estimators."""
         check_is_fitted(self)
 
+        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
+            saved_predictions = self._saved_test_predictions
+        else:
+            saved_predictions = [None] * len(self.estimators_)
+
+        assert len(saved_predictions) == len(self.estimators_)
+
         predictions = Parallel(n_jobs=self.n_jobs)(
             delayed(call_method)(
-                est,
-                meth,
+                est_meth[0],
+                est_meth[1],
                 X,
             )
-            for est, meth in zip(self.estimators_, self.stack_method_)
-            if est != "drop"
+            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
+            if est_meth[0] != "drop"
+            and saved_predictions[i] is None
+            or est_meth[1] not in saved_predictions[i]
         )
         predictions = list(predictions)
 
-        return self._concatenate_predictions(X, predictions)
+        for i in range(len(saved_predictions)):
+            if (
+                saved_predictions[i] is None
+                or self.stack_method_[i] not in saved_predictions[i]
+            ):
+                saved_predictions[i] = predictions.pop(0)
+            else:
+                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
+
+        predictions = saved_predictions
 
     def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
@@ -410,8 +452,9 @@ class PandasStackingRegressor(_StackingRegressor):
                     X_meta_names.append(
                         [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
                     )
+        index = X.index if hasattr(X, "index") else None
         X_meta = [
-            pd.DataFrame(x, columns=X_meta_names[i], index=X.index)  # TODO: Better name
+            pd.DataFrame(x, columns=X_meta_names[i], index=index)  # TODO: Better name
             for i, x in enumerate(X_meta)
         ]
         meta_df = pd.concat(X_meta, axis=1)
@@ -419,7 +462,10 @@ class PandasStackingRegressor(_StackingRegressor):
             df = self.preprocessor_.transform(meta_df)
         except Exception:
             df = self.preprocessor_.fit_transform(meta_df)
-        df.index = X.index
+        try:
+            df.index = X.index
+        except:
+            pass
         if save_predictions:
             self.stacked_predictions_ = df
         if self.passthrough:

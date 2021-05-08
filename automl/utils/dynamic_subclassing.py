@@ -70,4 +70,4 @@ def create_dynamically_subclassed_object(obj: Any, subclasses: List[type]) -> An
         obj = deepcopy(obj)
     obj.__class__ = subtype
 
-    return obj
+    return obj, original_type
