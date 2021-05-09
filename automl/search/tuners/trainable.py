@@ -19,6 +19,7 @@ from sklearn.model_selection._validation import (
     _fit_and_score,
 )
 from sklearn.utils import resample, _safe_indexing
+from sklearn.model_selection._split import _RepeatedSplits
 
 import ray
 import ray.exceptions
@@ -32,7 +33,7 @@ import ray.cloudpickle as cpickle
 import lz4.frame
 
 from ...utils.joblib_backend import register_ray_caching
-from .utils import treat_config
+from .utils import treat_config, split_list_into_chunks
 from ..utils import score_test
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
@@ -301,7 +302,7 @@ class SklearnTrainable(Trainable):
         return_estimator=False,
         error_score=np.nan,
     ):
-        """Fast cross validation with Ray"""
+        """Fast cross validation with Ray, adapted from sklearn.validation.cross_validate"""
         X, y, groups = indexable(X, y, groups)
 
         cv = check_cv(cv, y, classifier=is_classifier(estimator))
@@ -318,6 +319,8 @@ class SklearnTrainable(Trainable):
 
         # We clone the estimator to make sure that all the folds are
         # independent, and that it is pickle-able.
+        train_test = list(cv.split(X, y, groups))
+
         results_futures = [
             ray_fit_and_score.remote(
                 clone(estimator),
@@ -334,7 +337,7 @@ class SklearnTrainable(Trainable):
                 return_estimator=return_estimator,
                 error_score=error_score,
             )
-            for train, test in cv.split(X, y, groups)
+            for train, test in train_test
         ]
 
         results = ray.get(results_futures)
@@ -367,7 +370,33 @@ class SklearnTrainable(Trainable):
                 key = "train_%s" % name
                 ret[key] = train_scores_dict[name]
 
+        # added in automl
+        ret["cv_indices"] = train_test
+
         return ret
+
+    def _combine_cv_repeat(self, chunk):
+        predictions, test_indices = zip(*chunk)
+        predictions = np.concatenate(predictions)
+        test_indices = np.concatenate(test_indices)
+        inv_test_indices = np.empty(len(test_indices), dtype=int)
+        inv_test_indices[test_indices] = np.arange(len(test_indices))
+        return predictions[inv_test_indices]
+
+    def _combine_cv_predictions(self, predictions, train_test_indices):
+        if isinstance(self.cv, _RepeatedSplits):
+            repeats = self.cv.n_repeats
+        else:
+            repeats = 1
+        _, test_indices = zip(*train_test_indices)
+        predictions_with_indices = list(zip(predictions, test_indices))
+        combined_predictions = [
+            array_shrink(self._combine_cv_repeat(repeat), int2uint=True)
+            for repeat in split_list_into_chunks(
+                predictions_with_indices, len(predictions_with_indices) // repeats
+            )
+        ]
+        return combined_predictions
 
     def _train(self):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -437,9 +466,9 @@ class SklearnTrainable(Trainable):
         combined_predictions = {}
         if self.cache_results and not is_early_stopping_on:
             combined_predictions = {
-                k: array_shrink(
-                    np.concatenate([x._saved_preds[k] for x in scores["estimator"]]),
-                    int2uint=True,
+                k: self._combine_cv_predictions(
+                    [x._saved_preds[k] for x in scores["estimator"]],
+                    scores["cv_indices"],
                 )
                 for k in scores["estimator"][0]._saved_preds.keys()
             }

@@ -33,3 +33,10 @@ def removesuffix(string: str, suffix: str) -> str:
         return string[: -len(suffix)]
     else:
         return string[:]
+
+
+def split_list_into_chunks(lst: list, chunk_size: int) -> list:
+    return [
+        lst[i * chunk_size : (i + 1) * chunk_size]
+        for i in range((len(lst) + chunk_size - 1) // chunk_size)
+    ]

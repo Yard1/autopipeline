@@ -1,8 +1,12 @@
+import numpy as np
 from copy import deepcopy
-from sklearn.base import clone, ClassifierMixin, BaseEstimator
+from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
 from sklearn.model_selection import cross_val_predict
 from sklearn.ensemble._base import _fit_single_estimator
-from sklearn.utils.validation import check_is_fitted, NotFittedError
+from sklearn.utils.validation import check_is_fitted, NotFittedError, check_random_state
+from sklearn.model_selection._split import _RepeatedSplits
+from pandas.api.types import is_integer_dtype, is_bool_dtype
+from ...utils import split_list_into_chunks
 
 import logging
 
@@ -51,6 +55,78 @@ def fit_single_estimator_if_not_fitted(
         )
 
 
+def _get_average_preds_from_repeated_cv(predictions: list, estimator):
+    if not isinstance(predictions, list):
+        return predictions
+    if len(predictions) > 1:
+        averaged_preds = np.mean(predictions, axis=0)
+        if is_classifier(estimator) and (
+            is_integer_dtype(predictions[0].dtype)
+            or is_bool_dtype(predictions[0].dtype)
+        ):
+            averaged_preds = np.round(averaged_preds)
+        return averaged_preds.astype(predictions[0].dtype)
+    return predictions[0]
+
+
+def _cross_val_predict_repeated(
+    estimator,
+    X,
+    y=None,
+    *,
+    groups=None,
+    cv=None,
+    n_jobs=None,
+    verbose=0,
+    fit_params=None,
+    pre_dispatch="2*n_jobs",
+    method="predict",
+):
+    """sklearn cross_val_predict with support for repeated CV splitters"""
+    if isinstance(cv, _RepeatedSplits):
+        repeat_predictions = []
+        n_repeats = cv.n_repeats
+        rng = check_random_state(cv.random_state)
+
+        for idx in range(n_repeats):
+            repeat_cv = cv.cv(random_state=rng, shuffle=True, **cv.cvargs)
+            repeat_predictions.append(
+                cross_val_predict(
+                    estimator,
+                    X,
+                    y,
+                    groups=groups,
+                    cv=repeat_cv,
+                    n_jobs=n_jobs,
+                    verbose=verbose,
+                    fit_params=fit_params,
+                    pre_dispatch=pre_dispatch,
+                    method=method,
+                )
+            )
+
+        averaged_preds = np.mean(repeat_predictions, axis=0)
+        if is_classifier(estimator) and (
+            is_integer_dtype(repeat_predictions[0].dtype)
+            or is_bool_dtype(repeat_predictions[0].dtype)
+        ):
+            averaged_preds = np.round(averaged_preds)
+        return averaged_preds.astype(repeat_predictions[0].dtype)
+
+    return cross_val_predict(
+        estimator,
+        X,
+        y,
+        groups=groups,
+        cv=cv,
+        n_jobs=n_jobs,
+        verbose=verbose,
+        fit_params=fit_params,
+        pre_dispatch=pre_dispatch,
+        method=method,
+    )
+
+
 def get_cv_predictions(
     X,
     y,
@@ -78,11 +154,13 @@ def get_cv_predictions(
             prediction = {}
 
         if prediction and meth in prediction:
-            predictions_new.append(prediction[meth])
+            predictions_new.append(
+                _get_average_preds_from_repeated_cv(prediction[meth], est)
+            )
         else:
             print(f"doing cv for {est}.{meth}")
             predictions_new.append(
-                cross_val_predict(
+                _cross_val_predict_repeated(
                     clone(est),
                     X,
                     y,
