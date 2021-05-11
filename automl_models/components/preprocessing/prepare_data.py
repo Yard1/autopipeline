@@ -171,7 +171,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             X[self.id_column_] = X[self.id_column_].astype(int)
             X.set_index(self.id_column_, inplace=True)
 
-        X = X[self.final_columns_]
+        if self.final_columns_ is not None:
+            X = X[self.final_columns_]
 
         X = X.apply(self._convert_dtypes)
 
@@ -216,5 +217,6 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         if was_series:
             X = X.squeeze()
+            self.final_columns_ = None
 
         return X

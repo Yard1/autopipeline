@@ -36,6 +36,7 @@ from ray.tune.sample import Categorical
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
+from sklearn.utils import Bunch
 
 from ray import tune
 from ray.tune.suggest import Searcher, ConcurrencyLimiter
@@ -74,7 +75,7 @@ GlobalSearch = ConditionalOptunaSearch
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
-    #STEPSIZE = 0.15
+    # STEPSIZE = 0.15
 
     def __init__(
         self,
@@ -180,7 +181,9 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = 2  #max(self.dim // 4, 2)  # max number of trials without improvement
+        # self.dir = (
+        #    3  # max(self.dim // 4, 2)  # max number of trials without improvement
+        # )
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -225,34 +228,6 @@ class PatchedFLOW2(FLOW2):
         )
         return np.linalg.norm(delta) <= self.step
 
-    @property
-    def step_lower_bound(self) -> float:
-        step_lb = self._step_lb
-        for key in self._tunable_keys:
-            if key not in self.best_config:
-                continue
-            domain = self.space[key]
-            sampler = domain.get_sampler()
-            if isinstance(sampler, sample.Quantized):
-                sampler_inner = sampler.get_sampler()
-                if str(sampler_inner) == "LogUniform":
-                    step_lb = min(
-                        step_lb,
-                        np.log(1.0 + sampler.q / self.best_config[key])
-                        / np.log(domain.upper / domain.lower),
-                    )
-            elif isinstance(domain, sample.Integer) and str(sampler) == "LogUniform":
-                step_lb = min(
-                    step_lb,
-                    np.log(1.0 + 1.0 / self.best_config[key])
-                    / np.log(domain.upper / domain.lower),
-                )
-        if np.isinf(step_lb):
-            step_lb = self.STEP_LOWER_BOUND
-        else:
-            step_lb *= np.sqrt(self.dim)
-        return step_lb
-
     def create(
         self,
         init_config: Dict,
@@ -283,55 +258,14 @@ class PatchedFLOW2(FLOW2):
 
     def _round(self, resource) -> float:
         """round the resource to self.max_resource if close to it"""
-        if resource * self.resource_multiple_factor > self.max_resource:
-            return np.around(self.max_resource, 2)
-        return np.around(resource, 2)
+        return np.around(super()._round(resource), 2)
 
-    def suggest(self, trial_id: str) -> Optional[Dict]:
-        """suggest a new config, one of the following cases:
-        1. same incumbent, increase resource
-        2. same resource, move from the incumbent to a random direction
-        3. same resource, move from the incumbent to the opposite direction
-        """
-        if (
-            self.saved_resource is None
-            and self._num_complete4incumbent > 0
-            and self.cost_incumbent
-            and self._resource
-            and self._resource < self.max_resource
-            and (
-                self._cost_complete4incumbent
-                >= self.cost_incumbent * self.resource_multiple_factor
-            )
-        ):
-            # consider increasing resource using sum eval cost of complete
-            # configs
-            self._resource = self._round(self._resource * self.resource_multiple_factor)
-            config = self.best_config.copy()
-            config[self.prune_attr] = self._resource
-            print(f"{trial_id} increasing resource to {self._resource}")
-            self.saved_resource = self._resource
-            # self.incumbent[self.prune_attr] = self._resource
-            self._direction_tried = None
-            self._configs[trial_id] = config
-            return config
-        self._num_allowed4incumbent -= 1
-        move = self.incumbent.copy()
-        if self._direction_tried is not None:
-            # return negative direction
-            for i, key in enumerate(self._tunable_keys):
-                move[key] -= self._direction_tried[i]
-            self._direction_tried = None
+    def _is_trial_better(self, trial_id: str, obj: float) -> bool:
+        if self._resource and self._resource < self._configs[trial_id][self.prune_attr]:
+            diff = 0
         else:
-            # propose a new direction
-            self._direction_tried = self.rand_vector_unit_sphere(self.dim) * self.step
-            for i, key in enumerate(self._tunable_keys):
-                move[key] += self._direction_tried[i]
-        self._project(move)
-        config = self.denormalize(move)
-        self._proposed_by[trial_id] = self.incumbent
-        self._configs[trial_id] = config
-        return unflatten_dict(config)
+            diff = np.abs(self.best_obj * self._tol)
+        return self.best_obj is None or obj < (self.best_obj - diff)
 
     def on_trial_complete(
         self, trial_id: str, result: Optional[Dict] = None, error: bool = False
@@ -339,79 +273,181 @@ class PatchedFLOW2(FLOW2):
         """compare with incumbent"""
         # if better, move, reset num_complete and num_proposed
         # if not better and num_complete >= 2*dim, num_allowed += 2
-        self.trial_count += 1
-        print("flow2 on_trial_complete")
-        if (
-            self.saved_resource is not None
-            and result.get(self.prune_attr) >= self.saved_resource - 1e-10
-        ):
-            print(
-                f"{trial_id} reseting saved resource due to {result.get(self.prune_attr)}"
-            )
-            self.saved_resource = None
+        self.trial_count_complete += 1
         if not error and result:
             obj = result.get(self._metric)
             if obj:
                 obj *= self.metric_op
-                if self.best_obj is None or obj < self.best_obj - (
-                    0
-                    if not self._resource
-                    or self._resource < self._configs[trial_id][self.prune_attr]
-                    else np.abs(self.best_obj * self._tol)
-                ):
-                    self.best_obj, self.best_config = obj, self._configs[trial_id]
+                if self._is_trial_better(trial_id, obj):
+                    self.best_obj = obj
+                    self.best_config, self.step = self._configs[trial_id]
                     self.incumbent = self.normalize(self.best_config)
                     self.cost_incumbent = result.get(self.cost_attr)
                     if self._resource:
                         self._resource = self.best_config[self.prune_attr]
                     self._num_complete4incumbent = 0
                     self._cost_complete4incumbent = 0
+                    self._num_proposedby_incumbent = 0
                     self._num_allowed4incumbent = 2 * self.dim
                     self._proposed_by.clear()
                     if self._K > 0:
+                        # self._oldK must have been set when self._K>0
                         self.step *= np.sqrt(self._K / self._oldK)
                     if self.step > self.step_ub:
                         self.step = self.step_ub
-                    self._iter_best_config = self.trial_count
+                    self._iter_best_config = self.trial_count_complete
                     return
         proposed_by = self._proposed_by.get(trial_id)
         if proposed_by == self.incumbent:
             # proposed by current incumbent and no better
-            print("proposed by current incumbent and no better")
             self._num_complete4incumbent += 1
             cost = (
                 result.get(self.cost_attr) if result else self._trial_cost.get(trial_id)
             )
             if cost:
                 self._cost_complete4incumbent += cost
-            print(
-                f"cost={cost}, cost_incumbent={self.cost_incumbent}, _cost_complete4incumbent={self._cost_complete4incumbent}"
-            )
-            print(
-                f"num_complete4incumbent={self._num_complete4incumbent}, self.cost_incumbent * self.resource_multiple_factor={self.cost_incumbent * self.resource_multiple_factor}"
-            )
             if (
                 self._num_complete4incumbent >= 2 * self.dim
                 and self._num_allowed4incumbent == 0
             ):
                 self._num_allowed4incumbent = 2
-            if self._num_complete4incumbent >= self.dir and (
-                not self._resource or self._resource >= self.max_resource
+            if self._num_complete4incumbent == self.dir and (
+                not self._resource or self._resource == self.max_resource
             ):
-                print(
-                    f"step={self.step}, lb={self.step_lower_bound} _oldK={self._iter_best_config} _K={self.trial_count + 1}"
-                )
                 # check stuck condition if using max resource
-                if self.step >= self.step_lower_bound:
-                    # decrease step size
-                    self._oldK = self._iter_best_config
-                    self._K = self.trial_count + 1
-                    self.step *= np.sqrt(self._oldK / self._K)
                 self._num_complete4incumbent -= 2
                 if self._num_allowed4incumbent < 2:
                     self._num_allowed4incumbent = 2
-        # elif proposed_by: # proposed by older incumbent
-        #     del self._proposed_by[trial_id]
+        # elif proposed_by: del self._proposed_by[trial_id]
+
+    # def suggest(self, trial_id: str) -> Optional[Dict]:
+    #     """suggest a new config, one of the following cases:
+    #     1. same incumbent, increase resource
+    #     2. same resource, move from the incumbent to a random direction
+    #     3. same resource, move from the incumbent to the opposite direction
+    #     """
+    #     if (
+    #         self.saved_resource is None
+    #         and self._num_complete4incumbent > 0
+    #         and self.cost_incumbent
+    #         and self._resource
+    #         and self._resource < self.max_resource
+    #         and (
+    #             self._cost_complete4incumbent
+    #             >= self.cost_incumbent * self.resource_multiple_factor
+    #         )
+    #     ):
+    #         # consider increasing resource using sum eval cost of complete
+    #         # configs
+    #         self._resource = self._round(self._resource * self.resource_multiple_factor)
+    #         config = self.best_config.copy()
+    #         config[self.prune_attr] = self._resource
+    #         print(f"{trial_id} increasing resource to {self._resource}")
+    #         self.saved_resource = self._resource
+    #         # self.incumbent[self.prune_attr] = self._resource
+    #         self._direction_tried = None
+    #         self._configs[trial_id] = config
+    #         return config
+    #     self._num_allowed4incumbent -= 1
+    #     move = self.incumbent.copy()
+    #     if self._direction_tried is not None:
+    #         # return negative direction
+    #         for i, key in enumerate(self._tunable_keys):
+    #             move[key] -= self._direction_tried[i]
+    #         self._direction_tried = None
+    #     else:
+    #         # propose a new direction
+    #         self._direction_tried = self.rand_vector_unit_sphere(self.dim) * self.step
+    #         for i, key in enumerate(self._tunable_keys):
+    #             move[key] += self._direction_tried[i]
+    #     self._project(move)
+    #     config = self.denormalize(move)
+    #     self._proposed_by[trial_id] = self.incumbent
+    #     self._configs[trial_id] = config
+    #     return unflatten_dict(config)
+
+    # def on_trial_complete(
+    #     self, trial_id: str, result: Optional[Dict] = None, error: bool = False
+    # ):
+    #     """compare with incumbent"""
+    #     # if better, move, reset num_complete and num_proposed
+    #     # if not better and num_complete >= 2*dim, num_allowed += 2
+    #     try:
+    #         self.trial_count += 1
+    #     except AttributeError:
+    #         self.trial_count = 1
+    #     print("flow2 on_trial_complete")
+    #     if (
+    #         self.saved_resource is not None
+    #         and result.get(self.prune_attr) >= self.saved_resource - 1e-10
+    #     ):
+    #         print(
+    #             f"{trial_id} reseting saved resource due to {result.get(self.prune_attr)}"
+    #         )
+    #         self.saved_resource = None
+    #     if not error and result:
+    #         obj = result.get(self._metric)
+    #         if obj:
+    #             obj *= self.metric_op
+    #             if self.best_obj is None or obj < self.best_obj - (
+    #                 0
+    #                 if not self._resource
+    #                 or self._resource < self._configs[trial_id][self.prune_attr]
+    #                 else np.abs(self.best_obj * self._tol)
+    #             ):
+    #                 self.best_obj, self.best_config = obj, self._configs[trial_id]
+    #                 self.incumbent = self.normalize(self.best_config)
+    #                 self.cost_incumbent = result.get(self.cost_attr)
+    #                 if self._resource:
+    #                     self._resource = self.best_config[self.prune_attr]
+    #                 self._num_complete4incumbent = 0
+    #                 self._cost_complete4incumbent = 0
+    #                 self._num_allowed4incumbent = 2 * self.dim
+    #                 self._proposed_by.clear()
+    #                 if self._K > 0:
+    #                     self.step *= np.sqrt(self._K / self._oldK)
+    #                 if self.step > self.step_ub:
+    #                     self.step = self.step_ub
+    #                 self._iter_best_config = self.trial_count
+    #                 return
+    #     proposed_by = self._proposed_by.get(trial_id)
+    #     if proposed_by == self.incumbent:
+    #         # proposed by current incumbent and no better
+    #         print("proposed by current incumbent and no better")
+    #         self._num_complete4incumbent += 1
+    #         cost = (
+    #             result.get(self.cost_attr) if result else self._trial_cost.get(trial_id)
+    #         )
+    #         if cost:
+    #             self._cost_complete4incumbent += cost
+    #         print(
+    #             f"cost={cost}, cost_incumbent={self.cost_incumbent}, _cost_complete4incumbent={self._cost_complete4incumbent}"
+    #         )
+    #         print(
+    #             f"num_complete4incumbent={self._num_complete4incumbent}, self.cost_incumbent * self.resource_multiple_factor={self.cost_incumbent * self.resource_multiple_factor}"
+    #         )
+    #         if (
+    #             self._num_complete4incumbent >= 2 * self.dim
+    #             and self._num_allowed4incumbent == 0
+    #         ):
+    #             self._num_allowed4incumbent = 2
+    #         if self._num_complete4incumbent >= self.dir and (
+    #             not self._resource or self._resource >= self.max_resource
+    #         ):
+    #             print(
+    #                 f"step={self.step}, lb={self.step_lower_bound} _oldK={self._iter_best_config} _K={self.trial_count + 1}"
+    #             )
+    #             # check stuck condition if using max resource
+    #             if self.step >= self.step_lower_bound:
+    #                 # decrease step size
+    #                 self._oldK = self._K if self._K else self._iter_best_config
+    #                 self._K = self.trial_count + 1
+    #                 self.step *= np.sqrt(self._oldK / self._K)
+    #             self._num_complete4incumbent -= 2
+    #             if self._num_allowed4incumbent < 2:
+    #                 self._num_allowed4incumbent = 2
+    #     # elif proposed_by: # proposed by older incumbent
+    #     #     del self._proposed_by[trial_id]
 
 
 LocalSearch = PatchedFLOW2
@@ -450,6 +486,7 @@ class SharingSearchThread(SearchThread):
         if prune_attr:
             assert max_prune_attr
         self.max_prune_attr = max_prune_attr
+        self.last_prune_attr = 1.0
         self.resources = [1.0]
 
     def __repr__(self) -> str:
@@ -459,6 +496,24 @@ class SharingSearchThread(SearchThread):
             )
         return f"SharingSearchThread with {self._search_alg}"
 
+    def update_eci(self, metric_target: float, max_speed: Optional[float] = np.inf):
+        # calculate eci: estimated cost for improvement over metric_target
+        best_obj = metric_target * self._metric_op
+        if not self.speed:
+            self.speed = max_speed
+        self.eci = max(
+            self.cost_total - self.cost_best1, self.cost_best1 - self.cost_best2
+        )
+
+        if self.prune_attr and self.last_prune_attr < self.max_prune_attr:
+            self.eci = min(
+                self.eci,
+                self.cost_best1 * min(4, self.max_prune_attr / self.last_prune_attr),
+            )
+
+        if self.obj_best1 > best_obj and self.speed > 0:
+            self.eci = max(self.eci, 2 * (self.obj_best1 - best_obj) / self.speed)
+
     def on_trial_complete(
         self,
         trial_id: str,
@@ -467,11 +522,11 @@ class SharingSearchThread(SearchThread):
         thread_created: bool = True,
         update_results: bool = True,
         add_to_gs: bool = True,
-    ):
+    ) -> bool:
         """update the statistics of the thread"""
         print(f"on_trial_complete {trial_id} {self._search_alg}")
         if not self._search_alg:
-            return
+            return False
         if pd.isnull(result.get(self._search_alg.metric, None)):
             error = True
         print(
@@ -560,9 +615,14 @@ class SharingSearchThread(SearchThread):
             print(
                 f"updating results {trial_id} {self._search_alg}, searcher metric {self._search_alg.metric} {result[self._search_alg.metric]}"
             )
+            if self.prune_attr in result:
+                self.last_prune_attr = result[self.prune_attr]
             if self.cost_attr in result:
                 self.cost_last = result[self.cost_attr]
                 self.cost_total += self.cost_last
+                print(
+                    f"{str(self)} cost_last={self.cost_last} cost_total={self.cost_total}"
+                )
             # if not isinstance(self._search_alg, FLOW2):
             #     logger.info(f"result.metric{result[self._search_alg.metric]}")
             if self._search_alg.metric in result:
@@ -574,6 +634,13 @@ class SharingSearchThread(SearchThread):
                     self.obj_best1 = obj
                     self.cost_best = self.cost_last
             self._update_speed()
+            return True
+        return False
+
+    def _update_speed(self):
+        old_speed = self.speed
+        super()._update_speed()
+        print(f"{str(self)} old speed={old_speed} new speed={self.speed}")
 
     def suggest(self, trial_id: str, **kwargs) -> Optional[Dict]:
         """use the suggest() of the underlying search algorithm"""
@@ -617,6 +684,25 @@ class SharingSearchThread(SearchThread):
         if self.cost_attr in result and self.cost_last < result[self.cost_attr]:
             self.cost_last = result[self.cost_attr]
             # self._update_speed()
+
+
+class EstimatorState(Bunch):
+    def __init__(self, resource):
+        super().__init__(
+            resource=resource,
+            best_score=np.inf,
+            best_score_old=np.inf,
+            best_cost=0,
+            best_cost_old=0,
+            best_eval_time=0,
+            total_time=0,
+        )
+
+    @property
+    def eci(self):
+        return max(
+            self.best_cost - self.best_cost_old, self.total_time - self.best_cost
+        )
 
 
 class ConditionalBlendSearch(BlendSearch):
@@ -663,10 +749,10 @@ class ConditionalBlendSearch(BlendSearch):
             use_extended=use_extended,
         )
         self._cost_bounds = {k: v for k, v in cost_bounds.items() if k in init_config}
-        tune_space, _ = get_all_tunable_params(
+        tunable_space, _ = get_all_tunable_params(
             space, to_str=True, use_extended=use_extended
         )
-        tune_space = get_tune_distributions(tune_space)
+        tune_space = get_tune_distributions(tunable_space)
 
         if global_search_alg is not None:
             self._gs = global_search_alg
@@ -715,7 +801,11 @@ class ConditionalBlendSearch(BlendSearch):
             resources_per_trial.get("mem") if resources_per_trial else None
         )
         self._reached_max_prune_attr = not bool(prune_attr)
-        # self._diversification_multipliers = {}
+        self._random = np.random.RandomState(seed)
+        self._estimator_states = {
+            k: EstimatorState(resource=min_resource if prune_attr else max_resource)
+            for k in tunable_space["Estimator"].values
+        }
         self._init_search()
 
     @property
@@ -814,6 +904,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
             self._cost_bounds,
+            self._random,
             # self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
@@ -840,6 +931,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
             self._cost_bounds,
+            self._random,
             # self._diversification_multipliers,
         ) = save_object
 
@@ -888,27 +980,30 @@ class ConditionalBlendSearch(BlendSearch):
                     key=lambda trial: trial[1][self._metric] * self._ls.metric_op,
                     reverse=True,
                 )
+
                 mean_metric = sum(
                     trial[1][self._metric] * self._ls.metric_op
                     for trial in clean_sorted_evaluted_trials
                 ) / len(clean_sorted_evaluted_trials)
 
-                cutoff_trial = next(
-                    trial
-                    for trial in clean_sorted_evaluted_trials
-                    if (trial[1][self._metric] * self._ls.metric_op) <= mean_metric
-                )
-                # cutoff_trial = clean_sorted_evaluted_trials[
-                #    len(clean_sorted_evaluted_trials) // 2
-                # ]
-                self._points_to_evaluate_trials.pop(cutoff_trial[0])
-                self._on_trial_complete(
-                    trial_id=cutoff_trial[0],
-                    result=cutoff_trial[1],
-                    error=cutoff_trial[2],
-                    condition_kwargs=cutoff_trial[3],
-                )
-                for trial in self._points_to_evaluate_trials.values():
+                # cutoff_trial = next(
+                #     trial
+                #     for trial in clean_sorted_evaluted_trials
+                #     if (trial[1][self._metric] * self._ls.metric_op) <= mean_metric
+                # )
+                # # cutoff_trial = clean_sorted_evaluted_trials[
+                # #    len(clean_sorted_evaluted_trials) // 2
+                # # ]
+                # self._points_to_evaluate_trials.pop(cutoff_trial[0])
+                # self._on_trial_complete(
+                #     trial_id=cutoff_trial[0],
+                #     result=cutoff_trial[1],
+                #     error=cutoff_trial[2],
+                #     condition_kwargs=cutoff_trial[3],
+                # )
+                for trial in clean_sorted_evaluted_trials:
+                    if (trial[1][self._metric] * self._ls.metric_op) > mean_metric:
+                        continue
                     self._on_trial_complete(
                         trial_id=trial[0],
                         result=trial[1],
@@ -949,12 +1044,34 @@ class ConditionalBlendSearch(BlendSearch):
             f"on_trial_complete thread_id {thread_id}, self._search_thread_pool {self._search_thread_pool}"
         )
         if thread_id in self._search_thread_pool:
-            self._search_thread_pool[thread_id].on_trial_complete(
+            thread = self._search_thread_pool[thread_id]
+            was_updated = thread.on_trial_complete(
                 trial_id, result, error, thread_created=create_condition
             )
             treat_as_thread_created = (
                 False if self._points_to_evaluate else create_condition
             )
+            if was_updated:
+                estimator_state = self._estimator_states[
+                    self._suggested_configs[trial_id]["Estimator"]
+                ]
+                obj = result[self._metric] * self._ls.metric_op
+                estimator_state.total_time += thread.cost_last
+                if obj < estimator_state.best_score:
+                    estimator_state.best_score_old = (
+                        estimator_state.best_score
+                        if estimator_state.best_score < np.inf
+                        else 2 * obj
+                    )
+                    estimator_state.best_score = obj
+                    estimator_state.best_cost_old = estimator_state.best_cost
+                    estimator_state.best_cost = estimator_state.total_time
+                    estimator_state.best_eval_time = thread.cost_last
+                if (
+                    estimator_state.resource is not None
+                    and estimator_state.resource < thread.last_prune_attr
+                ):
+                    estimator_state.resource = thread.last_prune_attr
             if thread_id > 0 and self._global_search_thread:
                 self._global_search_thread.on_trial_complete(
                     trial_id,
@@ -1098,6 +1215,62 @@ class ConditionalBlendSearch(BlendSearch):
         new_config = {**config, **self._ls.denormalize(enforced_values)}
         return new_config
 
+    def _select_estimator(self, local_threads):
+        if not self._estimator_states or not local_threads:
+            return None
+        inv = []
+        estimators_in_threads = {
+            thread_tuple[1]._search_alg.space["Estimator"]
+            for thread_tuple in local_threads
+        }
+        print(f"best global score={self._metric_target * self._ls.metric_op}")
+        for estimator, state in self._estimator_states.items():
+            if estimator not in estimators_in_threads:
+                inv.append(0)
+                continue
+            estimated_cost = state.eci
+            if state.resource is not None and state.resource < self._ls.max_resource:
+                estimated_cost = min(
+                    estimated_cost,
+                    state.best_eval_time
+                    * min(
+                        self._ls.resource_multiple_factor,
+                        self._ls.max_resource / state.resource,
+                    ),
+                )
+            gap = state.best_score - (self._metric_target * self._ls.metric_op)
+            if gap > 0:
+                delta_loss = (
+                    state.best_score_old - state.best_score
+                ) or state.best_score
+                delta_time = (state.total_time - state.best_cost_old) or 1e-10
+                speed = delta_loss / delta_time
+                if speed:
+                    estimated_cost = max(2 * gap / speed, estimated_cost)
+            if estimated_cost == 0:
+                estimated_cost = 1e-10
+            print(f"estimator {estimator}")
+            print(
+                f"best_score={state.best_score} best_score_old={state.best_score_old}"
+            )
+            print(f"best_cost={state.best_cost} best_cost_old={state.best_cost_old}")
+            print(
+                f"total_time={state.total_time} best_eval_time={state.best_eval_time}"
+            )
+            inv.append(1 / estimated_cost)
+        s = sum(inv)
+        p = self._random.rand()
+        q = 0
+        estimator_list = list(self._estimator_states.keys())
+        print(f"estimator priorities: {dict(zip(estimator_list, inv))}")
+        for i in range(len(inv)):
+            if inv[i]:
+                q += inv[i] / s
+                if p < q:
+                    return estimator_list[i]
+        return None
+
+    # TODO consider estimator selection as in https://github.com/microsoft/FLAML/blob/3083229e402bf9cddfed009b08c662abcf229d86/flaml/automl.py#L1227
     def _select_thread(self) -> Tuple:
         """thread selector; use can_suggest to check LS availability"""
         # update priority
@@ -1122,12 +1295,13 @@ class ConditionalBlendSearch(BlendSearch):
         # print(f"priority of thread 0={priority1}, obj_best1={self._search_thread_pool[0].obj_best1}")
         # diversification_multiplier = 0.99
         # print(f"diversification: {self._diversification_multipliers}")
+
         local_threads_by_priority = sorted(
             [
                 (
                     thread_id,
                     thread,
-                    thread.priority
+                    thread.priority,
                     # * (
                     #    diversification_multiplier
                     #    ** self._diversification_multipliers.get(thread_id, 0)
@@ -1139,16 +1313,30 @@ class ConditionalBlendSearch(BlendSearch):
             reverse=True,
             key=lambda x: x[2],
         )
+
+        estimator_to_use = self._select_estimator(local_threads_by_priority)
+
+        if not estimator_to_use:
+            local_threads_by_priority_estimator_only = local_threads_by_priority
+        else:
+            local_threads_by_priority_estimator_only = [
+                thread_tuple
+                for thread_tuple in local_threads_by_priority
+                if thread_tuple[1]._search_alg.space["Estimator"] == estimator_to_use
+            ]
         print(f"global search priority: {priority1}")
         print(local_threads_by_priority)
-        if local_threads_by_priority:
+        print(local_threads_by_priority_estimator_only)
+
+        if local_threads_by_priority_estimator_only:
             top_thread_id = (
                 0
                 if priority1 >= local_threads_by_priority[0][2]
-                else local_threads_by_priority[0][0]
+                else local_threads_by_priority_estimator_only[0][0]
             )
-            backup_thread_id = local_threads_by_priority[0][0]
-        return top_thread_id, backup_thread_id, local_threads_by_priority
+            backup_thread_id = local_threads_by_priority_estimator_only[0][0]
+
+        return top_thread_id, backup_thread_id, local_threads_by_priority_estimator_only
 
     def _suggest_from_points_to_evaluate(self, trial_id: str):
         init_config = (
@@ -1197,10 +1385,9 @@ class ConditionalBlendSearch(BlendSearch):
                 if config:
                     return config, prune_attr, 0, estimator
 
-            if (
-                not backup
-                or self._search_thread_pool[backup]._search_alg.space["Estimator"]
-                != estimator
+            if not backup or not any(
+                thread._search_alg.space["Estimator"] == estimator
+                for thread in list(self._search_thread_pool.values())[1:]
             ):
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(

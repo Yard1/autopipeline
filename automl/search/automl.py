@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split, BaseCrossValidator
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
+from sklearn.utils import shuffle
 
 import joblib
 from ..utils.joblib_backend import register_ray_caching
@@ -177,12 +178,10 @@ class AutoML(BaseEstimator):
         )
 
     def _shuffle_data(self, X, y):
-        X, _, y, _ = train_test_split(
+        X, y = shuffle(
             X,
             y,
-            test_size=0.0,
             random_state=self.random_seed_,
-            stratify=y if self.problem_type_.is_classification() else None,
         )
         return X, y
 
@@ -359,21 +358,15 @@ class AutoML(BaseEstimator):
             ),
         }
 
-        d.update(
-            {f"Test {key}": metric for key, metric in result["test_metrics"].items()}
-        )
+        if "test_metrics" in result:
+            d.update(
+                {f"Test {key}": metric for key, metric in result["test_metrics"].items()}
+            )
         if "metrics" in result:
             d.update(
                 {
                     f"Validation {key}": metric
                     for key, metric in result["metrics"].items()
-                }
-            )
-        else:
-            d.update(
-                {
-                    f"Validation {key}": None
-                    for key, metric in result["test_metrics"].items()
                 }
             )
 

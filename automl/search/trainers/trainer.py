@@ -336,6 +336,7 @@ class Trainer:
             "results_df": results_df,
             "pipeline_blueprint": pipeline_blueprint,
             "metric_name": self.default_metric_name,
+            # TODO fix this
             "metric": self.scoring_dict[self.target_metric]
             if self.problem_type == ProblemType.REGRESSION
             else self.scoring_dict["balanced_accuracy"],
@@ -355,9 +356,10 @@ class Trainer:
         ) = self.main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
             **ensemble_config
         )
+        # TODO come up with a way to reuse fitted estimators
         fitted_ensembles = {
             ensemble._ensemble_name: ensemble.fit_ensemble(**ensemble_config)
-            for ensemble in self.secondary_ensembles
+            for ensemble in self.secondary_ensembles or []
         }
         fitted_ensembles[
             self.main_stacking_ensemble._ensemble_name
@@ -379,80 +381,6 @@ class Trainer:
             except Exception:
                 pass
         return X_stack, X_test_stack
-
-    def _get_optimal_voting_ensemble_weights(
-        self,
-        trial_results,
-        initial_guess,
-        y_test,
-        target_metric=None,
-    ):
-        """
-        Optimize on CV predictions
-        """
-        target_metric = target_metric or self.default_metric_name
-        initial_guess = np.array(initial_guess)
-        sum_initial_guess = np.sum(initial_guess)
-        initial_guess = (initial_guess / sum_initial_guess)[:-1]
-        estimators = [
-            (
-                str(idx),
-                DummyClassifier(
-                    str(idx),
-                    self.last_tuner_.fold_predictions_[trial_result["trial_id"]][
-                        "predict"
-                    ],
-                    self.last_tuner_.fold_predictions_[trial_result["trial_id"]][
-                        "predict_proba"
-                    ],
-                ),
-            )
-            for idx, trial_result in enumerate(trial_results)
-        ]
-        le_ = LabelEncoder().fit(y_test)
-        y_test = le_.transform(y_test)
-        ensemble = PandasVotingClassifier(
-            estimators=estimators,
-            voting="hard",
-            n_jobs=1,
-            weights=initial_guess,
-        )
-        ensemble.le_ = le_
-        ensemble.classes_ = ensemble.le_.classes_
-        ensemble.estimators_ = [x[1] for x in estimators]
-
-        def optimize_function(weights, *args):
-            weights = np.append(weights, 1 - np.sum(weights))
-            logger.debug(np.min(weights))
-            ensemble.weights = weights
-            scores, _ = score_test(
-                ensemble,
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
-                y_test,
-                self.scoring_dict,
-                refit=False,
-                error_score="raise",
-            )
-            # logger.debug(-1 * scores[target_metric])
-            return -1 * scores[target_metric]
-
-        constraints = {"type": "ineq", "fun": lambda x: 1 - np.sum(x)}
-        logger.debug(initial_guess)
-        bounds = tuple((0, 1) for x in initial_guess)
-        res = scipy.optimize.minimize(
-            optimize_function,
-            initial_guess,
-            bounds=bounds,
-            constraints=constraints,
-            method="SLSQP",
-            options={
-                "maxiter": 1000,
-                "disp": True,
-            },
-        )
-        return np.append(res.x, 1 - np.sum(res.x))
 
     def _score_ensemble(
         self,
