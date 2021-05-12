@@ -489,30 +489,18 @@ class SharingSearchThread(SearchThread):
         self.last_prune_attr = 1.0
         self.resources = [1.0]
 
+    @property
+    def estimator(self) -> str:
+        if self._is_ls:
+            return self._search_alg.space["Estimator"]
+        return None
+
     def __repr__(self) -> str:
         if self._is_ls:
             return (
                 f"SharingSearchThread with FLOW2 {self._search_alg.space['Estimator']}"
             )
         return f"SharingSearchThread with {self._search_alg}"
-
-    def update_eci(self, metric_target: float, max_speed: Optional[float] = np.inf):
-        # calculate eci: estimated cost for improvement over metric_target
-        best_obj = metric_target * self._metric_op
-        if not self.speed:
-            self.speed = max_speed
-        self.eci = max(
-            self.cost_total - self.cost_best1, self.cost_best1 - self.cost_best2
-        )
-
-        if self.prune_attr and self.last_prune_attr < self.max_prune_attr:
-            self.eci = min(
-                self.eci,
-                self.cost_best1 * min(4, self.max_prune_attr / self.last_prune_attr),
-            )
-
-        if self.obj_best1 > best_obj and self.speed > 0:
-            self.eci = max(self.eci, 2 * (self.obj_best1 - best_obj) / self.speed)
 
     def on_trial_complete(
         self,
@@ -709,7 +697,7 @@ class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
     _FORCE_GS_AFTER = 1000
-    _MAX_GS_RETRIES = 4
+    _MAX_GS_RETRIES = 2
 
     def __init__(
         self,
@@ -986,23 +974,23 @@ class ConditionalBlendSearch(BlendSearch):
                     for trial in clean_sorted_evaluted_trials
                 ) / len(clean_sorted_evaluted_trials)
 
-                # cutoff_trial = next(
-                #     trial
-                #     for trial in clean_sorted_evaluted_trials
-                #     if (trial[1][self._metric] * self._ls.metric_op) <= mean_metric
-                # )
-                # # cutoff_trial = clean_sorted_evaluted_trials[
-                # #    len(clean_sorted_evaluted_trials) // 2
-                # # ]
-                # self._points_to_evaluate_trials.pop(cutoff_trial[0])
-                # self._on_trial_complete(
-                #     trial_id=cutoff_trial[0],
-                #     result=cutoff_trial[1],
-                #     error=cutoff_trial[2],
-                #     condition_kwargs=cutoff_trial[3],
-                # )
+                cutoff_trial = next(
+                    trial
+                    for trial in clean_sorted_evaluted_trials
+                    if (trial[1][self._metric] * self._ls.metric_op) <= mean_metric
+                )
+                # cutoff_trial = clean_sorted_evaluted_trials[
+                #    len(clean_sorted_evaluted_trials) // 2
+                # ]
+                self._points_to_evaluate_trials.pop(cutoff_trial[0])
+                self._on_trial_complete(
+                    trial_id=cutoff_trial[0],
+                    result=cutoff_trial[1],
+                    error=cutoff_trial[2],
+                    condition_kwargs=cutoff_trial[3],
+                )
                 for trial in clean_sorted_evaluted_trials:
-                    if (trial[1][self._metric] * self._ls.metric_op) > mean_metric:
+                    if trial[0] == cutoff_trial[0]:
                         continue
                     self._on_trial_complete(
                         trial_id=trial[0],
@@ -1220,7 +1208,7 @@ class ConditionalBlendSearch(BlendSearch):
             return None
         inv = []
         estimators_in_threads = {
-            thread_tuple[1]._search_alg.space["Estimator"]
+            thread_tuple[1].estimator
             for thread_tuple in local_threads
         }
         print(f"best global score={self._metric_target * self._ls.metric_op}")
@@ -1322,7 +1310,7 @@ class ConditionalBlendSearch(BlendSearch):
             local_threads_by_priority_estimator_only = [
                 thread_tuple
                 for thread_tuple in local_threads_by_priority
-                if thread_tuple[1]._search_alg.space["Estimator"] == estimator_to_use
+                if thread_tuple[1].estimator == estimator_to_use
             ]
         print(f"global search priority: {priority1}")
         print(local_threads_by_priority)
@@ -1385,10 +1373,7 @@ class ConditionalBlendSearch(BlendSearch):
                 if config:
                     return config, prune_attr, 0, estimator
 
-            if not backup or not any(
-                thread._search_alg.space["Estimator"] == estimator
-                for thread in list(self._search_thread_pool.values())[1:]
-            ):
+            if not backup or not self._search_thread_pool[backup].estimator == estimator:
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
                     trial_id,
@@ -1476,7 +1461,7 @@ class ConditionalBlendSearch(BlendSearch):
                 #     (
                 #         thread_id
                 #         for thread_id, thread, priority in local_threads_by_priority
-                #         if thread._search_alg.space["Estimator"] == estimator
+                #         if thread.estimator == estimator
                 #     ),
                 #     None,
                 # )
@@ -1711,7 +1696,9 @@ class BlendSearchTuner(RayTuneTuner):
             trainable_n_jobs=trainable_n_jobs,
             **tune_kwargs,
         )
-        self._searcher_kwargs = {}
+        self._searcher_kwargs = {
+            "time_attr": "estimator_fit_time"
+        }
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4

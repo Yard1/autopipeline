@@ -1,5 +1,6 @@
 import numpy as np
 import gc
+import time
 from copy import deepcopy
 from collections import defaultdict
 from sklearn.base import clone
@@ -399,6 +400,7 @@ class SklearnTrainable(Trainable):
         return combined_predictions
 
     def _train(self):
+        time_cv = time.time()
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
         config = {**self.const_values, **self.estimator_config}
@@ -456,9 +458,7 @@ class SklearnTrainable(Trainable):
         )
         logger.debug("cv done")
 
-        estimator_fit_time = np.sum(
-            [x.final_estimator_fit_time_ for x in scores["estimator"]]
-        )
+        estimator_fit_time = time.time() - time_cv
         metrics = {
             metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring.keys()
         }
