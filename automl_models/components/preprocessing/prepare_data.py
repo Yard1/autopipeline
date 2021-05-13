@@ -55,6 +55,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         int_dtype: Optional[type] = None,
         ordinal_columns: Optional[Dict[str, list]] = None,
         copy_X: bool = True,
+        variance_threshold: float = 0.01,
+        missing_values_threshold: float = 0.3,
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:
             raise ValueError("allowed_dtypes cannot be empty")
@@ -74,6 +76,8 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         self.int_dtype = int_dtype
         self.copy_X = copy_X
         self.ordinal_columns = ordinal_columns or {}
+        self.variance_threshold = variance_threshold
+        self.missing_values_threshold = missing_values_threshold
 
     def _set_index_to_id_column(self, X):
         possible_id_columns = X.apply(_is_id_column)
@@ -141,10 +145,15 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             )
         return col.astype(self.final_dtypes_[col.name])
 
-    def _drop_0_variance(self, X):
+    def _drop_variance_missing_values(self, X):
         cols_to_drop = []
         for column in X.columns:
-            if np.all(X[column] == X[column].iloc[0]):
+            if (column.isna().sum() / len(column)) >= self.missing_values_threshold:
+                cols_to_drop.append(column)
+            elif is_float_dtype(column.dtype):
+                if column.var() <= self.variance_threshold:
+                    cols_to_drop.append(column)
+            elif np.all(X[column] == X[column].iloc[0]):
                 cols_to_drop.append(column)
         return X.drop(cols_to_drop, axis=1)
 
@@ -204,7 +213,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         X = df_shrink(X, obj2cat=False)
         X = X.apply(self._infer_dtypes)
-        X = self._drop_0_variance(X)
+        X = self._drop_variance_missing_values(X)
 
         self.final_columns_ = X.columns
         self.final_dtypes_ = X.dtypes

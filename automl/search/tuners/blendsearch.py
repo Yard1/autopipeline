@@ -716,6 +716,7 @@ class ConditionalBlendSearch(BlendSearch):
         time_attr: str = "time_total_s",
         seed: Optional[int] = None,
         use_extended: bool = False,
+        spawn_local_threads: bool = True,
         mem_size=None,
     ):
         self._metric, self._mode = metric, mode
@@ -794,6 +795,7 @@ class ConditionalBlendSearch(BlendSearch):
             k: EstimatorState(resource=min_resource if prune_attr else max_resource)
             for k in tunable_space["Estimator"].values
         }
+        self._spawn_local_threads = spawn_local_threads
         self._init_search()
 
     @property
@@ -893,6 +895,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._reached_max_prune_attr,
             self._cost_bounds,
             self._random,
+            self._spawn_local_threads
             # self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
@@ -920,6 +923,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._reached_max_prune_attr,
             self._cost_bounds,
             self._random,
+            self._spawn_local_threads
             # self._diversification_multipliers,
         ) = save_object
 
@@ -1126,11 +1130,14 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _create_condition(self, result: dict, median=None) -> bool:
         """create thread condition"""
+        if not self._spawn_local_threads:
+            return False
         if len(self._search_thread_pool) < 2:
             return True
         obj_median = median or np.median(
             [thread.obj_best1 for id, thread in self._search_thread_pool.items() if id]
         )
+        print(f"create condition: {result[self._metric] * self._ls.metric_op} must be lower than {obj_median}")
         return result[self._metric] * self._ls.metric_op < obj_median
 
     def _update_admissible_region(self, config, admissible_min, admissible_max):

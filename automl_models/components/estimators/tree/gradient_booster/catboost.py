@@ -1,8 +1,9 @@
 import pandas as pd
 from catboost import CatBoostClassifier, CatBoostRegressor
+from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 
 
-class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier):
+class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin, BaseEstimator):
     def get_params(self, deep=True):
         r = super().get_params(deep=deep)
         r["auto_class_weights"] = r.get("auto_class_weights", None)
@@ -59,7 +60,10 @@ class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier):
         )
 
 
-class CatBoostRegressorWithAutoCatFeatures(CatBoostRegressor):
+class CatBoostRegressorWithAutoCatFeatures(CatBoostRegressor, RegressorMixin, BaseEstimator):
+    def __repr__(self, N_CHAR_MAX=700) -> str:
+        return BaseEstimator.__repr__(self, N_CHAR_MAX=N_CHAR_MAX)
+
     def fit(
         self,
         X,

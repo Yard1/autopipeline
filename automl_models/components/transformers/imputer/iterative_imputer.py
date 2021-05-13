@@ -8,15 +8,20 @@ from sklearn.impute._base import _BaseImputer
 from sklearn.utils.validation import check_is_fitted
 from lightgbm.sklearn import LGBMClassifier, LGBMRegressor
 
+from ...estimators.tree.gradient_booster.lightgbm import (
+    LGBMClassifierWithAutoEarlyStopping,
+    LGBMRegressorWithAutoEarlyStopping,
+)
 from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
 lightgbm_imputer_config = {
     "n_jobs": 1,
-    "n_estimators": 200,
+    "n_estimators": 1000,
     "class_weight": "balanced",
     "verbose": -1,
     "learning_rate": 0.05,
+    "early_stopping_condition": 5000,
 }
 
 
@@ -102,10 +107,9 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
                 prediction = model.predict(
                     X_imputed.iloc[missing_indices_list].drop(col, axis=1)
                 )
-                prediction = (
-                    pd.Series(prediction, index=missing_indices_list, name=col)
-                    .astype(self.dtypes_[col])
-                )
+                prediction = pd.Series(
+                    prediction, index=missing_indices_list, name=col
+                ).astype(self.dtypes_[col])
 
                 if fit and iter_count != 0:
                     if classification:
@@ -171,13 +175,13 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
 
         self.encoder_ = PandasOrdinalEncoder()
 
-        regressor = self.regressor or LGBMRegressor()
-        classifier = self.classifier or LGBMClassifier()
+        regressor = self.regressor or LGBMRegressorWithAutoEarlyStopping(**lightgbm_imputer_config)
+        classifier = self.classifier or LGBMClassifierWithAutoEarlyStopping(**lightgbm_imputer_config)
 
         if regressor == "LGBMRegressor":
-            regressor = LGBMRegressor(**lightgbm_imputer_config)
+            regressor = LGBMRegressorWithAutoEarlyStopping(**lightgbm_imputer_config)
         if classifier == "LGBMClassifier":
-            classifier = LGBMClassifier(**lightgbm_imputer_config)
+            classifier = LGBMClassifierWithAutoEarlyStopping(**lightgbm_imputer_config)
 
         self.n_catmissing_ = 0
         for col in self.nan_columns_:

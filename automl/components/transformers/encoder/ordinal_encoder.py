@@ -14,7 +14,7 @@ class OrdinalEncoder(Encoder):
     _default_parameters = {
         "categories": "auto",
         "handle_unknown": "use_encoded_value",
-        "dtype": np.int,
+        "dtype": np.uint16,
         "unknown_value": None,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}

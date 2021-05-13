@@ -3,6 +3,7 @@ from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from automl.utils.logging import make_header
 from typing import Any, Dict, Optional, Union
+from IPython.display import HTML
 
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ from sklearn.model_selection import train_test_split, BaseCrossValidator
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.utils import shuffle
+from sklearn.utils import shuffle, estimator_html_repr
 
 import joblib
 from ..utils.joblib_backend import register_ray_caching
@@ -71,6 +72,7 @@ class AutoML(BaseEstimator):
 
         self._displays = {
             "results_display": IPythonDisplay("results_display"),
+            "pipeline_display": IPythonDisplay("pipeline_display"),
         }
 
         self._validate()
@@ -297,7 +299,7 @@ class AutoML(BaseEstimator):
 
         self.results_ = self._get_results()
         self.best_id_ = str(self.results_.index[0])
-        #self._displays["results_display"].clear_all()
+        # self._displays["results_display"].clear_all()
         self._displays["results_display"].display(self.results_.head(20))
 
         return self
@@ -307,9 +309,27 @@ class AutoML(BaseEstimator):
         check_is_fitted(self)
         return self.get_pipeline_by_id(self.best_id_)
 
+    def visualize_pipeline(self, id_or_pipeline: Union[str, Pipeline]):
+        if isinstance(id_or_pipeline, Pipeline):
+            pipeline = id_or_pipeline
+        else:
+            pipeline = self._get_pipeline_by_id(id_or_pipeline, refit=False, copy=True)
+        html_repr = HTML(estimator_html_repr(pipeline))
+        #self._displays["pipeline_display"].display(html_repr, display_type="html")
+        return html_repr
+
     def get_pipeline_by_id(self, id, refit: Union[bool, str] = False):
+        return self._get_pipeline_by_id(id, refit=refit, copy=True)
+
+    def _get_pipeline_by_id(
+        self, id, refit: Union[bool, str] = False, copy: bool = True
+    ):
         check_is_fitted(self)
-        pipeline = deepcopy(self.trainer_.get_ensemble_or_pipeline_by_id(id))
+        pipeline = (
+            deepcopy(self.trainer_.get_ensemble_or_pipeline_by_id(id))
+            if copy
+            else self.trainer_.get_ensemble_or_pipeline_by_id(id)
+        )
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
@@ -360,7 +380,10 @@ class AutoML(BaseEstimator):
 
         if "test_metrics" in result:
             d.update(
-                {f"Test {key}": metric for key, metric in result["test_metrics"].items()}
+                {
+                    f"Test {key}": metric
+                    for key, metric in result["test_metrics"].items()
+                }
             )
         if "metrics" in result:
             d.update(

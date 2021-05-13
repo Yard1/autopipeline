@@ -29,7 +29,9 @@ class IPythonDisplay(Display):
         self.id = id
         self._last_displayed_obj = None
 
-    def display(self, obj):
+    def display(self, obj, display_type=None):
+        if display_type == "html":
+            obj = HTML(obj)
         self._last_displayed_obj = obj
         display(obj, display_id=self.id)
 
