@@ -147,14 +147,19 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
     def _drop_variance_missing_values(self, X):
         cols_to_drop = []
-        for column in X.columns:
-            if (column.isna().sum() / len(column)) >= self.missing_values_threshold:
-                cols_to_drop.append(column)
-            elif is_float_dtype(column.dtype):
-                if column.var() <= self.variance_threshold:
-                    cols_to_drop.append(column)
-            elif np.all(X[column] == X[column].iloc[0]):
-                cols_to_drop.append(column)
+        for column_name in X.columns:
+            column = X[column_name]
+            if (
+                self.missing_values_threshold is not None
+                and (column.isna().sum() / len(column)) >= self.missing_values_threshold
+            ):
+                cols_to_drop.append(column_name)
+            elif self.variance_threshold is not None:
+                if is_float_dtype(column.dtype):
+                    if column.var() <= self.variance_threshold:
+                        cols_to_drop.append(column_name)
+                elif np.all(column == column.iloc[0]):
+                    cols_to_drop.append(column_name)
         return X.drop(cols_to_drop, axis=1)
 
     def fit(self, X, y=None):

@@ -12,11 +12,6 @@ from ...search.distributions.distributions import CategoricalDistribution
 from ..utils import call_component_if_needed
 
 
-def remove_component_suffix(key: str) -> str:
-    split_key = [s for s in key.split("__") if s[-1] != Component._automl_id_sign]
-    return "__".join(split_key)
-
-
 def split_list_into_chunks(lst: list, chunk_size: int) -> list:
     return [
         lst[i * chunk_size : (i + 1) * chunk_size]
@@ -24,10 +19,10 @@ def split_list_into_chunks(lst: list, chunk_size: int) -> list:
     ]
 
 
-def treat_config(config: dict, component_strings: dict, random_state=None) -> dict:
+def treat_config(config: dict, component_strings: dict, hyperparameter_names: dict, random_state=None) -> dict:
     config = {k: component_strings.get(v, v) for k, v in config.items()}
     return {
-        remove_component_suffix(k): call_component_if_needed(
+        hyperparameter_names.get(k, k): call_component_if_needed(
             v, random_state=random_state
         )
         for k, v in config.items()
@@ -130,6 +125,7 @@ def get_all_tunable_params(
     if space is None:
         space = pipeline.get_all_distributions(use_extended=use_extended)
     string_space = {}
+    hyperparam_keys = {}
     for k, v in space.items():
         choices = v.values
         for choice in choices:
@@ -141,6 +137,7 @@ def get_all_tunable_params(
                 if isinstance(v3, CategoricalDistribution) and len(v3.values) <= 1:
                     continue
                 name = v2.get_hyperparameter_key_suffix(k, k3)
+                hyperparam_keys[name] = f"{k}__{k3}"
                 hyperparams[name] = v3
         if to_str:
             v.values = list(
@@ -151,4 +148,4 @@ def get_all_tunable_params(
             )
     space = {**space, **hyperparams}
 
-    return space, string_space
+    return space, string_space, hyperparam_keys

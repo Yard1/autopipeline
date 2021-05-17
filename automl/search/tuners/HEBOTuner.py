@@ -116,7 +116,7 @@ class HEBOTuner(RayTuneTuner):
                     [next(x for x in v.values if str(x) == points_to_evaluate[0][k])]
                 )
         logger.debug(space)
-        space, _ = get_all_tunable_params(
+        space, _, _ = get_all_tunable_params(
             self.pipeline_blueprint,
             to_str=True,
             use_extended=self.use_extended,

@@ -22,9 +22,10 @@ class BasePipeline(_ImblearnPipeline):
         if fit and isinstance(X, pd.DataFrame):
             self.X_columns_ = X.columns
             self.X_dtypes_ = X.dtypes
-        else:
-            X = pd.DataFrame(X, columns=self.X_columns_)
-            X = X.astype(self.X_dtypes_)
+        elif not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+        X.columns = self.X_columns_
+        X = X.astype(self.X_dtypes_)
         if y is not None:
             if fit:
                 if isinstance(y, pd.Series):
@@ -37,11 +38,11 @@ class BasePipeline(_ImblearnPipeline):
                         self.y_dtype_ = "category"
                     else:
                         self.y_dtype_ = np.float32  # TODO make dynamic
-                    y = pd.Series(y, name=self.y_name_)
-                    y = y.astype(self.y_dtype_)
-            else:
-                y = pd.Series(y, name=self.y_name_)
-                y = y.astype(self.y_dtype_)
+                    y = pd.Series(y)
+            elif not isinstance(y, pd.Series):
+                y = pd.Series(y)
+            y.name = self.y_name_
+            y = y.astype(self.y_dtype_)
         return X, y
 
     def fit(self, X, y=None, **fit_params):

@@ -2,7 +2,7 @@ from typing import Any, Dict, Tuple, Union
 import ray
 import numpy as np
 import os
-import json
+from copy import deepcopy
 from unittest.mock import patch
 import contextlib
 import time
@@ -107,3 +107,13 @@ class ray_context:
     def __exit__(self, type, value, traceback):
         if not self.ray_init and ray.is_initialized():
             ray.shutdown()
+
+
+def stack_estimator(estimator, stack):
+    if stack:
+        stack = deepcopy(stack)
+        stack.final_estimator = estimator
+        stack.final_estimator_ = estimator
+        stack.passthrough = True
+        estimator = stack
+    return estimator

@@ -57,7 +57,12 @@ class PandasStackingClassifier(_StackingClassifier):
         self : object
         """
         logger.debug("fitting stack", flush=True)
-        self.preprocessor_ = PrepareDataFrame(find_id_column=False, copy_X=False)
+        self.preprocessor_ = PrepareDataFrame(
+            find_id_column=False,
+            copy_X=False,
+            missing_values_threshold=None,
+            variance_threshold=None,
+        )
         self.stacked_predictions_ = None
         self._le = LabelEncoder().fit(y)
         self.classes_ = self._le.classes_
@@ -283,7 +288,12 @@ class PandasStackingRegressor(_StackingRegressor):
         self : object
         """
         logger.debug("fitting stack", flush=True)
-        self.preprocessor_ = PrepareDataFrame(find_id_column=False, copy_X=False)
+        self.preprocessor_ = PrepareDataFrame(
+            find_id_column=False,
+            copy_X=False,
+            missing_values_threshold=None,
+            variance_threshold=None,
+        )
         self.stacked_predictions_ = None
         names, all_estimators = self._validate_estimators()
         # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib

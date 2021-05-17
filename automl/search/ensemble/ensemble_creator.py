@@ -13,6 +13,7 @@ from sklearn.base import BaseEstimator
 from ...components.estimators.ensemble.ensemble import Ensemble
 from .ensemble_strategy import EnsembleStrategy
 from ...problems.problem_type import ProblemType
+from ..utils import stack_estimator
 
 import logging
 
@@ -39,7 +40,7 @@ class EnsembleCreator(ABC):
         return
 
     def _get_estimators_for_ensemble(
-        self, trials_for_ensembling, current_stacking_level
+        self, trials_for_ensembling, current_stacking_level, previous_stack
     ):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
@@ -48,7 +49,7 @@ class EnsembleCreator(ABC):
                 (
                     f"meta-{current_stacking_level}_{trial_result['trial_id']}",
                     #deepcopy(trial_result["estimator"]),
-                    trial_result["estimator"]
+                    stack_estimator(trial_result["estimator"], previous_stack)
                 )
                 for trial_result in trials_for_ensembling
             ]
@@ -83,8 +84,11 @@ class EnsembleCreator(ABC):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame] = None,
         y_test: Optional[pd.Series] = None,
+        X_test_original: Optional[pd.DataFrame] = None,
+        y_test_original: Optional[pd.Series] = None,
         **kwargs,
     ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)

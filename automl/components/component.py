@@ -55,7 +55,6 @@ class Component(ABC):
     _component_level = ComponentLevel.COMMON
     _consider_for_initial_combinations = True
 
-    _automl_id_sign = "\u200B"
     _allow_duplicates = False
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
@@ -90,25 +89,21 @@ class Component(ABC):
         return self._component_class(**params)
 
     @property
-    def final_parameters(self):
+    def final_parameters(self) -> dict:
         return {
             **self._default_parameters,
             **self.parameters,
         }
 
-    @property
-    def automl_id(self):
-        return f"{self._automl_id_sign}{self.__class__.__name__}{self._automl_id_sign}"
-
-    def get_hyperparameter_key_suffix(self, prefix, hyperparam_name):
-        return f"{prefix}__{self.automl_id}__{hyperparam_name}"
+    def get_hyperparameter_key_suffix(self, prefix: str, hyperparam_name: str) -> str:
+        return f"{prefix}__{self.short_name}__{hyperparam_name}"
 
     def __repr__(self) -> str:
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
         return f"{self.__class__.__name__}({', '.join(params)})"
 
     @property
-    def short_name(self):
+    def short_name(self) -> str:
         return self.__class__.__name__
 
     def __hash__(self) -> int:
@@ -127,9 +122,7 @@ class Component(ABC):
             **self.tuning_grid,
         }
 
-    def call_tuning_grid_funcs(
-        self, config: ComponentConfig, stage: AutoMLStage
-    ):
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
         self.called_tuning_grid = {
             k: v(config, stage) if callable(v) else v
             for k, v in self._default_tuning_grid.items()

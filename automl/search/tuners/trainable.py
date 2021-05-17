@@ -229,7 +229,8 @@ class SklearnTrainable(Trainable):
             self.X_ = params["X_"]
             self.y_ = params["y_"]
             self.pipeline_blueprint = params["pipeline_blueprint"]
-            self._component_strings_ = params["_component_strings_"]
+            self.component_strings = params["component_strings"]
+            self.hyperparameter_names = params["hyperparameter_names"]
             self.problem_type = params["problem_type"]
             self.groups_ = params.get("groups_", None)
             self.fit_params = params.get("fit_params", None)
@@ -405,7 +406,7 @@ class SklearnTrainable(Trainable):
 
         config = {**self.const_values, **self.estimator_config}
         config_called = treat_config(
-            config, self._component_strings_, self.random_state
+            config, self.component_strings, self.hyperparameter_names, self.random_state
         )
         if self.prune_attr:
             prune_attr = config_called.pop(self.prune_attr, None)
@@ -439,9 +440,13 @@ class SklearnTrainable(Trainable):
         else:
             estimator_subclassed, original_type = estimator, None
 
+        # TODO: threshold for binary classification?
+        # TODO: prediction time (per row)
+
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
         # with joblib.parallel_backend("ray_caching"):
+        print(self.X_.columns)
         scores = self._cross_validate(
             estimator_subclassed,
             self.X_,

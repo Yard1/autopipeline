@@ -58,7 +58,7 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._conditional_space = get_conditions(
             space, to_str=True, use_extended=use_extended
         )
-        space, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
+        space, _, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
         if remove_const_values:
             const_values = {
                 k

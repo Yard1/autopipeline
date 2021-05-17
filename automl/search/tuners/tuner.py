@@ -267,12 +267,12 @@ class RayTuneTuner(Tuner):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
         # this is just to ensure constant order
         self._shuffle_default_grid()
-        _, self._component_strings_ = get_all_tunable_params(
+        _, self.component_strings_, self.hyperparameter_names_ = get_all_tunable_params(
             self.pipeline_blueprint, use_extended=self.use_extended
         )
         for conf in self.default_grid_:
             for k, v in conf.items():
-                if str(v) in self._component_strings_:
+                if str(v) in self.component_strings_:
                     conf[k] = str(v)
 
     def _get_objects_from_ray_store(self, object_store):
@@ -346,7 +346,8 @@ class RayTuneTuner(Tuner):
             "X_test_": self.X_test_,
             "y_test_": self.y_test_,
             "pipeline_blueprint": self.pipeline_blueprint,
-            "_component_strings_": self._component_strings_,
+            "component_strings": self.component_strings_,
+            "hyperparameter_names": self.hyperparameter_names_,
             "problem_type": self.problem_type,
             "groups_": self.groups_,
             "fit_params": None,

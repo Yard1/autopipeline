@@ -82,8 +82,11 @@ class StackingEnsembleCreator(EnsembleCreator):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame],
         y_test: Optional[pd.Series],
+        X_test_original: Optional[pd.DataFrame],
+        y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
         assert "fold_predictions" in kwargs
@@ -99,14 +102,17 @@ class StackingEnsembleCreator(EnsembleCreator):
             metric,
             random_state,
             current_stacking_level,
+            previous_stack,
             X_test=X_test,
             y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
 
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level
+            trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
@@ -124,7 +130,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
@@ -138,8 +144,10 @@ class StackingEnsembleCreator(EnsembleCreator):
             save_predictions=True,
         )
         X_stack = ensemble.stacked_predictions_
-        if X_test is not None:
-            X_test_stack = ensemble.transform(X_test)
+
+        if X_test_original is not None:
+            # TODO optimize this
+            X_test_stack = ensemble.transform(X_test_original)
         else:
             X_test_stack = None
 
@@ -167,8 +175,11 @@ class StackingEnsembleCreator(EnsembleCreator):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame],
         y_test: Optional[pd.Series],
+        X_test_original: Optional[pd.DataFrame],
+        y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> BaseEstimator:
         ensemble, X_stack, X_test_stack = self._fit_ensemble(
@@ -181,8 +192,11 @@ class StackingEnsembleCreator(EnsembleCreator):
             metric,
             random_state,
             current_stacking_level,
+            previous_stack,
             X_test=X_test,
             y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
             **kwargs,
         )
         self.clear_stacked_predictions(ensemble)
@@ -199,8 +213,11 @@ class StackingEnsembleCreator(EnsembleCreator):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame],
         y_test: Optional[pd.Series],
+        X_test_original: Optional[pd.DataFrame],
+        y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
         ensemble, X_stack, X_test_stack = self._fit_ensemble(
@@ -213,8 +230,11 @@ class StackingEnsembleCreator(EnsembleCreator):
             metric,
             random_state,
             current_stacking_level,
+            previous_stack,
             X_test=X_test,
             y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
             **kwargs,
         )
         self.clear_stacked_predictions(ensemble)
@@ -299,8 +319,11 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame],
         y_test: Optional[pd.Series],
+        X_test_original: Optional[pd.DataFrame],
+        y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
         assert "fold_predictions" in kwargs
@@ -316,14 +339,17 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             metric,
             random_state,
             current_stacking_level,
+            previous_stack,
             X_test=X_test,
             y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
 
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level
+            trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
@@ -341,7 +367,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         try:
             ensemble.fit(
                 X,
@@ -383,8 +409,10 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                 raise e
 
         X_stack = ensemble.stacked_predictions_
-        if X_test is not None:
-            X_test_stack = ensemble.transform(X_test)
+        print(X_test.columns)
+        if X_test_original is not None:
+            # TODO optimize this
+            X_test_stack = ensemble.transform(X_test_original)
         else:
             X_test_stack = None
 

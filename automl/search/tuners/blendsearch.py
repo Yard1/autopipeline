@@ -25,23 +25,18 @@
 """
 import collections
 import pandas as pd
-from copy import deepcopy
 from typing import Dict, Optional, List, Tuple
 import numpy as np
 import traceback
 import pickle
 import time
-import gc
 from ray.tune.sample import Categorical
 
-from sklearn.model_selection import cross_validate
-from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.utils import Bunch
 
 from ray import tune
 from ray.tune.suggest import Searcher, ConcurrencyLimiter
-from ray.tune.suggest.variant_generator import generate_variants
-from ray.tune.utils.util import flatten_dict, unflatten_dict
+from ray.tune.utils.util import flatten_dict
 from flaml.searcher.search_thread import SearchThread
 from flaml.searcher.blendsearch import BlendSearch
 from flaml.searcher.flow2 import FLOW2
@@ -50,24 +45,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from ray.tune.suggest import Searcher
 from ray.tune import sample
 
-from ray.tune.suggest.suggestion import (
-    UNDEFINED_METRIC_MODE,
-    UNDEFINED_SEARCH_SPACE,
-)
-from ray.tune.utils.util import unflatten_dict
-
-from .trainable import SklearnTrainable
 from .OptunaTPETuner import ConditionalOptunaSearch, TrialState, RandomSampler
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner
-from ..utils import call_component_if_needed
 from ...problems import ProblemType
-from ...components import Component
-from ...utils.memory import dynamic_memory_factory
 from ...utils.display import IPythonDisplay
 
 GlobalSearch = ConditionalOptunaSearch
@@ -93,6 +77,7 @@ class PatchedFLOW2(FLOW2):
         conditional_space=None,
         cost_attr="time_total_s",
         tol=0.001,
+        hyperparameter_names=None,
     ):
         """Constructor
 
@@ -144,6 +129,7 @@ class PatchedFLOW2(FLOW2):
         self.signature_space = list(space.keys())
         self._random = np.random.RandomState(seed)
         self._seed = seed
+        self._hyperparameter_names = hyperparameter_names or {}
         if not init_config:
             logger.warning(
                 "No init config given to FLOW2. Using random initial config."
@@ -159,7 +145,7 @@ class PatchedFLOW2(FLOW2):
         if limit_space_to_init_config:
             assert init_config
             self.space = {
-                k: v if Component._automl_id_sign in k else init_config[k]
+                k: v if k in self._hyperparameter_names else init_config[k]
                 for k, v in self.space.items()
                 if k in init_config
             }
@@ -251,6 +237,7 @@ class PatchedFLOW2(FLOW2):
             limit_space_to_init_config=limit_space_to_init_config,
             cost_attr=self.cost_attr,
             tol=self._tol,
+            hyperparameter_names=self._hyperparameter_names
         )
         flow2.best_obj = obj * self.metric_op  # minimize internally
         flow2.cost_incumbent = cost
@@ -525,14 +512,7 @@ class SharingSearchThread(SearchThread):
             if self._is_ls or not self._init_config:
                 self._search_alg.on_trial_complete(
                     trial_id,
-                    enforce_conditions_on_config(
-                        result,
-                        self._search_alg.conditional_space,
-                        prefix="config/",
-                        keys_to_keep=set(self._search_alg.space).union(
-                            {self.prune_attr, self.cost_attr}
-                        ),
-                    ),
+                    result,
                     error,
                 )
             else:
@@ -552,17 +532,15 @@ class SharingSearchThread(SearchThread):
             print(
                 f"resource: {resource} max_prune_attr_reached: {max_prune_attr_reached}"
             )
+            if self.prune_attr in result:
+                result = result.copy()
+                result.pop(self.prune_attr)
             try:
                 if trial_id in self._search_alg._ot_trials:
                     print("adding trial result to optuna")
                     self._search_alg.on_trial_complete(
                         trial_id,
-                        enforce_conditions_on_config(
-                            result,
-                            self._search_alg._conditional_space,
-                            prefix="config/",
-                            keys_to_keep=self._search_alg._space,
-                        ),
+                        result,
                         state=TrialState.COMPLETE
                         if max_prune_attr_reached
                         else TrialState.PRUNED,
@@ -575,12 +553,7 @@ class SharingSearchThread(SearchThread):
                     print("adding ls result to optuna")
                     return_val = self._search_alg.add_evaluated_trial(
                         trial_id,
-                        enforce_conditions_on_config(
-                            result,
-                            self._search_alg._conditional_space,
-                            prefix="config/",
-                            keys_to_keep=self._search_alg._space,
-                        ),
+                        result,
                         state=TrialState.COMPLETE
                         if max_prune_attr_reached
                         else TrialState.PRUNED,
@@ -662,12 +635,7 @@ class SharingSearchThread(SearchThread):
         elif trial_id in self._search_alg._ot_trials:
             self._search_alg.on_trial_result(
                 trial_id,
-                enforce_conditions_on_config(
-                    result,
-                    self._search_alg._conditional_space,
-                    prefix="config/",
-                    keys_to_keep=self._search_alg._space,
-                ),
+                result,
             )
         if self.cost_attr in result and self.cost_last < result[self.cost_attr]:
             self.cost_last = result[self.cost_attr]
@@ -738,7 +706,7 @@ class ConditionalBlendSearch(BlendSearch):
             use_extended=use_extended,
         )
         self._cost_bounds = {k: v for k, v in cost_bounds.items() if k in init_config}
-        tunable_space, _ = get_all_tunable_params(
+        tunable_space, _, hyperparameter_names = get_all_tunable_params(
             space, to_str=True, use_extended=use_extended
         )
         tune_space = get_tune_distributions(tunable_space)
@@ -783,6 +751,7 @@ class ConditionalBlendSearch(BlendSearch):
             resource_multiple_factor=reduction_factor,
             seed=seed,
             cost_attr=self._time_attr,
+            hyperparameter_names=hyperparameter_names,
         )
         self._resources_per_trial = resources_per_trial
         self._mem_size = mem_size

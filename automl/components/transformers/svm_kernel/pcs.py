@@ -31,12 +31,3 @@ class PolynomialCountSketch(SVMKernel):
         #    "coef0": UniformDistribution(-1, 1),
         "degree": IntUniformDistribution(2, 3),
     }
-
-    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
-        if config is None:
-            return True
-        super_check = super().is_component_valid(config, stage)
-        return super_check and (
-            config.estimator is None
-            or isinstance(config.estimator, LinearModelEstimator)
-        )

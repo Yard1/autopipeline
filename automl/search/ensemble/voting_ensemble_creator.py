@@ -58,8 +58,11 @@ class VotingEnsembleCreator(EnsembleCreator):
         metric,
         random_state,
         current_stacking_level: int,
+        previous_stack,
         X_test: Optional[pd.DataFrame],
         y_test: Optional[pd.Series],
+        X_test_original: Optional[pd.DataFrame],
+        y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> BaseEstimator:
         super().fit_ensemble(
@@ -72,8 +75,11 @@ class VotingEnsembleCreator(EnsembleCreator):
             metric,
             random_state,
             current_stacking_level,
+            previous_stack,
             X_test=X_test,
             y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
@@ -86,7 +92,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         ]
         weights = [weight for weight in weights if weight > 0]
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level
+            trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
@@ -101,7 +107,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
@@ -141,5 +147,57 @@ class VotingByMetricEnsembleCreator(VotingEnsembleCreator):
                     else 0
                 )
             self.ensemble_args_ = {"voting": "hard"}
+        else:
+            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+
+
+class VotingSoftEnsembleCreator(VotingEnsembleCreator):
+    _ensemble_name: str = "VotingSoft"
+
+    def _configure_ensemble(self, metric_name: str, metric, random_state):
+        if self.problem_type == ProblemType.REGRESSION:
+            self.weight_function_ = (
+                lambda trial: 1 if trial["metrics"][metric_name] > 0.5 else 0
+            )
+            self.ensemble_args_ = {}
+        elif self.problem_type.is_classification():
+            if self.problem_type == ProblemType.BINARY:
+                self.weight_function_ = (
+                    lambda trial: 1 if trial["metrics"][metric_name] > 0.5 else 0
+                )
+            else:
+                self.weight_function_ = (
+                    lambda trial: 1 if trial["metrics"][metric_name] > 0 else 0
+                )
+            self.ensemble_args_ = {"voting": "soft"}
+        else:
+            raise ValueError(f"Unknown ProblemType {self.problem_type}")
+
+
+class VotingSoftByMetricEnsembleCreator(VotingEnsembleCreator):
+    _ensemble_name: str = "VotingSoftByMetric"
+
+    def _configure_ensemble(self, metric_name: str, metric, random_state):
+        if self.problem_type == ProblemType.REGRESSION:
+            self.weight_function_ = (
+                lambda trial: trial["metrics"][metric_name]
+                if trial["metrics"][metric_name] > 0.5
+                else 0
+            )
+            self.ensemble_args_ = {}
+        elif self.problem_type.is_classification():
+            if self.problem_type == ProblemType.BINARY:
+                self.weight_function_ = (
+                    lambda trial: trial["metrics"][metric_name]
+                    if trial["metrics"][metric_name] > 0.5
+                    else 0
+                )
+            else:
+                self.weight_function_ = (
+                    lambda trial: trial["metrics"][metric_name]
+                    if trial["metrics"][metric_name] > 0
+                    else 0
+                )
+            self.ensemble_args_ = {"voting": "soft"}
         else:
             raise ValueError(f"Unknown ProblemType {self.problem_type}")
