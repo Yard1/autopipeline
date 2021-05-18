@@ -12,6 +12,29 @@ from ..transformer import DataType
 from ...utils import validate_type
 
 # TODO consider caching for KNN inside SMOTE?
+
+
+class SMOTENJobsMixin:
+    def _validate_estimator(self):
+        super()._validate_estimator()
+        try:
+            self.nn_k_.set_params(n_jobs=self.n_jobs)
+        except Exception:
+            pass
+
+
+class SMOTEN(SMOTENJobsMixin, _SMOTEN):
+    pass
+
+
+class SMOTE(SMOTENJobsMixin, _SMOTE):
+    pass
+
+
+class SMOTENC(SMOTENJobsMixin, _SMOTENC):
+    pass
+
+
 class PandasAutoSMOTE(BaseEstimator):
     """Automatically choose which SMOTE to use based on features"""
 
@@ -22,19 +45,19 @@ class PandasAutoSMOTE(BaseEstimator):
         self.n_jobs = n_jobs
         self.k_neighbors = k_neighbors
         self.sampling_strategy = sampling_strategy
-        self._all_categorical_sampler = _SMOTEN(
+        self._all_categorical_sampler = SMOTEN(
             random_state=random_state,
             n_jobs=n_jobs,
             k_neighbors=k_neighbors,
             sampling_strategy=sampling_strategy,
         )
-        self._all_numeric_sampler = _SMOTE(
+        self._all_numeric_sampler = SMOTE(
             random_state=random_state,
             n_jobs=n_jobs,
             k_neighbors=k_neighbors,
             sampling_strategy=sampling_strategy,
         )
-        self._mixed_sampler = _SMOTENC(
+        self._mixed_sampler = SMOTENC(
             categorical_features=[],
             random_state=random_state,
             n_jobs=n_jobs,
