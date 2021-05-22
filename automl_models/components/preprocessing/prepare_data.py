@@ -44,6 +44,7 @@ def clean_df(df):
     return df
 
 
+# TODO handle duplicate indices (raise exception, drop first/last, rename)
 class PrepareDataFrame(TransformerMixin, BaseEstimator):
     _datetime_dtype = "datetime64[ns]"
 

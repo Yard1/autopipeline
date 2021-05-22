@@ -1460,6 +1460,14 @@ class ConditionalBlendSearch(BlendSearch):
                 )
 
             if not config:
+                if proposing_thread:
+                    # local search thread finishes
+                    if self._search_thread_pool[proposing_thread].converged:
+                        for key in self._ls_bound_max:
+                            if key in self._search_thread_pool[proposing_thread]._search_alg.space:
+                                self._ls_bound_max[key] += self._ls.STEPSIZE
+                                self._ls_bound_min[key] -= self._ls.STEPSIZE
+                        del self._search_thread_pool[proposing_thread]
                 return None
 
             config = self._clean_and_enforce_config(config, prune_attr)

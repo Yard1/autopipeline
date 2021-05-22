@@ -440,7 +440,7 @@ class SklearnTrainable(Trainable):
         else:
             estimator_subclassed, original_type = estimator, None
 
-        # TODO: threshold for binary classification?
+        # TODO: threshold for binary classification? https://github.com/scikit-learn/scikit-learn/pull/16525/files
         # TODO: prediction time (per row)
 
         scoring_with_dummies = self._make_scoring_dict()

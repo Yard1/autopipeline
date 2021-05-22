@@ -19,7 +19,7 @@ class SMOTENJobsMixin:
         super()._validate_estimator()
         try:
             self.nn_k_.set_params(n_jobs=self.n_jobs)
-        except Exception:
+        except ValueError:
             pass
 
 
