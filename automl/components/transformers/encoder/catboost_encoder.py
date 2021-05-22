@@ -18,7 +18,7 @@ class CatBoostEncoderBinary(Encoder):
         "base_transformer": _CatBoostEncoder(
             **{
                 "verbose": 0,
-                "cols": None,
+                "cols": [],
                 "drop_invariant": False,
                 "return_df": True,
                 "handle_unknown": "value",
@@ -31,6 +31,7 @@ class CatBoostEncoderBinary(Encoder):
         "cv": 5,
         "return_same_type": True,
         "is_classification": True,
+        "random_state": None,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY
@@ -55,7 +56,7 @@ class CatBoostEncoderMulticlass(Encoder):
             _CatBoostEncoder(
                 **{
                     "verbose": 0,
-                    "cols": None,
+                    "cols": [],
                     "drop_invariant": False,
                     "return_df": True,
                     "handle_unknown": "value",
@@ -69,6 +70,7 @@ class CatBoostEncoderMulticlass(Encoder):
         "cv": 5,
         "return_same_type": True,
         "is_classification": True,
+        "random_state": None,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY
@@ -92,7 +94,7 @@ class CatBoostEncoderRegression(Encoder):
         "base_transformer": _CatBoostEncoder(
             **{
                 "verbose": 0,
-                "cols": None,
+                "cols": [],
                 "drop_invariant": False,
                 "return_df": True,
                 "handle_unknown": "value",
@@ -105,6 +107,7 @@ class CatBoostEncoderRegression(Encoder):
         "cv": 5,
         "return_same_type": True,
         "is_classification": False,
+        "random_state": None,
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY

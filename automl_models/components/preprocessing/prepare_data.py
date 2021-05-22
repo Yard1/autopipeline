@@ -76,7 +76,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         self.float_dtype = float_dtype
         self.int_dtype = int_dtype
         self.copy_X = copy_X
-        self.ordinal_columns = ordinal_columns or {}
+        self.ordinal_columns = ordinal_columns
         self.variance_threshold = variance_threshold
         self.missing_values_threshold = missing_values_threshold
 
@@ -94,6 +94,10 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             self.id_column_ = possible_id_columns.index[0]
             return X.set_index(self.id_column_)
         return X
+
+    @property
+    def _ordinal_columns_not_none(self):
+        return self.ordinal_columns if self.ordinal_columns else {}
 
     def _infer_dtypes(self, col):
         if is_float_dtype(col.dtype):
@@ -124,13 +128,15 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                 col = col.astype(self._datetime_dtype)
             except Exception:
                 pass
-            if col.name in self.ordinal_columns:
+            if col.name in self._ordinal_columns_not_none:
                 # if set(col_unqiue) != set(self.ordinal_columns[col.name]):
                 #     raise ValueError(
-                #         f"Ordered values for column '{col.name}' are mismatched. Got {self.ordinal_columns[col.name]}, actual categories {col_unqiue}."
+                #         f"Ordered values for column '{col.name}' are mismatched. Got {self._ordinal_columns_not_none[col.name]}, actual categories {col_unqiue}."
                 #     )
                 return col.astype(
-                    pd.CategoricalDtype(self.ordinal_columns[col.name], ordered=True)
+                    pd.CategoricalDtype(
+                        self._ordinal_columns_not_none[col.name], ordered=True
+                    )
                 ).cat.codes.replace(-1, None)
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))

@@ -69,22 +69,35 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         self.is_classification = is_classification
         self.random_state = random_state
 
-    def _pre_train(self, y):
+    def _pre_train(self, y, cat_columns):
         self.cv_ = check_cv(self.cv, y, classifier=self.is_classification)
         if isinstance(self.cv, int):
             self.cv_.random_state = self.random_state
             self.cv_.shuffle = True
         self.n_splits = self.cv_.get_n_splits()
         self.transformers_ = [
-            clone(self.base_transformer) for _ in range(self.n_splits + 1)
+            self._clone_and_set_params(self.base_transformer, cat_columns)
+            for _ in range(self.n_splits + 1)
         ]
+
+    def _clone_and_set_params(self, transformer, cat_columns):
+        transformer = clone(transformer)
+        try:
+            transformer.set_params(random_state=self.random_state)
+        except Exception:
+            pass
+        try:
+            transformer.set_params(cols=cat_columns)
+        except Exception:
+            pass
+        return transformer
 
     def _fit_train(
         self, X: pd.DataFrame, y: Optional[pd.Series], groups=None, **fit_params
     ) -> pd.DataFrame:
         if y is None:
             X_ = self.transformers_[-1].transform(X)
-            return self._post_transform(X_)
+            return X_
 
         X_ = X.copy()
 
@@ -97,12 +110,6 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
 
         return X_
 
-    def _post_fit(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
-        return X
-
-    def _post_transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        return X
-
     def fit(self, X: pd.DataFrame, y: pd.Series):
         """
         Fit models for each fold.
@@ -114,7 +121,7 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         Returns:
             returns the transformer object.
         """
-        self._post_fit(self.fit_transform(X, y), y)
+        self.fit_transform(X, y)
         return self
 
     def transform(
@@ -130,9 +137,8 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         is_pandas = isinstance(X, pd.DataFrame)
         if is_pandas:
             X_index = X.index
-            X = X.apply(categorical_column_to_float).reset_index(drop=True)
+            X = X.reset_index(drop=True).apply(categorical_column_to_float)
         X_ = self._fit_train(X, None)
-        X_ = self._post_transform(X_)
         if is_pandas:
             X_.index = X_index
         return X_ if self.return_same_type and is_pandas else X_.values
@@ -156,26 +162,15 @@ class KFoldEncoderWrapper(BaseEstimator, TransformerMixin):
         Returns:
             Transformed version of X. It will be pd.DataFrame If X is `pd.DataFrame` and return_same_type is True.
         """
+        is_pandas = True
+        cat_columns = list(X.select_dtypes("category").columns)
         X_index = X.index
-        X = X.apply(categorical_column_to_float).reset_index(drop=True)
+        X_new = X.reset_index(drop=True).apply(categorical_column_to_float)
         y = y.reset_index(drop=True)
-        assert len(X) == len(y)
-        self._pre_train(y)
+        assert len(X_new) == len(y)
+        self._pre_train(y, cat_columns)
 
-        is_pandas = isinstance(X, pd.DataFrame)
-        X = convert_input(X)
-        y = convert_input_vector(y, X.index)
+        X_ = self._fit_train(X_new, y, groups=groups, **fit_params)
 
-        if y.isnull().sum() > 0:
-            # y == null is regarded as test data
-            X_ = X.copy()
-            X_.loc[~y.isnull(), :] = self._fit_train(
-                X[~y.isnull()], y[~y.isnull()], **fit_params
-            )
-            X_.loc[y.isnull(), :] = self._fit_train(X[y.isnull()], None, **fit_params)
-        else:
-            X_ = self._fit_train(X, y, groups=groups, **fit_params)
-
-        X_ = self._post_transform(self._post_fit(X_, y))
         X_.index = X_index
         return X_ if self.return_same_type and is_pandas else X_.values
