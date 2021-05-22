@@ -1,14 +1,7 @@
 from typing import List, Optional
+from collections import defaultdict
 
 from copy import copy
-from sklearn.base import clone
-from imblearn.pipeline import Pipeline as _ImblearnPipeline
-from sklearn.pipeline import Pipeline as _Pipeline, _fit_transform_one
-from sklearn.utils import (
-    Bunch,
-    _print_elapsed_time,
-)
-from sklearn.utils.validation import check_memory
 
 from ..flow import Flow
 from ..utils import (
@@ -16,6 +9,7 @@ from ..utils import (
     get_single_component_from_iterable,
     is_component_valid_iterable,
     get_step_choice_grid,
+    recursively_call_tuning_grid_funcs,
 )
 from ..utils import convert_tuning_grid
 from ...transformers import *
@@ -24,145 +18,11 @@ from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
 from ....search.distributions import CategoricalDistribution
 
-
-class BasePipeline(_Pipeline):
-    def _fit(self, X, y=None, **fit_params_steps):
-        # shallow copy of steps - this should really be steps_
-        self.steps = list(self.steps)
-        self._validate_steps()
-        # Setup the memory
-        memory = check_memory(self.memory)
-
-        fit_transform_one_cached = memory.cache(_fit_transform_one)
-
-        for (step_idx, name, transformer) in self._iter(
-            with_final=False, filter_passthrough=False
-        ):
-            if transformer is None or transformer == "passthrough":
-                with _print_elapsed_time("Pipeline", self._log_message(step_idx)):
-                    continue
-
-            if hasattr(memory, "location"):
-                # joblib >= 0.12
-                if memory.location is None:
-                    # we do not clone when caching is disabled to
-                    # preserve backward compatibility
-                    cloned_transformer = transformer
-                else:
-                    cloned_transformer = clone(transformer)
-            elif hasattr(memory, "cachedir"):
-                # joblib < 0.11
-                if memory.cachedir is None:
-                    # we do not clone when caching is disabled to
-                    # preserve backward compatibility
-                    cloned_transformer = transformer
-                else:
-                    cloned_transformer = clone(transformer)
-            else:
-                cloned_transformer = clone(transformer)
-            # Fit or load from cache the current transformer
-            result = fit_transform_one_cached(
-                cloned_transformer,
-                X,
-                y,
-                None,
-                message_clsname="Pipeline",
-                message=self._log_message(step_idx),
-                **fit_params_steps[name],
-            )
-            if len(result) == 3:
-                X, y, fitted_transformer = result
-            else:
-                X, fitted_transformer = result
-            # Replace the transformer of the step with the fitted
-            # transformer. This is necessary when loading the transformer
-            # from the cache.
-            self.steps[step_idx] = (name, fitted_transformer)
-        return X, y
-
-    def fit(self, X, y=None, **fit_params):
-        """Fit the model
-
-        Fit all the transforms one after the other and transform the
-        data, then fit the transformed data using the final estimator.
-
-        Parameters
-        ----------
-        X : iterable
-            Training data. Must fulfill input requirements of first step of the
-            pipeline.
-
-        y : iterable, default=None
-            Training targets. Must fulfill label requirements for all steps of
-            the pipeline.
-
-        **fit_params : dict of string -> object
-            Parameters passed to the ``fit`` method of each step, where
-            each parameter name is prefixed such that parameter ``p`` for step
-            ``s`` has key ``s__p``.
-
-        Returns
-        -------
-        self : Pipeline
-            This estimator
-        """
-        fit_params_steps = self._check_fit_params(**fit_params)
-        Xt, y = self._fit(X, y, **fit_params_steps)
-        with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
-            if self._final_estimator != "passthrough":
-                fit_params_last_step = fit_params_steps[self.steps[-1][0]]
-                self._final_estimator.fit(Xt, y, **fit_params_last_step)
-
-        return self
-
-    def fit_transform(self, X, y=None, **fit_params):
-        """Fit the model and transform with the final estimator
-
-        Fits all the transforms one after the other and transforms the
-        data, then uses fit_transform on transformed data with the final
-        estimator.
-
-        Parameters
-        ----------
-        X : iterable
-            Training data. Must fulfill input requirements of first step of the
-            pipeline.
-
-        y : iterable, default=None
-            Training targets. Must fulfill label requirements for all steps of
-            the pipeline.
-
-        **fit_params : dict of string -> object
-            Parameters passed to the ``fit`` method of each step, where
-            each parameter name is prefixed such that parameter ``p`` for step
-            ``s`` has key ``s__p``.
-
-        Returns
-        -------
-        Xt : array-like of shape  (n_samples, n_transformed_features)
-            Transformed samples
-        """
-        fit_params_steps = self._check_fit_params(**fit_params)
-        Xt, y = self._fit(X, y, **fit_params_steps)
-
-        last_step = self._final_estimator
-        with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
-            if last_step == "passthrough":
-                return Xt
-            fit_params_last_step = fit_params_steps[self.steps[-1][0]]
-            if hasattr(last_step, "fit_transform"):
-                return last_step.fit_transform(Xt, y, **fit_params_last_step)
-            else:
-                return last_step.fit(Xt, y, **fit_params_last_step).transform(Xt)
-
-    def set_params(self, **kwargs):
-        # ConfigSpace workaround
-        kwargs = {k: (None if v == "!None" else v) for k, v in kwargs.items()}
-        return super().set_params(**kwargs)
+from automl_models.components.flow.pipeline.base_pipeline import BasePipeline
 
 
 class Pipeline(Flow):
-    _component_class = _ImblearnPipeline
+    _component_class = BasePipeline
 
     _default_parameters = {
         "memory": None,
@@ -239,14 +99,17 @@ class Pipeline(Flow):
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
         default_grid = super().get_tuning_grid(use_extended=use_extended)
         step_grids = {
-            name: get_step_choice_grid(step)
-            for name, step in self.final_parameters["steps"]
+            name: get_step_choice_grid(step, use_extended=use_extended)
+            for name, step in self.components
         }
         return {**step_grids, **default_grid}
 
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
+        super().call_tuning_grid_funcs(config, stage)
+        for name, step in self.components:
+            recursively_call_tuning_grid_funcs(step, config=config, stage=stage)
+
     def __copy__(self):
-        # self.spam is to be ignored, it is calculated anew for the copy
-        # create a new copy of ourselves *reusing* self.bar
         new = type(self)(tuning_grid=self.tuning_grid, **self.parameters)
         new.components = self.components.copy()
         new.components = [
@@ -263,15 +126,15 @@ class TopPipeline(Pipeline):
     def get_estimator_distribution(self):
         return (self.components[-1][0], CategoricalDistribution(self.components[-1][1]))
 
-    def get_preprocessor_distribution(self):
-        grid = self.get_tuning_grid()
+    def get_preprocessor_distribution(self, use_extended: bool = False) -> dict:
+        grid = self.get_tuning_grid(use_extended=use_extended)
         grid.pop(self.components[-1][0])
         return {
             k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
         }
 
-    def get_all_distributions(self):
-        grid = self.get_tuning_grid()
+    def get_all_distributions(self, use_extended: bool = False) -> dict:
+        grid = self.get_tuning_grid(use_extended=use_extended)
         return {
             k: CategoricalDistribution(v) for k, v in convert_tuning_grid(grid).items()
         }
@@ -344,6 +207,24 @@ class TopPipeline(Pipeline):
                 converted_configurations.append(configuration)
         self.preset_configurations = converted_configurations
 
+    def _convert_duplicates_in_steps_to_extra_configs(self):
+        self.extra_configs = defaultdict(dict)
+        for i, name_step_pair in enumerate(self.parameters[self.components_name]):
+            name, step = name_step_pair
+            if not isinstance(step, list):
+                continue
+            no_dups_step = []
+            for component in step:
+                if component._allow_duplicates:
+                    no_dups_step.append(component)
+                elif not any(isinstance(component, type(x)) for x in no_dups_step):
+                    no_dups_step.append(component)
+                else:
+                    if type(component) not in self.extra_configs[name]:
+                        self.extra_configs[name][type(component)] = []
+                    self.extra_configs[name][type(component)].append(component)
+            self.parameters[self.components_name][i] = (name, no_dups_step)
+
     def __init__(
         self,
         tuning_grid=None,
@@ -355,3 +236,4 @@ class TopPipeline(Pipeline):
         self.preset_configurations = preset_configurations or []
         assert "steps" in self.parameters
         assert "Estimator" == self.parameters["steps"][-1][0]
+        self._convert_duplicates_in_steps_to_extra_configs()

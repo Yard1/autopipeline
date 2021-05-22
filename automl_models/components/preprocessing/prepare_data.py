@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import pandas as pd
 import numpy as np
@@ -9,10 +9,14 @@ from pandas.api.types import (
     is_datetime64_any_dtype,
 )
 
+from fastai.tabular.core import df_shrink, add_datepart
+from pandas.core.dtypes.common import is_bool_dtype, is_categorical_dtype
+
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 import warnings
+from ..utils import validate_type
 
 
 def _is_id_column(col):
@@ -24,12 +28,19 @@ def _is_id_column(col):
     )
 
 
+def replace_inf_in_col(col):
+    try:
+        return col.replace([np.inf, -np.inf], None)  # TODO: ensure this actually works
+    except Exception:
+        return col
+
+
 def clean_df(df):
     if isinstance(df, pd.DataFrame):
         df.columns = [str(col) for col in df.columns]
     else:
         df.name = str(df.name)
-    df.replace([np.inf, -np.inf], None, inplace=True)
+    df = df.apply(replace_inf_in_col)
     return df
 
 
@@ -42,20 +53,31 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         find_id_column: bool = True,
         float_dtype: type = np.float32,
         int_dtype: Optional[type] = None,
+        ordinal_columns: Optional[Dict[str, list]] = None,
         copy_X: bool = True,
+        variance_threshold: float = 0.01,
+        missing_values_threshold: float = 0.3,
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:
             raise ValueError("allowed_dtypes cannot be empty")
         if not is_float_dtype(float_dtype):
-            raise TypeError(f"Expected float_dtype to be a float dtype, got {type(float_dtype)}")
+            raise TypeError(
+                f"Expected float_dtype to be a float dtype, got {type(float_dtype)}"
+            )
         if int_dtype is not None and not is_integer_dtype(int_dtype):
-            raise TypeError(f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}")
+            raise TypeError(
+                f"Expected int_dtype to be an integer dtype or None, got {type(int_dtype)}"
+            )
+        validate_type(ordinal_columns, "ordinal_columns", (dict, None))
 
         self.allowed_dtypes = allowed_dtypes
         self.find_id_column = find_id_column
         self.float_dtype = float_dtype
         self.int_dtype = int_dtype
         self.copy_X = copy_X
+        self.ordinal_columns = ordinal_columns or {}
+        self.variance_threshold = variance_threshold
+        self.missing_values_threshold = missing_values_threshold
 
     def _set_index_to_id_column(self, X):
         possible_id_columns = X.apply(_is_id_column)
@@ -79,20 +101,17 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if is_datetime64_any_dtype(col.dtype):
             return col.astype(self._datetime_dtype)
 
-        if is_integer_dtype(col.dtype):
-            if self.int_dtype is None:
-                ii32 = np.iinfo(np.int32)
-                # err on the safe side - 20%
-                min_32_limit, max_32_limit = ii32.min * 0.8, ii32.max * 0.8
-                if col.min() >= min_32_limit and col.max() <= max_32_limit:
-                    col = col.astype(np.int32)
-                else:
-                    col = col.astype(np.int64)
-            else:
-                col = col.astype(self.int_dtype)
+        if is_integer_dtype(col.dtype) and self.int_dtype is not None:
+            return col.astype(self.int_dtype)
+
+        if is_categorical_dtype(col.dtype):
+            if col.dtype.ordered:
+                col = col.copy()
+                return col.cat.codes.replace(-1, None)
+            return col
 
         col_unqiue = col.unique()
-        if (
+        if is_bool_dtype(col.dtype) or (
             not is_numeric_dtype(col.dtype)
             or is_integer_dtype(col.dtype)
             and len(col_unqiue) <= 20
@@ -102,12 +121,20 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                     col, infer_datetime_format=True, utc=False, errors="raise"
                 )
                 col = col.astype(self._datetime_dtype)
-            except:
+            except Exception:
                 pass
+            if col.name in self.ordinal_columns:
+                # if set(col_unqiue) != set(self.ordinal_columns[col.name]):
+                #     raise ValueError(
+                #         f"Ordered values for column '{col.name}' are mismatched. Got {self.ordinal_columns[col.name]}, actual categories {col_unqiue}."
+                #     )
+                return col.astype(
+                    pd.CategoricalDtype(self.ordinal_columns[col.name], ordered=True)
+                ).cat.codes.replace(-1, None)
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))
-            except:
-                return col.astype("object").astype(pd.CategoricalDtype(col_unqiue))
+            except Exception:
+                return col.astype("category")
 
         return col
 
@@ -117,6 +144,23 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                 col, infer_datetime_format=True, utc=False, errors="raise"
             )
         return col.astype(self.final_dtypes_[col.name])
+
+    def _drop_variance_missing_values(self, X):
+        cols_to_drop = []
+        for column_name in X.columns:
+            column = X[column_name]
+            if (
+                self.missing_values_threshold is not None
+                and (column.isna().sum() / len(column)) >= self.missing_values_threshold
+            ):
+                cols_to_drop.append(column_name)
+            elif self.variance_threshold is not None:
+                if is_float_dtype(column.dtype):
+                    if column.var() <= self.variance_threshold:
+                        cols_to_drop.append(column_name)
+                elif np.all(column == column.iloc[0]):
+                    cols_to_drop.append(column_name)
+        return X.drop(cols_to_drop, axis=1)
 
     def fit(self, X, y=None):
         self.fit_transform(X, y=y)
@@ -141,9 +185,13 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             X[self.id_column_] = X[self.id_column_].astype(int)
             X.set_index(self.id_column_, inplace=True)
 
-        X = X[self.final_columns_]
+        if self.final_columns_ is not None:
+            X = X[self.final_columns_]
 
         X = X.apply(self._convert_dtypes)
+
+        for datetime_column in self.datetime_columns_:
+            add_datepart(X, datetime_column, prefix=f"{datetime_column}_")
 
         if was_series:
             X = X.squeeze()
@@ -160,6 +208,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         X = X.infer_objects()
 
         X = clean_df(X)
+
         X.dropna(axis=0, how="all", inplace=True)
         X.dropna(axis=1, how="all", inplace=True)
 
@@ -167,7 +216,9 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         if X.shape[1] > 1 and self.find_id_column:
             X = self._set_index_to_id_column(X)
 
+        X = df_shrink(X, obj2cat=False)
         X = X.apply(self._infer_dtypes)
+        X = self._drop_variance_missing_values(X)
 
         self.final_columns_ = X.columns
         self.final_dtypes_ = X.dtypes
@@ -175,8 +226,11 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         self.datetime_columns_ = set(
             self.datetime_columns_[self.datetime_columns_].index
         )
+        for datetime_column in self.datetime_columns_:
+            add_datepart(X, datetime_column, prefix=f"{datetime_column}_")
 
         if was_series:
             X = X.squeeze()
+            self.final_columns_ = None
 
         return X

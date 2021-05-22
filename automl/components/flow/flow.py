@@ -1,11 +1,11 @@
-from typing import Iterable
-from copy import copy
 from ..transformers.transformer import Transformer
 from ..component import ComponentLevel, ComponentConfig
 from ...search.stage import AutoMLStage
 
+
 class Flow(Transformer):
     _component_level = ComponentLevel.NECESSARY
+    _allow_duplicates = True
 
     @property
     def components_name(self) -> str:
@@ -39,3 +39,6 @@ class Flow(Transformer):
         self, pipeline_config: ComponentConfig, current_stage: AutoMLStage
     ):
         raise NotImplementedError()
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        return super().is_component_valid(config, stage) and self.components

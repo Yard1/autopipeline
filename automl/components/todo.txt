@@ -1,0 +1,8 @@
+- DeepTables
+- XGBoost
+- Naive Bayes
+- ARD for regression
+- OptBinning
+- Coalesce low frequency categories
+- PCA for linear models
+- mRMR feature selection (https://towardsdatascience.com/feature-selection-how-to-throw-away-95-of-your-data-and-get-95-accuracy-ad41ca016877)

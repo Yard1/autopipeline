@@ -1,0 +1,483 @@
+import numpy as np
+import pandas as pd
+
+from joblib import Parallel
+
+from sklearn.ensemble import (
+    StackingClassifier as _StackingClassifier,
+    StackingRegressor as _StackingRegressor,
+)
+from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
+from sklearn.utils import Bunch
+from sklearn.utils.fixes import delayed
+from sklearn.model_selection import check_cv
+from sklearn.base import is_classifier
+from sklearn.ensemble._base import _fit_single_estimator
+from sklearn.utils.validation import check_is_fitted
+
+from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_method
+from ...utils import clone_with_n_jobs_1
+from ...preprocessing import PrepareDataFrame
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# TODO handle Repeated CV (here and in trainable)
+class PandasStackingClassifier(_StackingClassifier):
+    def fit(
+        self,
+        X,
+        y,
+        sample_weight=None,
+        fit_final_estimator=True,
+        refit_estimators=True,
+        predictions=None,
+        save_predictions=False,
+    ):
+        """Fit the estimators.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Training vectors, where `n_samples` is the number of samples and
+            `n_features` is the number of features.
+
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights. If None, then samples are equally weighted.
+            Note that this is supported only if all underlying estimators
+            support sample weights.
+
+        Returns
+        -------
+        self : object
+        """
+        logger.debug("fitting stack", flush=True)
+        self.preprocessor_ = PrepareDataFrame(
+            find_id_column=False,
+            copy_X=False,
+            missing_values_threshold=None,
+            variance_threshold=None,
+        )
+        self.stacked_predictions_ = None
+        self._le = LabelEncoder().fit(y)
+        self.classes_ = self._le.classes_
+        names, all_estimators = self._validate_estimators()
+        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
+        self._validate_final_estimator()
+        # else:
+        #    self.final_estimator_ = self.final_estimator
+        stack_method = [self.stack_method] * len(all_estimators)
+
+        # Fit the base estimators on the whole training data. Those
+        # base estimators will be used in transform, predict, and
+        # predict_proba. They are exposed publicly.
+        # if not hasattr(self, "estimators_"):
+        try:
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est, X, y, sample_weight, force_refit=refit_estimators
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
+        except Exception:  # TODO is there a better way to catch exceptions here?
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est,
+                    X,
+                    y,
+                    sample_weight,
+                    cloning_function=clone_with_n_jobs_1,
+                    force_refit=refit_estimators,
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
+
+        self.named_estimators_ = Bunch()
+        est_fitted_idx = 0
+        for name_est, org_est in zip(names, all_estimators):
+            if org_est != "drop":
+                self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
+                est_fitted_idx += 1
+            else:
+                self.named_estimators_[name_est] = "drop"
+
+        # To train the meta-classifier using the most data as possible, we use
+        # a cross-validation to obtain the output of the stacked estimators.
+
+        # To ensure that the data provided to each estimator are the same, we
+        # need to set the random state of the cv if there is one and we need to
+        # take a copy.
+        cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
+        if hasattr(cv, "random_state") and cv.random_state is None:
+            cv.random_state = np.random.RandomState()
+
+        self.stack_method_ = [
+            self._method_name(name, est, meth)
+            for name, est, meth in zip(names, all_estimators, stack_method)
+        ]
+        fit_params = (
+            {"sample_weight": sample_weight} if sample_weight is not None else None
+        )
+        # if not any(self.estimators[0][0] in col for col in X.columns):
+
+        predictions = get_cv_predictions(
+            X,
+            y,
+            all_estimators,
+            self.stack_method_,
+            cv,
+            predictions=predictions,
+            n_jobs=self.n_jobs,
+            fit_params=fit_params,
+            verbose=self.verbose,
+        )
+        X_meta = self._concatenate_predictions(
+            X, predictions, save_predictions=save_predictions
+        )
+        # else:
+        #    X_meta = X
+        # Only not None or not 'drop' estimators will be used in transform.
+        # Remove the None from the method as well.
+        self.stack_method_ = [
+            meth
+            for (meth, est) in zip(self.stack_method_, all_estimators)
+            if est != "drop"
+        ]
+
+        if fit_final_estimator:
+            try:
+                self.final_estimator_.set_params(n_jobs=self.n_jobs)
+            except ValueError:
+                pass
+            _fit_single_estimator(
+                self.final_estimator_, X_meta, y, sample_weight=sample_weight
+            )
+
+        return self
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+
+        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
+            saved_predictions = self._saved_test_predictions
+        else:
+            saved_predictions = [None] * len(self.estimators_)
+
+        assert len(saved_predictions) == len(self.estimators_)
+
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(call_method)(
+                est_meth[0],
+                est_meth[1],
+                X,
+            )
+            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
+            if est_meth[0] != "drop"
+            and saved_predictions[i] is None
+            or est_meth[1] not in saved_predictions[i]
+        )
+        predictions = list(predictions)
+
+        for i in range(len(saved_predictions)):
+            if (
+                saved_predictions[i] is None
+                or self.stack_method_[i] not in saved_predictions[i]
+            ):
+                saved_predictions[i] = predictions.pop(0)
+            else:
+                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
+
+        predictions = saved_predictions
+
+        return self._concatenate_predictions(X, predictions)
+
+    def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
+        """Concatenate the predictions of each first layer learner and
+        possibly the input dataset `X`.
+
+        If `X` is sparse and `self.passthrough` is False, the output of
+        `transform` will be dense (the predictions). If `X` is sparse
+        and `self.passthrough` is True, the output of `transform` will
+        be sparse.
+
+        This helper is in charge of ensuring the predictions are 2D arrays and
+        it will drop one of the probability column when using probabilities
+        in the binary case. Indeed, the p(y|c=0) = 1 - p(y|c=1)
+        """
+        X_meta = []
+        X_meta_names = []
+        for est_idx, preds in enumerate(predictions):
+            # case where the the estimator returned a 1D array
+            estimator_name = self.estimators[est_idx][0]
+            if preds.ndim == 1:
+                X_meta.append(preds.reshape(-1, 1))
+                X_meta_names.append([f"{estimator_name}_-1"])
+            else:
+                if (
+                    self.stack_method_[est_idx] == "predict_proba"
+                    and len(self.classes_) == 2
+                ):
+                    # Remove the first column when using probabilities in
+                    # binary classification because both features are perfectly
+                    # collinear.
+                    X_meta.append(preds[:, 1:])
+                    X_meta_names.append([f"{estimator_name}_1"])
+                else:
+                    X_meta.append(preds)
+                    X_meta_names.append(
+                        [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
+                    )
+        index = X.index if hasattr(X, "index") else None
+        X_meta = [
+            pd.DataFrame(x, columns=X_meta_names[i], index=index)  # TODO: Better name
+            for i, x in enumerate(X_meta)
+        ]
+        meta_df = pd.concat(X_meta, axis=1)
+        try:
+            df = self.preprocessor_.transform(meta_df)
+        except Exception:
+            df = self.preprocessor_.fit_transform(meta_df)
+        try:
+            df.index = X.index
+        except:
+            pass
+        if save_predictions:
+            self.stacked_predictions_ = df
+        if self.passthrough:
+            df = pd.concat((X, df), axis=1)
+        return df
+
+
+class PandasStackingRegressor(_StackingRegressor):
+    def fit(
+        self,
+        X,
+        y,
+        sample_weight=None,
+        fit_final_estimator=True,
+        refit_estimators=True,
+        predictions=None,
+        save_predictions=False,
+    ):
+        """Fit the estimators.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Training vectors, where `n_samples` is the number of samples and
+            `n_features` is the number of features.
+
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights. If None, then samples are equally weighted.
+            Note that this is supported only if all underlying estimators
+            support sample weights.
+
+        Returns
+        -------
+        self : object
+        """
+        logger.debug("fitting stack", flush=True)
+        self.preprocessor_ = PrepareDataFrame(
+            find_id_column=False,
+            copy_X=False,
+            missing_values_threshold=None,
+            variance_threshold=None,
+        )
+        self.stacked_predictions_ = None
+        names, all_estimators = self._validate_estimators()
+        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
+        self._validate_final_estimator()
+        # else:
+        #    self.final_estimator_ = self.final_estimator
+        stack_method = [self.stack_method] * len(all_estimators)
+
+        # Fit the base estimators on the whole training data. Those
+        # base estimators will be used in transform, predict, and
+        # predict_proba. They are exposed publicly.
+        # if not hasattr(self, "estimators_"):
+        try:
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est, X, y, sample_weight, force_refit=refit_estimators
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
+        except Exception:  # TODO is there a better way to catch exceptions here?
+            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+                delayed(fit_single_estimator_if_not_fitted)(
+                    est,
+                    X,
+                    y,
+                    sample_weight,
+                    cloning_function=clone_with_n_jobs_1,
+                    force_refit=refit_estimators,
+                )
+                for est in all_estimators
+                if est != "drop"
+            )
+
+        self.named_estimators_ = Bunch()
+        est_fitted_idx = 0
+        for name_est, org_est in zip(names, all_estimators):
+            if org_est != "drop":
+                self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
+                est_fitted_idx += 1
+            else:
+                self.named_estimators_[name_est] = "drop"
+
+        # To train the meta-classifier using the most data as possible, we use
+        # a cross-validation to obtain the output of the stacked estimators.
+
+        # To ensure that the data provided to each estimator are the same, we
+        # need to set the random state of the cv if there is one and we need to
+        # take a copy.
+        cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
+        if hasattr(cv, "random_state") and cv.random_state is None:
+            cv.random_state = np.random.RandomState()
+
+        self.stack_method_ = [
+            self._method_name(name, est, meth)
+            for name, est, meth in zip(names, all_estimators, stack_method)
+        ]
+        fit_params = (
+            {"sample_weight": sample_weight} if sample_weight is not None else None
+        )
+        # if not any(self.estimators[0][0] in col for col in X.columns):
+
+        predictions = get_cv_predictions(
+            X,
+            y,
+            all_estimators,
+            self.stack_method_,
+            cv,
+            predictions=predictions,
+            n_jobs=self.n_jobs,
+            fit_params=fit_params,
+            verbose=self.verbose,
+        )
+        X_meta = self._concatenate_predictions(
+            X, predictions, save_predictions=save_predictions
+        )
+        # else:
+        #    X_meta = X
+        # Only not None or not 'drop' estimators will be used in transform.
+        # Remove the None from the method as well.
+        self.stack_method_ = [
+            meth
+            for (meth, est) in zip(self.stack_method_, all_estimators)
+            if est != "drop"
+        ]
+
+        if fit_final_estimator:
+            try:
+                self.final_estimator_.set_params(n_jobs=self.n_jobs)
+            except ValueError:
+                pass
+            _fit_single_estimator(
+                self.final_estimator_, X_meta, y, sample_weight=sample_weight
+            )
+
+        return self
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+
+        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
+            saved_predictions = self._saved_test_predictions
+        else:
+            saved_predictions = [None] * len(self.estimators_)
+
+        assert len(saved_predictions) == len(self.estimators_)
+
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(call_method)(
+                est_meth[0],
+                est_meth[1],
+                X,
+            )
+            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
+            if est_meth[0] != "drop"
+            and saved_predictions[i] is None
+            or est_meth[1] not in saved_predictions[i]
+        )
+        predictions = list(predictions)
+
+        for i in range(len(saved_predictions)):
+            if (
+                saved_predictions[i] is None
+                or self.stack_method_[i] not in saved_predictions[i]
+            ):
+                saved_predictions[i] = predictions.pop(0)
+            else:
+                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
+
+        predictions = saved_predictions
+
+    def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
+        """Concatenate the predictions of each first layer learner and
+        possibly the input dataset `X`.
+
+        If `X` is sparse and `self.passthrough` is False, the output of
+        `transform` will be dense (the predictions). If `X` is sparse
+        and `self.passthrough` is True, the output of `transform` will
+        be sparse.
+
+        This helper is in charge of ensuring the predictions are 2D arrays and
+        it will drop one of the probability column when using probabilities
+        in the binary case. Indeed, the p(y|c=0) = 1 - p(y|c=1)
+        """
+        X_meta = []
+        X_meta_names = []
+        for est_idx, preds in enumerate(predictions):
+            # case where the the estimator returned a 1D array
+            estimator_name = self.estimators[est_idx][0]
+            if preds.ndim == 1:
+                X_meta.append(preds.reshape(-1, 1))
+                X_meta_names.append([f"{estimator_name}_-1"])
+            else:
+                if (
+                    self.stack_method_[est_idx] == "predict_proba"
+                    and len(self.classes_) == 2
+                ):
+                    # Remove the first column when using probabilities in
+                    # binary classification because both features are perfectly
+                    # collinear.
+                    X_meta.append(preds[:, 1:])
+                    X_meta_names.append([f"{estimator_name}_1"])
+                else:
+                    X_meta.append(preds)
+                    X_meta_names.append(
+                        [f"{estimator_name}_{i}" for i in range(preds.shape[1])]
+                    )
+        index = X.index if hasattr(X, "index") else None
+        X_meta = [
+            pd.DataFrame(x, columns=X_meta_names[i], index=index)  # TODO: Better name
+            for i, x in enumerate(X_meta)
+        ]
+        meta_df = pd.concat(X_meta, axis=1)
+        try:
+            df = self.preprocessor_.transform(meta_df)
+        except Exception:
+            df = self.preprocessor_.fit_transform(meta_df)
+        try:
+            df.index = X.index
+        except:
+            pass
+        if save_predictions:
+            self.stacked_predictions_ = df
+        if self.passthrough:
+            df = pd.concat((X, df), axis=1)
+        return df

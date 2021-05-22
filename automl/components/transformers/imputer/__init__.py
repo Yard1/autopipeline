@@ -1,1 +1,3 @@
 from .simple_imputer import SimpleCategoricalImputer, SimpleNumericImputer
+from .iterative_imputer import IterativeImputer
+from .combined_simple_imputer import CombinedSimpleImputer

@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import Optional, Union
 from enum import IntEnum
+from collections import UserDict
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
 
@@ -26,15 +27,15 @@ class ComponentLevel(IntEnum):
         raise ValueError(f"Cannot translate '{label}' to a ComponentLevel object!")
 
 
-class ComponentConfig:
-    def __init__(self, **params) -> None:
-        self.params = params
+class ComponentConfig(UserDict):
+    def __init__(self, **kwargs) -> None:
+        self.data = kwargs
 
     def __getattr__(self, name: str):
-        return self.params.get(name, None)
+        return self.data.get(name, None)
 
     def __repr__(self) -> str:
-        return str(self.params)
+        return str(self.data)
 
 
 class Component(ABC):
@@ -52,8 +53,9 @@ class Component(ABC):
         ProblemType.MULTICLASS,
     }
     _component_level = ComponentLevel.COMMON
+    _consider_for_initial_combinations = True
 
-    _automl_id_sign = "\u200B"
+    _allow_duplicates = False
 
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters
@@ -65,6 +67,13 @@ class Component(ABC):
                     f"_default_parameters is missing key {k} present in _default_tuning_grid"
                 )
             self._default_tuning_grid[k].default = self._default_parameters[k]
+
+        for k in self._default_tuning_grid_extended.keys():
+            if k not in self._default_parameters:
+                raise KeyError(
+                    f"_default_parameters is missing key {k} present in _default_tuning_grid"
+                )
+            self._default_tuning_grid_extended[k].default = self._default_parameters[k]
 
     def __call__(
         self,
@@ -80,30 +89,48 @@ class Component(ABC):
         return self._component_class(**params)
 
     @property
-    def final_parameters(self):
+    def final_parameters(self) -> dict:
         return {
             **self._default_parameters,
             **self.parameters,
         }
 
-    @property
-    def automl_id(self):
-        return f"{self._automl_id_sign}{self.__class__.__name__}{self._automl_id_sign}"
-
-    def get_hyperparameter_key_suffix(self, prefix, hyperparam_name):
-        return f"{prefix}__{self.automl_id}__{hyperparam_name}"
+    def get_hyperparameter_key_suffix(self, prefix: str, hyperparam_name: str) -> str:
+        return f"{prefix}__{self.short_name}__{hyperparam_name}"
 
     def __repr__(self) -> str:
         params = [f"{key}={value}" for key, value in self.final_parameters.items()]
         return f"{self.__class__.__name__}({', '.join(params)})"
 
+    @property
+    def short_name(self) -> str:
+        return self.__class__.__name__
+
+    def __hash__(self) -> int:
+        return hash(self.__repr__())
+
     def get_tuning_grid(self, use_extended: bool = False) -> dict:
-        default_tuning_grid = (
-            self._default_tuning_grid_extended
-            if use_extended
-            else self._default_tuning_grid
-        )
-        return {**default_tuning_grid, **self.tuning_grid}
+        if hasattr(self, "called_tuning_grid"):
+            return {
+                **self.called_tuning_grid,
+                **(self.called_extended_tuning_grid if use_extended else {}),
+                **self.tuning_grid,
+            }
+        return {
+            **self._default_tuning_grid,
+            **(self._default_tuning_grid_extended if use_extended else {}),
+            **self.tuning_grid,
+        }
+
+    def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
+        self.called_tuning_grid = {
+            k: v(config, stage) if callable(v) else v
+            for k, v in self._default_tuning_grid.items()
+        }
+        self.called_extended_tuning_grid = {
+            k: v(config, stage) if callable(v) else v
+            for k, v in self._default_tuning_grid_extended.items()
+        }
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

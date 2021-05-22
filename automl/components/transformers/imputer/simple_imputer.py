@@ -1,14 +1,12 @@
-from sklearn.impute import SimpleImputer as _SimpleImputer
-
 from .imputer import Imputer
-from ..transformer import Transformer, DataType
+from ..transformer import DataType
 from ...component import ComponentLevel
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ....search.distributions import CategoricalDistribution
 
-
-class PandasSimpleImputer(PandasDataFrameTransformerMixin, _SimpleImputer):
-    pass
+from automl_models.components.transformers.imputer.simple_imputer import (
+    PandasSimpleCategoricalImputer,
+    PandasSimpleImputer,
+)
 
 
 class SimpleNumericImputer(Imputer):
@@ -20,15 +18,13 @@ class SimpleNumericImputer(Imputer):
         "copy": True,
         "add_indicator": False,
     }
-    _default_tuning_grid = {
-        "strategy": CategoricalDistribution(["mean", "median", "constant"])
-    }
+    _default_tuning_grid = {"strategy": CategoricalDistribution(["mean", "median"])}
     _allowed_dtypes = {DataType.NUMERIC}
     _component_level = ComponentLevel.NECESSARY
 
 
 class SimpleCategoricalImputer(Imputer):
-    _component_class = PandasSimpleImputer
+    _component_class = PandasSimpleCategoricalImputer
     _default_parameters = {
         "strategy": "most_frequent",
         "fill_value": "missing_value",

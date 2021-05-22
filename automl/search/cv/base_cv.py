@@ -13,7 +13,7 @@ def get_cv_for_problem_type(
 ) -> BaseCrossValidator:
     if n_splits is None:
         n_splits = 5
-    if isinstance(n_splits, BaseCrossValidator):
+    if not isinstance(n_splits, int):
         return n_splits
     if groups is not None:
         return GroupKFold(n_splits=n_splits)

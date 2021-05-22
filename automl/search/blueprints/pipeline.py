@@ -1,30 +1,35 @@
-from automl.components.transformers.feature_selector.boruta import (
-    BorutaSHAPClassification,
-)
+import numpy as np
+
 from typing import Optional
 
-from automl import components
-
-from ...components.estimators.tree.decision_tree import DecisionTreeClassifier
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
+from ...components.flow import (
+    ColumnTransformer,
+    Pipeline,
+    TopPipeline,
+)
 from ...components.transformers import *
 from ...components.estimators import *
-from ...components.flow import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
-from ...components.estimators.tree.tree_estimator import TreeEstimator
+from ...components.estimators.linear_model.linear_model_estimator import (
+    LinearModelEstimator,
+)
+from ...components.estimators.knn.knn_estimator import KNNEstimator
 from ...utils import validate_type
 
-from sklearn.compose import make_column_selector
-
-from automl.components import estimators
+from automl_models.components.flow.column_transformer import make_column_selector
 
 
 def _scaler_passthrough_condition(config, stage):
-    return config.estimator is None or isinstance(config.estimator, TreeEstimator)
+    return config.estimator is None or not isinstance(
+        config.estimator, (LinearModelEstimator, KNNEstimator)
+    )
+
 
 categorical_selector = make_column_selector(dtype_include="category")
 numeric_selector = make_column_selector(dtype_exclude="category")
+
 
 def create_pipeline_blueprint(
     problem_type: ProblemType,
@@ -38,6 +43,11 @@ def create_pipeline_blueprint(
     validate_type(level, "level", ComponentLevel)
 
     # steps in [] are tunable
+    # there are three possible states for a step depending on an estimator:
+    # - none of the components are valid
+    # - one component is valid
+    # - all components are valid
+    # make sure that is the case!
 
     passthrough = {
         "Passthrough": Passthrough(),
@@ -46,59 +56,92 @@ def create_pipeline_blueprint(
         ),
     }
     imbalance = {"AutoSMOTE": AutoSMOTE()}
-    numeric_imputers = {
-        "SimpleNumericImputer": SimpleNumericImputer(),
+    imputers = {
+        "CombinedSimpleImputer": CombinedSimpleImputer(),
+        "IterativeImputer": IterativeImputer(),
     }
     scalers_normalizers = {
-        "StandardScaler": StandardScaler(),
-    }
-    categorical_imputers = {
-        "SimpleCategoricalImputer": SimpleCategoricalImputer(),
+        "CombinedScalerTransformer": CombinedScalerTransformer(),
+        "MinMaxScaler": MinMaxScaler(),
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
+        "CatBoostEncoderBinary": CatBoostEncoderBinary(),
+        "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
+        "CatBoostEncoderRegression": CatBoostEncoderRegression(),
+        "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
+        "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
+        "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
     }
+    oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
         "BorutaSHAPClassification": BorutaSHAPClassification(),
-        "BorutaSHAPRegression": BorutaSHAPClassification(),
+        "BorutaSHAPRegression": BorutaSHAPRegression(),
+        "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
+        "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
+    }
+    svm_kernels = {
+        "NystroemRBF": NystroemRBF(),
+        "PolynomialCountSketch": PolynomialCountSketch(),
+        "NystroemSigmoid": NystroemSigmoid(),
+    }
+    knn_transformers = {
+        "KNNTransformer": KNNTransformer(),
+        # "NCATransformer": NCATransformer(),
     }
     estimators = {
-        "DecisionTreeClassifier": DecisionTreeClassifier(),
+        # "DecisionTreeClassifier": DecisionTreeClassifier(),
+        # "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
+        "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
+        "LogisticRegression_EN": LogisticRegression(l1_ratio=0.5),
+        "LinearRegression": LinearRegression(),
+        "ElasticNet": ElasticNet(),
+        "LGBMClassifier": LGBMClassifier(),
+        "LGBMRegressor": LGBMRegressor(),
+        "CatBoostClassifierBinary": CatBoostClassifierBinary(),
+        "CatBoostClassifierMulticlass": CatBoostEncoderMulticlass(),
+        "CatBoostRegressor": CatBoostRegressor(),
+        "RandomForestClassifier": RandomForestClassifier(),
+        "RandomForestRegressor": RandomForestRegressor(),
+        "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
+        "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
+        "LinearSVC": LinearSVC(),
+        "LinearSVR": LinearSVR(),
+        "KNeighborsClassifier": KNeighborsClassifier(),
+        "KNeighborsRegressor": KNeighborsRegressor(),
     }
     components = {
         **passthrough,
         **imbalance,
-        **numeric_imputers,
+        **imputers,
         **scalers_normalizers,
-        **categorical_imputers,
         **categorical_encoders,
+        **oridinal_encoder,
         **feature_selectors,
+        **svm_kernels,
+        **knn_transformers,
         **estimators,
     }
 
     pipeline_steps = [
-        ("Imbalance", list(imbalance.values()) + [components["Passthrough"]]),
+        ("Imputer", list(imputers.values())),
         (
-            "ColumnImputation",
+            "FeatureSelector",
+            [components["Passthrough"]] + list(feature_selectors.values()),
+        ),
+        ("Imbalance", [components["Passthrough"]] + list(imbalance.values())),
+        (
+            "ColumnOrdinal",
             ColumnTransformer(
                 transformers=[
                     (
-                        "CategoricalImputer",
-                        list(categorical_imputers.values()),
+                        "OrdinalEncoder",
+                        [components["OrdinalEncoder"]],
                         categorical_selector,
-                    ),
-                    (
-                        "NumericImputer",
-                        list(numeric_imputers.values()),
-                        numeric_selector,
                     ),
                 ],
             ),
-        ),
-        (
-            "FeatureSelector",
-            list(feature_selectors.values()) + [components["Passthrough"]],
         ),
         (
             "ColumnEncodingScaling",
@@ -118,56 +161,35 @@ def create_pipeline_blueprint(
             ),
         ),
         (
+            "SVMKernelApproximation",
+            [components["Passthrough"]] + list(svm_kernels.values()),
+        ),
+        (
+            "KNNTransformer",
+            list(knn_transformers.values()),
+        ),
+        (
             "Estimator",
             list(estimators.values()),
         ),
     ]
 
-    d = {
-        "Preprocessor__ColumnTransformer__Categorical__Imputer": (
-            components["SimpleCategoricalImputer"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
-            components["OneHotEncoder"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__Imputers": (
-            components["SimpleNumericImputer"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["StandardScaler"],
-            {},
-        ),
-        "Estimator": (components["LogisticRegression"], {"C": 4.0}),
-    }
-    d2 = {
-        "Preprocessor__ColumnTransformer__Categorical__CategoricalEncoder": (
-            components["OneHotEncoder"],
-            {},
-        ),
-        "Preprocessor__ColumnTransformer__Numeric__ScalerNormalizer": (
-            components["StandardScaler"],
-            {},
-        ),
-        "Estimator": (components["LogisticRegression"], {"C": 1.0}),
-    }
-
     pipeline = TopPipeline(
         steps=pipeline_steps,
         # preset_configurations=[d, d2]
     )
+    config = ComponentConfig(
+        level=level,
+        problem_type=problem_type,
+        categorical_columns=categorical_columns,
+        numeric_columns=numeric_columns,
+        X=X,
+        y=y,
+    )
     pipeline.remove_invalid_components(
-        pipeline_config=ComponentConfig(
-            level=level,
-            problem_type=problem_type,
-            categorical_columns=categorical_columns,
-            numeric_columns=numeric_columns,
-            X=X,
-            y=y,
-        ),
+        pipeline_config=config,
         current_stage=AutoMLStage.PREPROCESSING,
     )
-
+    # TODO: move to trainer
+    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
     return pipeline

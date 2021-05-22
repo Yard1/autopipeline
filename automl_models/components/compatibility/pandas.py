@@ -1,20 +1,11 @@
 from scipy.sparse import issparse
 import pandas as pd
-from pandas.api.types import is_categorical_dtype
-from ...utils import validate_type
+from ..utils import validate_type
+from ..transformers.utils import categorical_column_to_int_categories
 
 
-def col_categorical_to_int(column):
-    if is_categorical_dtype(column.dtype):
-        try:
-            return column.astype(int)
-        except ValueError:
-            return column
-    return column
-
-
-def categorical_to_int(df):
-    return df.apply(col_categorical_to_int, axis=1)
+def categorical_columns_to_int_categories(df):
+    return df.apply(categorical_column_to_int_categories)
 
 
 class PandasSeriesTransformerMixin:
@@ -23,19 +14,19 @@ class PandasSeriesTransformerMixin:
             X = X.squeeze(axis=1)
         try:
             self.name_ = X.name
-        except:
+        except Exception:
             self.name_ = None
         validate_type(X, "X", pd.Series)
         try:
-            return super().fit(X.to_numpy(), **fit_params)
+            return super().fit(X, **fit_params)
         except TypeError:
-            return super().fit(X.to_numpy())
+            return super().fit(X)
 
     def transform(self, X):
         if isinstance(X, pd.DataFrame) and X.shape[1] == 1:
             X = X.squeeze(axis=1)
         validate_type(X, "X", pd.Series)
-        Xt = super().transform(col_categorical_to_int(X).to_numpy())
+        Xt = super().transform(categorical_column_to_int_categories(X))
         if not isinstance(Xt, pd.Series):
             if issparse(Xt):
                 Xt_s = pd.Series.sparse.from_coo(Xt)
@@ -48,8 +39,7 @@ class PandasSeriesTransformerMixin:
                     index=self.get_index(Xt, X),
                     name=self.get_name(Xt, X),
                 )
-            Xt = Xt.infer_objects()
-            Xt = Xt.astype(self.get_dtype(Xt, X))
+        Xt = Xt.astype(self.get_dtype(Xt, X))
         return Xt
 
     def get_index(self, Xt, X, y=None):
@@ -68,13 +58,13 @@ class PandasDataFrameTransformerMixin:
             X = pd.DataFrame(X)
         try:
             self.columns_ = X.columns
-        except:
+        except Exception:
             self.columns_ = None
         validate_type(X, "X", pd.DataFrame)
         try:
-            return super().fit(categorical_to_int(X).to_numpy(), y=y, **fit_params)
+            return super().fit(categorical_columns_to_int_categories(X), y=y, **fit_params)
         except TypeError:
-            return super().fit(categorical_to_int(X).to_numpy())
+            return super().fit(categorical_columns_to_int_categories(X))
 
     def transform(self, X):
         if isinstance(X, pd.Series):
@@ -85,7 +75,7 @@ class PandasDataFrameTransformerMixin:
                 f"Column mismatch. Expected {self.columns_}, got {X.columns}"
             )
         X = X[self.columns_]
-        Xt = super().transform(categorical_to_int(X).to_numpy())
+        Xt = super().transform(categorical_columns_to_int_categories(X))
 
         if not isinstance(Xt, pd.DataFrame):
             if issparse(Xt):
@@ -96,8 +86,7 @@ class PandasDataFrameTransformerMixin:
                 Xt = pd.DataFrame(
                     Xt, index=self.get_index(Xt, X), columns=self.get_columns(Xt, X)
                 )
-            Xt = Xt.infer_objects()
-            Xt = Xt.astype(self.get_dtypes(Xt, X))
+        Xt = Xt.astype(self.get_dtypes(Xt, X))
         return Xt
 
     def get_index(self, Xt, X, y=None):

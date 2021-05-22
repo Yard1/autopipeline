@@ -26,6 +26,9 @@ class Distribution:
     def get_optuna(self):
         raise NotImplementedError("This is an abstract class.")
 
+    def get_optuna_dist(self):
+        raise NotImplementedError("This is an abstract class.")
+
     def get_hyperopt(self, label):
         raise NotImplementedError("This is an abstract class.")
 
@@ -62,12 +65,25 @@ class UniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     log: bool, default = False:
         If True, the distribution will be log-uniform.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
     """
 
-    def __init__(self, lower: float, upper: float, log: bool = False):
+    def __init__(
+        self,
+        lower: float,
+        upper: float,
+        log: bool = False,
+        cost_related: bool = True,
+        cost_bounds: str = "both",
+    ):
         self.lower = lower
         self.upper = upper
         self.log = log
+        self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -88,6 +104,14 @@ class UniformDistribution(Distribution):
             return optuna_param.suggest_loguniform(label, self.lower, self.upper)
         else:
             return optuna_param.suggest_uniform(label, self.lower, self.upper)
+
+    def get_optuna_dist(self):
+        from optuna.distributions import LogUniformDistribution, UniformDistribution
+
+        if self.log:
+            return LogUniformDistribution(self.lower, self.upper)
+        else:
+            return UniformDistribution(self.lower, self.upper)
 
     def get_hyperopt(self, label):
         from hyperopt import hp
@@ -140,12 +164,25 @@ class IntUniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     log: bool, default = False:
         If True, the distribution will be log-uniform.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
     """
 
-    def __init__(self, lower: int, upper: int, log: bool = False):
+    def __init__(
+        self,
+        lower: int,
+        upper: int,
+        log: bool = False,
+        cost_related: bool = True,
+        cost_bounds: str = "both",
+    ):
         self.lower = lower
         self.upper = upper
         self.log = log
+        self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -166,6 +203,17 @@ class IntUniformDistribution(Distribution):
             return optuna_param.suggest_int(label, self.lower, self.upper, log=True)
         else:
             return optuna_param.suggest_int(label, self.lower, self.upper, log=False)
+
+    def get_optuna_dist(self):
+        from optuna.distributions import (
+            IntLogUniformDistribution,
+            IntUniformDistribution,
+        )
+
+        if self.log:
+            return IntLogUniformDistribution(self.lower, self.upper)
+        else:
+            return IntUniformDistribution(self.lower, self.upper)
 
     def get_hyperopt(self, label):
         from hyperopt import hp
@@ -198,48 +246,12 @@ class IntUniformDistribution(Distribution):
             )
 
     def get_tune(self):
-        from ray.tune.sample import Integer
-        from ray.tune.sample import LogUniform
-
-        class LogUniformInteger(Integer):
-            class _LogUniform(LogUniform):
-                def sample(self, domain: "Integer", spec=None, size: int = 1):
-                    assert (
-                        domain.lower > 0
-                    ), "LogUniform needs a lower bound greater than 0"
-                    assert (
-                        0 < domain.upper < float("inf")
-                    ), "LogUniform needs a upper bound greater than 0"
-                    logmin = np.log(domain.lower) / np.log(self.base)
-                    logmax = np.log(domain.upper) / np.log(self.base)
-
-                    items = self.base ** (np.random.uniform(logmin, logmax, size=size))
-                    items = np.round(items).astype(int)
-                    return items if len(items) > 1 else domain.cast(items[0])
-
-            def loguniform(self, base: float = 10):
-                if not self.lower > 0:
-                    raise ValueError(
-                        "LogUniform requires a lower bound greater than 0."
-                        f"Got: {self.lower}. Did you pass a variable that has "
-                        "been log-transformed? If so, pass the non-transformed value "
-                        "instead."
-                    )
-                if not 0 < self.upper < float("inf"):
-                    raise ValueError(
-                        "LogUniform requires a upper bound greater than 0. "
-                        f"Got: {self.lower}. Did you pass a variable that has "
-                        "been log-transformed? If so, pass the non-transformed value "
-                        "instead."
-                    )
-                new = copy(self)
-                new.set_sampler(self._LogUniform(base))
-                return new
+        from ray import tune
 
         if self.log:
-            return LogUniformInteger(self.lower, self.upper).loguniform(10)
+            return tune.lograndint(self.lower, self.upper)
         else:
-            return Integer(self.lower, self.upper).uniform()
+            return tune.randint(self.lower, self.upper)
 
     def __repr__(self):
         return f"IntUniformDistribution(lower={self.lower}, upper={self.upper}, log={self.log})"
@@ -257,6 +269,10 @@ class DiscreteUniformDistribution(Distribution):
         Inclusive upper bound of distribution.
     q: float = None:
         Step. If None, will be equal to UniformDistribution.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
 
     Warnings
     --------
@@ -264,10 +280,19 @@ class DiscreteUniformDistribution(Distribution):
     `get_skopt()` will return a standard uniform distribution.
     """
 
-    def __init__(self, lower: int, upper: int, q: Optional[float] = None):
+    def __init__(
+        self,
+        lower: int,
+        upper: int,
+        q: Optional[float] = None,
+        cost_related: bool = True,
+        cost_bounds: str = "both",
+    ):
         self.lower = lower
         self.upper = upper
         self.q = q
+        self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
 
     def _validate_default(self, default):
         if not (self.lower <= default <= self.upper):
@@ -285,6 +310,11 @@ class DiscreteUniformDistribution(Distribution):
         return optuna_param.suggest_discrete_uniform(
             label, self.lower, self.upper, self.q
         )
+
+    def get_optuna_dist(self):
+        from optuna.distributions import DiscreteUniformDistribution
+
+        return DiscreteUniformDistribution(self.lower, self.upper, step=self.q)
 
     def get_hyperopt(self, label):
         from hyperopt import hp
@@ -328,14 +358,43 @@ class CategoricalDistribution(Distribution):
     ----------
     values: list or other iterable
         Possible values.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
 
     Warnings
     --------
     - `None` is not supported  as a value for ConfigSpace.
     """
 
-    def __init__(self, values):
-        self.values = list(values)
+    None_str = "!None"
+
+    def __init__(self, values, cost_related: bool = True, cost_bounds: str = "both"):
+        self.values = [x if x is not None else self.None_str for x in values]
+        try:
+            self.values = list(set(self.values))
+        except:
+            new_values = []
+            for x in self.values:
+                if x not in new_values:
+                    new_values.append(x)
+            self.values = new_values
+        self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
+
+    @property
+    def default(self):
+        if not hasattr(self, "_default"):
+            raise KeyError("default value has not been set.")
+        return self._default
+
+    @default.setter
+    def default(self, val):
+        if val is None:
+            val = self.None_str
+        self._validate_default(val)
+        self._default = val
 
     def _validate_default(self, default):
         if not default in self.values:
@@ -352,6 +411,11 @@ class CategoricalDistribution(Distribution):
     def get_optuna(self, label):
         return optuna_param.suggest_categorical(label, self.values)
 
+    def get_optuna_dist(self):
+        from optuna.distributions import CategoricalDistribution
+
+        return CategoricalDistribution(self.values)
+
     def get_hyperopt(self, label):
         from hyperopt import hp
 
@@ -363,14 +427,13 @@ class CategoricalDistribution(Distribution):
         try:
             return CSH.CategoricalHyperparameter(
                 name=label,
-                choices=[x if x is not None else "!None" for x in self.values],
-                default_value=self.default if self.default is not None else "!None",
+                choices=self.values,
+                default_value=self.default
+                if self.default is not None
+                else self.None_str,
             )
         except KeyError:
-            return CSH.CategoricalHyperparameter(
-                name=label,
-                choices=[x if x is not None else "!None" for x in self.values],
-            )
+            return CSH.CategoricalHyperparameter(name=label, choices=self.values)
 
     def get_tune(self):
         from ray import tune
@@ -381,12 +444,53 @@ class CategoricalDistribution(Distribution):
         return f"CategoricalDistribution(values={self.values})"
 
 
+class FunctionDistribution(Distribution):
+    """
+    Dynamic distribution from function.
+
+    Parameters
+    ----------
+    function: callable:
+        Callable that returns a Distribution.
+    cost_related: bool, default = True:
+        Whether the parameter is cost-related.
+    cost_bounds: ['both', 'lower', 'upper'], default = 'both':
+        The bounds to enforce for cost. Ignored is `cost_related`=False
+
+    Warnings
+    --------
+    - `None` is not supported  as a value for ConfigSpace.
+    """
+
+    def __init__(self, function, cost_related: bool = True, cost_bounds: str = "both"):
+        self.function = function
+        self.cost_related = cost_related
+        self.cost_bounds = cost_bounds
+
+    def _validate_default(self, default):
+        return True
+
+    def __call__(self, config, stage):
+        dist: Distribution = self.function(config, stage)
+        dist.cost_related = self.cost_related
+        dist.cost_bounds = self.cost_bounds
+        try:
+            dist.default = self.default
+        except KeyError:
+            pass
+        return dist
+
+
 def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_skopt() for k, v in distributions.items()}
 
 
-def get_optuna_distributions(distributions: Dict[str, Distribution]) -> dict:
+def get_optuna_trial_suggestions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_optuna(k) for k, v in distributions.items()}
+
+
+def get_optuna_distributions(distributions: Dict[str, Distribution]) -> dict:
+    return {k: v.get_optuna_dist() for k, v in distributions.items()}
 
 
 def get_hyperopt_distributions(distributions: Dict[str, Distribution]) -> dict:

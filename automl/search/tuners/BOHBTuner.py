@@ -21,6 +21,7 @@ from ..distributions import CategoricalDistribution
 from ...problems import ProblemType
 from ...components.component import Component, ComponentConfig
 from ...search.stage import AutoMLStage
+from ...utils.display import IPythonDisplay
 
 # from hpbandster.optimizers.config_generators.bohb import BOHB
 from .BOHB import BOHBConditional as BOHB
@@ -83,7 +84,7 @@ class ConditionalTuneBOHB(TuneBOHB):
         self.bohber = BOHB(self._space, **bohb_config)
 
     @staticmethod
-    def convert_search_space(spec, seed=None, use_default: bool = False):
+    def convert_search_space(spec, seed=None):
         cs = CS.ConfigurationSpace(seed=seed)
         spec = copy(spec)
         estimator_name, estimators = spec.get_estimator_distribution()
@@ -192,6 +193,7 @@ class BOHBTuner(RayTuneTuner):
         num_samples: int = 100,
         early_stopping=True,
         cache=False,
+        display: Optional[IPythonDisplay] = None,
         **tune_kwargs,
     ) -> None:
         assert early_stopping, "early_stopping must be True for BOHB"
@@ -203,6 +205,7 @@ class BOHBTuner(RayTuneTuner):
             random_state=random_state,
             num_samples=num_samples,
             cache=cache,
+            display=display,
             **tune_kwargs,
         )
 
@@ -229,7 +232,7 @@ class BOHBTuner(RayTuneTuner):
 
         self._tune_kwargs["scheduler"] = (
             HyperBandForBOHB(
-                metric="mean_test_score",
+                metric="mean_validation_score",
                 mode="max",
                 reduction_factor=reduction_factor,
                 max_t=self.early_stopping_splits_,
@@ -240,9 +243,9 @@ class BOHBTuner(RayTuneTuner):
         super()._pre_search(X, y, groups=groups)
         self._tune_kwargs["search_alg"] = ConditionalTuneBOHB(
             space=self.pipeline_blueprint,
-            metric="mean_test_score",
+            metric="mean_validation_score",
             mode="max",
-            points_to_evaluate=self.default_grid,
+            points_to_evaluate=self.default_grid_,
             seed=self.random_state,
         )
 

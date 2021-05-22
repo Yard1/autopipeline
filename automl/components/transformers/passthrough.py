@@ -7,6 +7,7 @@ from ...search.stage import AutoMLStage
 class Passthrough(Transformer):
     _component_class = None
     _component_level = ComponentLevel.NECESSARY
+    _allow_duplicates = True
 
     def __init__(
         self,
@@ -16,6 +17,9 @@ class Passthrough(Transformer):
     ) -> None:
         self.validity_condition = validity_condition
         super().__init__(tuning_grid=tuning_grid, **parameters)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.validity_condition})"
 
     def __call__(
         self,
