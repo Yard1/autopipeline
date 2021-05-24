@@ -21,14 +21,25 @@ from ...utils import validate_type
 from automl_models.components.flow.column_transformer import make_column_selector
 
 
-def _scaler_passthrough_condition(config, stage):
+def _scaler_passthrough_condition(config, stage) -> bool:
     return config.estimator is None or not isinstance(
         config.estimator, (LinearModelEstimator, KNNEstimator)
     )
 
 
+def _column_is_binary_condition(column) -> bool:
+    return len(column.cat.categories) <= 2
+
+
 categorical_selector = make_column_selector(dtype_include="category")
-numeric_selector = make_column_selector(dtype_exclude="category")
+numeric_selector = make_column_selector(dtype_exclude=["category", "bool"])
+
+categorical_binary_selector = make_column_selector(
+    _column_is_binary_condition, dtype_include="category"
+)
+categorical_not_binary_selector = make_column_selector(
+    _column_is_binary_condition, dtype_include="category", negate_condition=True
+)
 
 
 def create_pipeline_blueprint(
@@ -63,6 +74,9 @@ def create_pipeline_blueprint(
     scalers_normalizers = {
         "CombinedScalerTransformer": CombinedScalerTransformer(),
         "MinMaxScaler": MinMaxScaler(),
+    }
+    binary_encoders = {
+        "BinaryEncoder": BinaryEncoder(),
     }
     categorical_encoders = {
         "OneHotEncoder": OneHotEncoder(),
@@ -116,6 +130,7 @@ def create_pipeline_blueprint(
         **imbalance,
         **imputers,
         **scalers_normalizers,
+        **binary_encoders,
         **categorical_encoders,
         **oridinal_encoder,
         **feature_selectors,
@@ -144,14 +159,26 @@ def create_pipeline_blueprint(
             ),
         ),
         (
-            "ColumnEncodingScaling",
+            "ColumnEncoding",
             ColumnTransformer(
                 transformers=[
                     (
+                        "BinaryEncoder",
+                        [components["BinaryEncoder"]],
+                        categorical_binary_selector,
+                    ),
+                    (
                         "CategoricalEncoder",
                         list(categorical_encoders.values()),
-                        categorical_selector,
+                        categorical_not_binary_selector,
                     ),
+                ],
+            ),
+        ),
+        (
+            "ColumnScaling",
+            ColumnTransformer(
+                transformers=[
                     (
                         "ScalerNormalizer",
                         list(scalers_normalizers.values()),

@@ -12,7 +12,7 @@ from automl_models.components.transformers.imputer.simple_imputer import (
 class SimpleNumericImputer(Imputer):
     _component_class = PandasSimpleImputer
     _default_parameters = {
-        "strategy": "mean",
+        "strategy": "median",
         "fill_value": 0,
         "verbose": 0,
         "copy": True,

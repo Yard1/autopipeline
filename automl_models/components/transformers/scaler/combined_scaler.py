@@ -2,6 +2,7 @@ import numpy as np
 from ...flow.column_transformer import PandasColumnTransformer, make_column_selector
 from .quantile_transformer import PandasQuantileTransformer
 from .robust_scaler import PandasRobustScaler
+from .standard_scaler import PandasStandardScaler
 
 
 def _scaler_skewness_condition(column, skewness_threshold=0.99):
@@ -21,7 +22,7 @@ class PandasCombinedScalerTransformer(PandasColumnTransformer):
         self.transformers = [
             (
                 "Scaler",
-                PandasRobustScaler(),
+                PandasStandardScaler(),
                 make_column_selector(
                     _scaler_skewness_condition,
                     negate_condition=True,

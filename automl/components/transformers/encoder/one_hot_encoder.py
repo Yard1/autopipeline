@@ -42,10 +42,10 @@ class OneHotEncoder(Encoder):
                     [
                         len(config.X[col].cat.categories)
                         if len(config.X[col].cat.categories) > 2
-                        else 1
+                        else 0
                         for col in config.X.select_dtypes("category")
                     ]
                 )
-                <= config.X.shape[1]
+                <= config.X.shape[1] * 2
             )
         )

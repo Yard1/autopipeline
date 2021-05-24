@@ -167,9 +167,9 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        # self.dir = (
-        #    3  # max(self.dim // 4, 2)  # max number of trials without improvement
-        # )
+        #self.dir = (
+           #max(self.dim // 4, 2)  # max number of trials without improvement
+        #)
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -664,7 +664,7 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_AFTER = 1000
+    _FORCE_GS_AFTER = 100
     _MAX_GS_RETRIES = 2
 
     def __init__(
@@ -1181,7 +1181,7 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _select_estimator(self, local_threads):
         if not self._estimator_states or not local_threads:
-            return None
+            return None, None
         inv = []
         estimators_in_threads = {
             thread_tuple[1].estimator
@@ -1223,16 +1223,18 @@ class ConditionalBlendSearch(BlendSearch):
             )
             inv.append(1 / estimated_cost)
         s = sum(inv)
+        inv = [i/s for i in inv]
         p = self._random.rand()
         q = 0
         estimator_list = list(self._estimator_states.keys())
-        print(f"estimator priorities: {dict(zip(estimator_list, inv))}")
+        prios = dict(zip(estimator_list, inv))
+        print(f"estimator priorities: {prios}")
         for i in range(len(inv)):
             if inv[i]:
-                q += inv[i] / s
+                q += inv[i]
                 if p < q:
-                    return estimator_list[i]
-        return None
+                    return estimator_list[i], prios
+        return None, None
 
     # TODO consider estimator selection as in https://github.com/microsoft/FLAML/blob/3083229e402bf9cddfed009b08c662abcf229d86/flaml/automl.py#L1227
     def _select_thread(self) -> Tuple:
@@ -1278,7 +1280,7 @@ class ConditionalBlendSearch(BlendSearch):
             key=lambda x: x[2],
         )
 
-        estimator_to_use = self._select_estimator(local_threads_by_priority)
+        estimator_to_use, estimator_priorities = self._select_estimator(local_threads_by_priority)
 
         if not estimator_to_use:
             local_threads_by_priority_estimator_only = local_threads_by_priority
@@ -1288,14 +1290,26 @@ class ConditionalBlendSearch(BlendSearch):
                 for thread_tuple in local_threads_by_priority
                 if thread_tuple[1].estimator == estimator_to_use
             ]
+
+        local_threads_by_priority_with_estimator = sorted(
+            [
+                (thread_id,
+                thread,
+                thread_priority,
+                thread_priority * estimator_priorities[thread.estimator]) for thread_id, thread, thread_priority in local_threads_by_priority
+            ],
+            reverse=True,
+            key=lambda x: x[3],
+        )
         print(f"global search priority: {priority1}")
-        print(local_threads_by_priority)
+        #print(local_threads_by_priority)
+        print(local_threads_by_priority_with_estimator)
         print(local_threads_by_priority_estimator_only)
 
         if local_threads_by_priority_estimator_only:
             top_thread_id = (
                 0
-                if priority1 >= local_threads_by_priority[0][2]
+                if priority1 >= local_threads_by_priority_with_estimator[0][2]
                 else local_threads_by_priority_estimator_only[0][0]
             )
             backup_thread_id = local_threads_by_priority_estimator_only[0][0]

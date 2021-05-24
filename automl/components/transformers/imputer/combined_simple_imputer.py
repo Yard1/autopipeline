@@ -14,7 +14,7 @@ def get_numeric_strategy(config, space):
         return CategoricalDistribution(["mean", "median"])
     missing_values = X.select_dtypes("number").isna().sum().sum()
     if missing_values == 0:
-        return CategoricalDistribution(["mean"])
+        return CategoricalDistribution(["median"])
     return CategoricalDistribution(["mean", "median"])
 
 
@@ -31,7 +31,7 @@ def get_categorical_strategy(config, space):
 class CombinedSimpleImputer(Imputer):
     _component_class = PandasCombinedSimpleImputer
     _default_parameters = {
-        "numeric_strategy": "mean",
+        "numeric_strategy": "median",
         "numeric_fill_value": 0,
         "categorical_strategy": "most_frequent",
         "categorical_fill_value": "missing_value",

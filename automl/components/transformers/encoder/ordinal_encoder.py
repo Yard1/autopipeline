@@ -9,6 +9,26 @@ from automl_models.components.transformers.encoder.ordinal_encoder import (
 )
 
 
+class BinaryEncoder(Encoder):
+    _component_class = PandasOrdinalEncoder
+    _default_parameters = {
+        "categories": "auto",
+        "handle_unknown": "use_encoded_value",
+        "dtype": bool,
+        "unknown_value": None,
+    }
+    _allowed_dtypes = {DataType.CATEGORICAL}
+    _component_level = ComponentLevel.NECESSARY
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        if config is None:
+            return True
+        super_check = super().is_component_valid(config, stage)
+        return super_check and (
+            config.estimator is None
+            or not getattr(config.estimator, "_has_own_cat_encoding", False)
+        )
+
 class OrdinalEncoder(Encoder):
     _component_class = PandasOrdinalEncoder
     _default_parameters = {
