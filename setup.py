@@ -11,7 +11,7 @@ with open("requirements.txt") as f:
     required = f.read().splitlines()
 
 setup(
-    name="AutoPipeline",
+    name="autopipeline",
     version="0.1.0",
     description="AutoPipeline",
     long_description=readme(),
