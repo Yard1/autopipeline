@@ -343,8 +343,6 @@ class SklearnTrainable(Trainable):
         ]
 
         results = ray.get(results_futures)
-        for future in results_futures:
-            del future
         del results_futures
 
         # For callabe scoring, the return type is only know after calling. If the

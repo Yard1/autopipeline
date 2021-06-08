@@ -9,7 +9,7 @@ flake8 = "*"
 
 [packages]
 ipython = "*"
-scikit-learn = "*"
+scikit-learn = ">=0.24.0"
 pandas = "*"
 optuna = "*"
 sklearn-pandas = "*"
@@ -17,7 +17,7 @@ imbalanced-learn = "*"
 deslib = "*"
 category-encoders = "*"
 catboost = "*"
-lightgbm = "==3.0.0"
+lightgbm = ">=3.2.0"
 xgboost = "*"
 configspace = "*"
 hpbandster = "*"
@@ -25,15 +25,16 @@ shap = "*"
 boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
 flaml = "*"
 hebo = "*"
-fastai = "*"
 xxhash = "*"
 lz4 = "*"
 ipywidgets = "*"
 plotly = "*"
 tabulate = "*"
-tensorboardx = "*"
-deeptables = {extras = ["gpu"],version = "*"}
-ray = {file = "https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-2.0.0.dev0-cp38-cp38-manylinux2014_x86_64.whl"}
+openml = "*"
+scikit-learn-intelex = "*"
+ray = {extras = ["tune"], version = "*"}
+spacy = "==2.3.7"
+fastai = "*"
 
 [requires]
 python_version = "3.8"

@@ -261,6 +261,7 @@ class Trainer:
             scoring=self.scoring_dict,
             target_metric=self.target_metric,
             display=self._displays["tuner_plot_display"],
+            **self.tune_kwargs,
         )
         self.tuners_.append(tuner)
         gc.collect()

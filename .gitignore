@@ -1,5 +1,6 @@
 datasets
 joblib
+catboost_info
 
 Test.ipynb
 .vscode

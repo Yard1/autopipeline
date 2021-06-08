@@ -25,7 +25,7 @@
 """
 import collections
 import pandas as pd
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Callable
 import numpy as np
 import traceback
 import pickle
@@ -681,6 +681,10 @@ class ConditionalBlendSearch(BlendSearch):
         reduction_factor: Optional[float] = None,
         resources_per_trial: Optional[dict] = None,
         global_search_alg: Optional[Searcher] = None,
+        config_constraints: Optional[
+            List[Tuple[Callable[[dict], float], str, float]]] = None,
+        metric_constraints: Optional[
+            List[Tuple[str, str, float]]] = None,
         time_attr: str = "time_total_s",
         seed: Optional[int] = None,
         use_extended: bool = False,
@@ -688,6 +692,8 @@ class ConditionalBlendSearch(BlendSearch):
         mem_size=None,
     ):
         self._metric, self._mode = metric, mode
+        self._config_constraints = config_constraints
+        self._metric_constraints = metric_constraints
         self._conditional_space = get_conditions(
             space, to_str=True, use_extended=use_extended
         )

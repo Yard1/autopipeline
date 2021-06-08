@@ -376,8 +376,7 @@ class RayTuneTuner(Tuner):
 
             self._get_objects_from_ray_store(object_store)
 
-            ray.kill(object_store)
-            del object_store
+            ray.kill(object_store, no_restart=True)
 
             gc.collect()
 
