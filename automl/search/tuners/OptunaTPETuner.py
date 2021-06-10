@@ -343,6 +343,7 @@ class OptunaTPETuner(RayTuneTuner):
         cv,
         random_state,
         num_samples: int = 100,
+        secondary_pipeline_blueprint=None,
         early_stopping=True,
         early_stopping_brackets=1,
         cache=False,
@@ -363,6 +364,7 @@ class OptunaTPETuner(RayTuneTuner):
             display=display,
             max_concurrent=max_concurrent,
             trainable_n_jobs=trainable_n_jobs,
+            secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             **tune_kwargs,
         )
 

@@ -8,6 +8,7 @@ import gc
 from abc import ABC
 
 import ray
+import ray.exceptions
 from ray import tune
 
 from sklearn.model_selection import cross_validate
@@ -48,6 +49,7 @@ class Tuner(ABC):
         use_extended: bool = False,
         num_samples: int = -1,
         time_budget_s: int = 600,
+        secondary_pipeline_blueprint=None,
         target_metric=None,
         scoring=None,
         display: Optional[IPythonDisplay] = None,
@@ -65,6 +67,7 @@ class Tuner(ABC):
 
         self.target_metric = target_metric
         self.scoring = scoring
+        self.secondary_pipeline_blueprint = secondary_pipeline_blueprint
 
     def _get_single_default_hyperparams(self, components: dict, grid: list) -> dict:
         hyperparams = {}
@@ -127,7 +130,7 @@ class Tuner(ABC):
             for components in ParameterGrid(default_grid)
         ]
 
-        for step_name, classes in self.pipeline_blueprint.extra_configs.items():
+        for step_name, classes in pipeline_blueprint.extra_configs.items():
             extra_config_presets = []
             for config in default_grid_list:
                 if type(config.get(step_name, None)) in classes:
@@ -164,13 +167,20 @@ class Tuner(ABC):
         ]
         self.default_grid_ += preset_configurations
 
-        self._remove_duplicates_from_default_grid()
+        if self.secondary_pipeline_blueprint:
+            self.secondary_grid_ = self._get_default_components(self.secondary_pipeline_blueprint)
+        else:
+            self.secondary_grid_ = []
+
+        self._remove_duplicates_from_grids()
 
         self._set_up_early_stopping(X, y, groups=groups)
 
-    def _remove_duplicates_from_default_grid(self):
+    def _remove_duplicates_from_grids(self):
         default_grid_list_dict = []
         default_grid_list_no_dups = []
+        secondary_grid_list_dict = []
+        secondary_grid_list_no_dups = []
         for config in self.default_grid_:
             str_config = {
                 k: str(v) for k, v in config.items() if not isinstance(v, Passthrough)
@@ -178,7 +188,18 @@ class Tuner(ABC):
             if str_config not in default_grid_list_dict:
                 default_grid_list_dict.append(str_config)
                 default_grid_list_no_dups.append(config)
+
+        if self.secondary_grid_:
+            for config in self.secondary_grid_:
+                str_config = {
+                    k: str(v) for k, v in config.items() if not isinstance(v, Passthrough)
+                }
+                if str_config not in default_grid_list_dict and str_config not in secondary_grid_list_dict:
+                    secondary_grid_list_dict.append(str_config)
+                    secondary_grid_list_no_dups.append(config)
+
         self.default_grid_ = default_grid_list_no_dups
+        self.secondary_grid_ = secondary_grid_list_no_dups
 
     def _set_up_early_stopping(self, X, y, groups=None):
         pass
@@ -200,6 +221,7 @@ class RayTuneTuner(Tuner):
         use_extended: bool = False,
         num_samples: int = -1,
         time_budget_s: int = 600,
+        secondary_pipeline_blueprint=None,
         target_metric=None,
         scoring=None,
         cache=False,
@@ -237,6 +259,7 @@ class RayTuneTuner(Tuner):
             time_budget_s=time_budget_s,
             scoring=scoring,
             target_metric=target_metric,
+            secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             display=display,
         )
 
@@ -268,23 +291,27 @@ class RayTuneTuner(Tuner):
         # this is just to ensure constant order
         self._shuffle_default_grid()
         _, self.component_strings_, self.hyperparameter_names_ = get_all_tunable_params(
-            self.pipeline_blueprint, use_extended=self.use_extended
+            self.secondary_pipeline_blueprint if self.secondary_pipeline_blueprint else self.pipeline_blueprint, use_extended=self.use_extended
         )
         for conf in self.default_grid_:
             for k, v in conf.items():
                 if str(v) in self.component_strings_:
                     conf[k] = str(v)
+        for conf in self.secondary_grid_:
+            for k, v in conf.items():
+                if str(v) in self.component_strings_:
+                    conf[k] = str(v)
 
-    def _get_objects_from_ray_store(self, object_store):
+    def _get_objects_from_ray_store(self, ray_cache):
         self.fold_predictions_ = {}
         self.test_predictions_ = {}
         self.fitted_estimators_ = {}
 
         logger.debug("getting estimators from ray object store")
-        trial_ids = ray.get(object_store.get_all_keys.remote("fitted_estimators"))
+        trial_ids = ray.get(ray_cache.get_all_keys.remote("fitted_estimators"))
         fitted_estimators = ray.get(
             [
-                object_store.get.remote(
+                ray_cache.get.remote(
                     key, "fitted_estimators", pop=True, decompress=False
                 )
                 for key in trial_ids
@@ -294,10 +321,10 @@ class RayTuneTuner(Tuner):
         self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
 
         logger.debug("getting fold predictions from ray object store")
-        trial_ids = ray.get(object_store.get_all_keys.remote("fold_predictions"))
+        trial_ids = ray.get(ray_cache.get_all_keys.remote("fold_predictions"))
         fold_predictions = ray.get(
             [
-                object_store.get.remote(
+                ray_cache.get.remote(
                     key, "fold_predictions", pop=True, decompress=False
                 )
                 for key in trial_ids
@@ -310,10 +337,10 @@ class RayTuneTuner(Tuner):
             self.fold_predictions_[key] = fold_predictions.get(key, {})
 
         logger.debug("getting test predictions from ray object store")
-        trial_ids = ray.get(object_store.get_all_keys.remote("test_predictions"))
+        trial_ids = ray.get(ray_cache.get_all_keys.remote("test_predictions"))
         test_predictions = ray.get(
             [
-                object_store.get.remote(
+                ray_cache.get.remote(
                     key, "test_predictions", pop=True, decompress=False
                 )
                 for key in trial_ids
@@ -368,15 +395,19 @@ class RayTuneTuner(Tuner):
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
         ):
-            object_store = RayStore.options(name="object_store").remote()
+            try:
+                ray_cache = RayStore.options(name="ray_cache").remote()
+            except ray.exceptions.RayActorError:
+                ray.kill(ray.get_actor("ray_cache"), no_restart=True)
+                ray_cache = RayStore.options(name="ray_cache").remote()
 
             self.analysis_ = tune.run(**tune_kwargs)
 
             gc.collect()
 
-            self._get_objects_from_ray_store(object_store)
+            self._get_objects_from_ray_store(ray_cache)
 
-            ray.kill(object_store, no_restart=True)
+            ray.kill(ray_cache, no_restart=True)
 
             gc.collect()
 

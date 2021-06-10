@@ -20,7 +20,7 @@ lightgbm_imputer_config = {
     "n_estimators": 1000,
     "class_weight": "balanced",
     "silent": True,
-    "learning_rate": 0.05,
+    #"learning_rate": 0.05,
     "early_stopping_condition": 5000,
 }
 

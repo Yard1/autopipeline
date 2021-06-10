@@ -88,7 +88,7 @@ class LGBMClassifierWithAutoEarlyStopping(LGBMClassifier):
         eval_init_score=None,
         eval_metric=None,
         early_stopping_rounds=None,
-        verbose=True,
+        verbose=False,
         feature_name="auto",
         categorical_feature="auto",
         callbacks=None,
@@ -114,6 +114,7 @@ class LGBMClassifierWithAutoEarlyStopping(LGBMClassifier):
                     random_state=self.random_state,
                     shuffle=True,
                 )
+            assert len(X_eval) > 0
             eval_set = (X_eval, y_eval)
             eval_metric = self.scoring if self.scoring != "loss" else None
             early_stopping_rounds = self.n_iter_no_change
@@ -208,7 +209,7 @@ class LGBMRegressorWithAutoEarlyStopping(LGBMRegressor):
         eval_init_score=None,
         eval_metric=None,
         early_stopping_rounds=None,
-        verbose=True,
+        verbose=False,
         feature_name="auto",
         categorical_feature="auto",
         callbacks=None,
@@ -224,6 +225,7 @@ class LGBMRegressorWithAutoEarlyStopping(LGBMRegressor):
                 random_state=self.random_state,
                 shuffle=True,
             )
+            assert len(X_eval) > 0
             eval_set = (X_eval, y_eval)
             eval_metric = self.scoring if self.scoring != "loss" else None
             early_stopping_rounds = self.n_iter_no_change

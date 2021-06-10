@@ -90,19 +90,6 @@ class CachingPool(Pool):
         print(f"accessing {obj_hash} ({type(obj)}) from multiprocessing cache")
         return multiprocessing_cache.get_reference(obj_hash)
 
-    def terminate(self):
-        """Close the pool.
-
-        Prevents any more tasks from being submitted on the pool and stops
-        outstanding work.
-        """
-
-        if not self._closed:
-            self.close()
-        for actor, _ in self._actor_pool:
-            ray.kill(actor)
-            del actor
-
 
 class CachingRayBackend(RayBackend):
     def configure(

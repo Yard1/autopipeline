@@ -167,9 +167,9 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        #self.dir = (
-           #max(self.dim // 4, 2)  # max number of trials without improvement
-        #)
+        # self.dir = (
+        # max(self.dim // 4, 2)  # max number of trials without improvement
+        # )
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -237,7 +237,7 @@ class PatchedFLOW2(FLOW2):
             limit_space_to_init_config=limit_space_to_init_config,
             cost_attr=self.cost_attr,
             tol=self._tol,
-            hyperparameter_names=self._hyperparameter_names
+            hyperparameter_names=self._hyperparameter_names,
         )
         flow2.best_obj = obj * self.metric_op  # minimize internally
         flow2.cost_incumbent = cost
@@ -673,6 +673,7 @@ class ConditionalBlendSearch(BlendSearch):
         mode: Optional[str] = None,
         space: Optional[dict] = None,
         points_to_evaluate: Optional[List[Dict]] = None,
+        secondary_points_to_evaluate: Optional[List[Dict]] = None,
         low_cost_partial_config: Optional[dict] = None,
         cat_hp_cost: Optional[dict] = None,
         prune_attr: Optional[str] = None,
@@ -682,9 +683,9 @@ class ConditionalBlendSearch(BlendSearch):
         resources_per_trial: Optional[dict] = None,
         global_search_alg: Optional[Searcher] = None,
         config_constraints: Optional[
-            List[Tuple[Callable[[dict], float], str, float]]] = None,
-        metric_constraints: Optional[
-            List[Tuple[str, str, float]]] = None,
+            List[Tuple[Callable[[dict], float], str, float]]
+        ] = None,
+        metric_constraints: Optional[List[Tuple[str, str, float]]] = None,
         time_attr: str = "time_total_s",
         seed: Optional[int] = None,
         use_extended: bool = False,
@@ -743,7 +744,16 @@ class ConditionalBlendSearch(BlendSearch):
                 {k: v for k, v in point.items() if k in tune_space}
                 for point in points_to_evaluate
             ]
+
+        if secondary_points_to_evaluate:
+            secondary_points_to_evaluate = [
+                {k: v for k, v in point.items() if k in tune_space}
+                for point in secondary_points_to_evaluate
+            ]
+
         self._points_to_evaluate = points_to_evaluate
+        self._secondary_points_to_evaluate = secondary_points_to_evaluate
+        self._init_finished = False
         self._points_to_evaluate_trials = {}
         self._ls = LocalSearch(
             init_config=init_config,
@@ -866,6 +876,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._time_attr,
             self._last_global_search,
             self._points_to_evaluate,
+            self._secondary_points_to_evaluate,
+            self._init_finished,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
             self._cost_bounds,
@@ -894,6 +906,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._time_attr,
             self._last_global_search,
             self._points_to_evaluate,
+            self._secondary_points_to_evaluate,
+            self._init_finished,
             self._points_to_evaluate_trials,
             self._reached_max_prune_attr,
             self._cost_bounds,
@@ -927,7 +941,7 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
-        if self._points_to_evaluate:
+        if self._points_to_evaluate and not self._init_finished:
             self._points_to_evaluate_trials[trial_id] = (
                 trial_id,
                 result,
@@ -978,6 +992,18 @@ class ConditionalBlendSearch(BlendSearch):
                         condition_kwargs=trial[3],
                     )
                 self._points_to_evaluate_trials = None
+                print(self._secondary_points_to_evaluate)
+                self._secondary_points_to_evaluate = [
+                    point
+                    for point in self._secondary_points_to_evaluate
+                    if point["Estimator"]
+                    in [
+                        thread.estimator
+                        for thread_id, thread in self._search_thread_pool.items()
+                    ]
+                ]
+                self._points_to_evaluate = self._secondary_points_to_evaluate
+                self._init_finished = True
                 # self._last_global_search = np.inf
                 # _, _, local_threads_by_priority = self._select_thread()
                 # for thread_id, _, _ in local_threads_by_priority[2:]:
@@ -1016,7 +1042,10 @@ class ConditionalBlendSearch(BlendSearch):
                 trial_id, result, error, thread_created=create_condition
             )
             treat_as_thread_created = (
-                False if self._points_to_evaluate else create_condition
+                False
+                if self._points_to_evaluate
+                and not self._init_finished
+                else create_condition
             )
             if was_updated:
                 estimator_state = self._estimator_states[
@@ -1112,7 +1141,9 @@ class ConditionalBlendSearch(BlendSearch):
         obj_median = median or np.median(
             [thread.obj_best1 for id, thread in self._search_thread_pool.items() if id]
         )
-        print(f"create condition: {result[self._metric] * self._ls.metric_op} must be lower than {obj_median}")
+        print(
+            f"create condition: {result[self._metric] * self._ls.metric_op} must be lower than {obj_median}"
+        )
         return result[self._metric] * self._ls.metric_op < obj_median
 
     def _update_admissible_region(self, config, admissible_min, admissible_max):
@@ -1190,8 +1221,7 @@ class ConditionalBlendSearch(BlendSearch):
             return None, None
         inv = []
         estimators_in_threads = {
-            thread_tuple[1].estimator
-            for thread_tuple in local_threads
+            thread_tuple[1].estimator for thread_tuple in local_threads
         }
         print(f"best global score={self._metric_target * self._ls.metric_op}")
         for estimator, state in self._estimator_states.items():
@@ -1229,7 +1259,7 @@ class ConditionalBlendSearch(BlendSearch):
             )
             inv.append(1 / estimated_cost)
         s = sum(inv)
-        inv = [i/s for i in inv]
+        inv = [i / s for i in inv]
         p = self._random.rand()
         q = 0
         estimator_list = list(self._estimator_states.keys())
@@ -1286,7 +1316,9 @@ class ConditionalBlendSearch(BlendSearch):
             key=lambda x: x[2],
         )
 
-        estimator_to_use, estimator_priorities = self._select_estimator(local_threads_by_priority)
+        estimator_to_use, estimator_priorities = self._select_estimator(
+            local_threads_by_priority
+        )
 
         if not estimator_to_use:
             local_threads_by_priority_estimator_only = local_threads_by_priority
@@ -1299,16 +1331,19 @@ class ConditionalBlendSearch(BlendSearch):
 
         local_threads_by_priority_with_estimator = sorted(
             [
-                (thread_id,
-                thread,
-                thread_priority,
-                thread_priority * estimator_priorities[thread.estimator]) for thread_id, thread, thread_priority in local_threads_by_priority
+                (
+                    thread_id,
+                    thread,
+                    thread_priority,
+                    thread_priority * estimator_priorities[thread.estimator],
+                )
+                for thread_id, thread, thread_priority in local_threads_by_priority
             ],
             reverse=True,
             key=lambda x: x[3],
         )
         print(f"global search priority: {priority1}")
-        #print(local_threads_by_priority)
+        # print(local_threads_by_priority)
         print(local_threads_by_priority_with_estimator)
         print(local_threads_by_priority_estimator_only)
 
@@ -1369,7 +1404,10 @@ class ConditionalBlendSearch(BlendSearch):
                 if config:
                     return config, prune_attr, 0, estimator
 
-            if not backup or not self._search_thread_pool[backup].estimator == estimator:
+            if (
+                not backup
+                or not self._search_thread_pool[backup].estimator == estimator
+            ):
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
                     trial_id,
@@ -1484,7 +1522,12 @@ class ConditionalBlendSearch(BlendSearch):
                     # local search thread finishes
                     if self._search_thread_pool[proposing_thread].converged:
                         for key in self._ls_bound_max:
-                            if key in self._search_thread_pool[proposing_thread]._search_alg.space:
+                            if (
+                                key
+                                in self._search_thread_pool[
+                                    proposing_thread
+                                ]._search_alg.space
+                            ):
                                 self._ls_bound_max[key] += self._ls.STEPSIZE
                                 self._ls_bound_min[key] -= self._ls.STEPSIZE
                         del self._search_thread_pool[proposing_thread]
@@ -1513,7 +1556,8 @@ class ConditionalBlendSearch(BlendSearch):
                 print("")
                 self._gs_admissible_min.update(self._ls_bound_min)
                 self._gs_admissible_max.update(self._ls_bound_max)
-
+        elif not self._init_finished and not self._points_to_evaluate:
+            return
         else:  # use init config
             (
                 config,
@@ -1674,6 +1718,7 @@ class BlendSearchTuner(RayTuneTuner):
         use_extended: bool = True,
         num_samples: int = -1,
         time_budget_s: int = 600,
+        secondary_pipeline_blueprint=None,
         target_metric=None,
         scoring=None,
         early_stopping: bool = True,
@@ -1698,11 +1743,10 @@ class BlendSearchTuner(RayTuneTuner):
             display=display,
             max_concurrent=max_concurrent,
             trainable_n_jobs=trainable_n_jobs,
+            secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             **tune_kwargs,
         )
-        self._searcher_kwargs = {
-            "time_attr": "estimator_fit_time"
-        }
+        self._searcher_kwargs = {"time_attr": "estimator_fit_time"}
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
@@ -1800,7 +1844,7 @@ class BlendSearchTuner(RayTuneTuner):
 
         self.default_grid_.extend(extra_params)
 
-        self._remove_duplicates_from_default_grid()
+        self._remove_duplicates_from_grids()
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
@@ -1816,10 +1860,11 @@ class BlendSearchTuner(RayTuneTuner):
         # self._shuffle_default_grid()
 
         blend_search = ConditionalBlendSearch(
-            space=self.pipeline_blueprint,
+            space=self.secondary_pipeline_blueprint if self.secondary_pipeline_blueprint else self.pipeline_blueprint,
             metric="mean_validation_score",
             mode="max",
             points_to_evaluate=self.default_grid_,
+            secondary_points_to_evaluate=self.secondary_grid_,
             seed=self.random_state,
             use_extended=self.use_extended,
             **self._searcher_kwargs,

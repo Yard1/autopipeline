@@ -95,6 +95,7 @@ class Trainer:
         early_stopping: bool = False,
         cache: Union[str, bool] = False,
         random_state=None,
+        secondary_level: Optional[ComponentLevel] = None,
         tune_kwargs: dict = None,
     ) -> None:
         self.problem_type = problem_type
@@ -158,6 +159,7 @@ class Trainer:
             if self.problem_type.is_classification()
             else []
         )
+        self.secondary_level = secondary_level
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None
@@ -250,9 +252,24 @@ class Trainer:
             y=y,
         )
         self.pipeline_blueprints_.append(pipeline_blueprint)
+        if self.secondary_level:
+            secondary_pipeline_blueprint = create_pipeline_blueprint(
+                problem_type=self.problem_type,
+                categorical_columns=categorical_columns,
+                numeric_columns=numeric_columns,
+                level=self.secondary_level,
+                X=X,
+                y=y,
+                is_secondary=True,
+            )
+            self.secondary_pipeline_blueprints_.append(secondary_pipeline_blueprint)
+        else:
+            secondary_pipeline_blueprint = None
+
         tuner = self.tuner(
             problem_type=self.problem_type,
             pipeline_blueprint=pipeline_blueprint,
+            secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             random_state=self.random_state,
             cv=self.cv_,
             early_stopping=self.early_stopping,
@@ -595,6 +612,7 @@ class Trainer:
 
         self.cv_ = self._get_cv(self.problem_type, self.cv)
         self.pipeline_blueprints_: List[TopPipeline] = []
+        self.secondary_pipeline_blueprints_: List[TopPipeline] = []
         self.tuners_: List[Tuner] = []
         self.secondary_tuners_ = defaultdict(list)
         self.all_results_ = []

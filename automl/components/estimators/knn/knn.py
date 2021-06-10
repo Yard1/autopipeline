@@ -25,7 +25,7 @@ class KNeighborsClassifier(KNNEstimator):
         "weights": CategoricalDistribution(["uniform", "distance"], cost_related=False),
     }
     _default_tuning_grid_extended = {}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}
 
 
@@ -46,5 +46,5 @@ class KNeighborsRegressor(KNNEstimator):
         "weights": CategoricalDistribution(["uniform", "distance"], cost_related=False),
     }
     _default_tuning_grid_extended = {}
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.REGRESSION}

@@ -49,6 +49,7 @@ def create_pipeline_blueprint(
     categorical_columns: Optional[list] = None,
     numeric_columns: Optional[list] = None,
     level: ComponentLevel = ComponentLevel.COMMON,
+    is_secondary: bool = False,
 ) -> TopPipeline:
     validate_type(problem_type, "problem_type", ProblemType)
     validate_type(level, "level", ComponentLevel)

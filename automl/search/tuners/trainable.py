@@ -547,7 +547,7 @@ class SklearnTrainable(Trainable):
 
         if self.cache_results:
             try:
-                store = ray.get_actor("object_store")
+                store = ray.get_actor("ray_cache")
             except ValueError as e:
                 logger.warning(e)
                 store = None
