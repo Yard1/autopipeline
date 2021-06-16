@@ -47,7 +47,6 @@ class MultiprocessingCache(_ParameterRegistry):
     def clear(self):
         self.to_flush.clear()
         self.references.clear()
-        gc.collect()
 
 
 multiprocessing_cache = MultiprocessingCache()

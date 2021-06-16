@@ -483,8 +483,6 @@ class SklearnTrainable(Trainable):
 
         del scores
 
-        gc.collect()
-
         ret = {}
 
         test_metrics = None

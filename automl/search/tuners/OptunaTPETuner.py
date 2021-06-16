@@ -82,6 +82,8 @@ class ConditionalOptunaSearch(OptunaSearch):
             n_startup_trials=n_startup_trials,
             seed=seed,
             multivariate=True,
+            group=True,
+            constant_liar=True,
             n_ei_candidates=512,
         )
         assert isinstance(self._sampler, BaseSampler), (
