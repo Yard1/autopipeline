@@ -103,15 +103,46 @@ def fast_hash_pandas_object(
     return h
 
 
+class _FileWriteToHash(object):
+    """ For Pickler, a file-like api that translates file.write(bytes) to
+        hash.update(bytes)
+        From the Pickler docs:
+        - https://docs.python.org/3/library/pickle.html#pickle.Pickler
+        > The file argument must have a write() method that accepts a single
+        > bytes argument. It can thus be an on-disk file opened for binary
+        > writing, an io.BytesIO instance, or any other custom object that meets
+        > this interface.
+    """
+
+    def __init__(self, hash):
+        self.hash = hash
+
+    def write(self, bytes):
+        self.hash.update(bytes)
+
 class xxHasher(Hasher):
     def __init__(self, hash_name="md5"):
-        self.stream = io.BytesIO()
+        self._hash = xxh3_128()
+        self.stream = _FileWriteToHash(self._hash)
         # By default we want a pickle protocol that only changes with
         # the major python version and not the minor one
         protocol = pickle.HIGHEST_PROTOCOL
         Pickler.__init__(self, self.stream, protocol=protocol)
         # Initialise the hash obj
-        self._hash = xxh3_128()
+
+    def hash(self, obj, return_digest=True):
+        try:
+            # Pickler.dump will trigger a sequence of self.stream.write(bytes)
+            # calls, which will in turn relay to self._hash.update(bytes)
+            self.dump(obj)
+        except pickle.PicklingError as e:
+            e.args += ('PicklingError while hashing %r: %r' % (obj, e),)
+            raise
+        # dumps = self.stream.getvalue()
+        # self._hash.update(dumps)
+        if return_digest:
+            # Read the resulting hash
+            return self._hash.hexdigest()
 
 
 class xxNumpyHasher(NumpyHasher):
@@ -163,8 +194,8 @@ class xxPandasHasher(xxNumpyHasher):
         except pickle.PicklingError as e:
             e.args += ("PicklingError while hashing %r: %r" % (obj, e),)
             raise
-        dumps = self.stream.getvalue()
-        self._hash.update(dumps)
+        # dumps = self.stream.getvalue()
+        # self._hash.update(dumps)
         if return_digest:
             return self._hash.hexdigest()
 
