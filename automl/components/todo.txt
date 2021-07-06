@@ -1,4 +1,4 @@
-- DeepTables
+- https://github.com/dreamquark-ai/tabnet
 - XGBoost
 - Naive Bayes
 - ARD for regression

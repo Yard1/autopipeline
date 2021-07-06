@@ -221,6 +221,7 @@ class PatchedFLOW2(FLOW2):
         cost: float,
         conditional_space=None,
         limit_space_to_init_config: bool = False,
+        seed=None,
     ) -> Searcher:
         flow2 = self.__class__(
             init_config,
@@ -232,7 +233,7 @@ class PatchedFLOW2(FLOW2):
             self.min_resource,
             self.max_resource,
             self.resource_multiple_factor,
-            self._seed + 1,
+            seed or self._seed + 1,
             conditional_space=conditional_space,
             limit_space_to_init_config=limit_space_to_init_config,
             cost_attr=self.cost_attr,
@@ -283,7 +284,11 @@ class PatchedFLOW2(FLOW2):
                     if self.step > self.step_ub:
                         self.step = self.step_ub
                     self._iter_best_config = self.trial_count_complete
+                    if self._trunc:
+                        self._trunc = min(self._trunc + 1, self.dim)
                     return
+                elif self._trunc:
+                    self._trunc = max(self._trunc >> 1, 1)
         proposed_by = self._proposed_by.get(trial_id)
         if proposed_by == self.incumbent:
             # proposed by current incumbent and no better
@@ -447,7 +452,7 @@ class SharingSearchThread(SearchThread):
         self,
         mode: str = "min",
         search_alg: Optional[Searcher] = None,
-        cost_attr=None,
+        cost_attr: Optional[str] = "time_total_s",
         prune_attr=None,
         max_prune_attr=None,
     ):
@@ -578,12 +583,11 @@ class SharingSearchThread(SearchThread):
             )
             if self.prune_attr in result:
                 self.last_prune_attr = result[self.prune_attr]
-            if self.cost_attr in result:
-                self.cost_last = result[self.cost_attr]
-                self.cost_total += self.cost_last
-                print(
-                    f"{str(self)} cost_last={self.cost_last} cost_total={self.cost_total}"
-                )
+            self.cost_last = result.get(self.cost_attr, 1)
+            self.cost_total += self.cost_last
+            print(
+                f"{str(self)} cost_last={self.cost_last} cost_total={self.cost_total}"
+            )
             # if not isinstance(self._search_alg, FLOW2):
             #     logger.info(f"result.metric{result[self._search_alg.metric]}")
             if self._search_alg.metric in result:
@@ -1043,8 +1047,7 @@ class ConditionalBlendSearch(BlendSearch):
             )
             treat_as_thread_created = (
                 False
-                if self._points_to_evaluate
-                and not self._init_finished
+                if self._points_to_evaluate and not self._init_finished
                 else create_condition
             )
             if was_updated:
@@ -1101,6 +1104,7 @@ class ConditionalBlendSearch(BlendSearch):
                         cost=result[self._time_attr],
                         conditional_space=self._conditional_space,
                         limit_space_to_init_config=True,
+                        seed=self._ls._seed + self._thread_count,
                     ),
                     cost_attr=self._time_attr,
                     prune_attr=self._ls.prune_attr,
@@ -1387,8 +1391,8 @@ class ConditionalBlendSearch(BlendSearch):
         last_estimator_config = config
 
         if not skip and self._valid(
-            config,  # 1 + ((iter + 1) / self._MAX_GS_RETRIES)
-        ):
+            config,
+        ):  # 1 + ((iter + 1) / self._MAX_GS_RETRIES)
             return config, prune_attr, 0, estimator
         else:
             config, prune_attr = None, None
@@ -1860,7 +1864,9 @@ class BlendSearchTuner(RayTuneTuner):
         # self._shuffle_default_grid()
 
         blend_search = ConditionalBlendSearch(
-            space=self.secondary_pipeline_blueprint if self.secondary_pipeline_blueprint else self.pipeline_blueprint,
+            space=self.secondary_pipeline_blueprint
+            if self.secondary_pipeline_blueprint
+            else self.pipeline_blueprint,
             metric="mean_validation_score",
             mode="max",
             points_to_evaluate=self.default_grid_,

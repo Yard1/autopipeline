@@ -83,7 +83,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             seed=seed,
             multivariate=True,
             group=True,
-            constant_liar=True,
+            constant_liar=False,
             n_ei_candidates=512,
         )
         assert isinstance(self._sampler, BaseSampler), (
@@ -242,16 +242,6 @@ class ConditionalOptunaSearch(OptunaSearch):
         except ValueError as exc:
             logger.warning(exc)  # E.g. if NaN was reported
             print(exc)
-
-    def save(self, checkpoint_path: str):
-        save_object = (
-            self._sampler,
-            self._ot_trials,
-            self._ot_study,
-            self._points_to_evaluate,
-        )
-        with open(checkpoint_path, "wb") as outputFile:
-            pickle.dump(save_object, outputFile)
 
     def add_evaluated_trial(
         self,
