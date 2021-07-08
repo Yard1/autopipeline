@@ -471,6 +471,7 @@ class SharingSearchThread(SearchThread):
         # eci: expected cost for improvement
         self.eci = self.cost_best
         self.priority = self.speed = 0
+        self.running = 1
         self._init_config = True
         if cost_attr:
             self.cost_attr = cost_attr

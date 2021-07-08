@@ -23,7 +23,7 @@ configspace = "*"
 hpbandster = "*"
 shap = "*"
 boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
-flaml = "*"
+flaml = "==0.5.6"
 hebo = "*"
 xxhash = "*"
 lz4 = "*"

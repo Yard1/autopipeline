@@ -43,8 +43,6 @@ from ..metrics.metrics import optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
-from ..tuners.BOHBTuner import BOHBTuner
-from ..tuners.HEBOTuner import HEBOTuner
 from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
 from ..cv import get_cv_for_problem_type

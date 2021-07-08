@@ -557,8 +557,8 @@ class SklearnTrainable(Trainable):
                 store.put.remote(
                     self.trial_id,
                     "fold_predictions",
-                    compress(combined_predictions),
-                    False,
+                    combined_predictions,
+                    True,
                 )
             except ray.exceptions.ObjectStoreFullError:
                 pass
@@ -567,8 +567,8 @@ class SklearnTrainable(Trainable):
                     store.put.remote(
                         self.trial_id,
                         "fitted_estimators",
-                        compress(fitted_estimator),
-                        False,
+                        fitted_estimator,
+                        True,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass
@@ -577,8 +577,8 @@ class SklearnTrainable(Trainable):
                     store.put.remote(
                         self.trial_id,
                         "test_predictions",
-                        compress(combined_test_predictions),
-                        False,
+                        combined_test_predictions,
+                        True,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass
