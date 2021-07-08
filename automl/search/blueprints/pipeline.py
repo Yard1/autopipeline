@@ -116,7 +116,7 @@ def create_pipeline_blueprint(
         "LGBMClassifier": LGBMClassifier(),
         "LGBMRegressor": LGBMRegressor(),
         "CatBoostClassifierBinary": CatBoostClassifierBinary(),
-        "CatBoostClassifierMulticlass": CatBoostEncoderMulticlass(),
+        "CatBoostClassifierMulticlass": CatBoostClassifierMulticlass(),
         "CatBoostRegressor": CatBoostRegressor(),
         "RandomForestClassifier": RandomForestClassifier(),
         "RandomForestRegressor": RandomForestRegressor(),
