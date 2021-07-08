@@ -471,7 +471,7 @@ class SharingSearchThread(SearchThread):
         # eci: expected cost for improvement
         self.eci = self.cost_best
         self.priority = self.speed = 0
-        self.running = 1
+        self._running = set()
         self._init_config = True
         if cost_attr:
             self.cost_attr = cost_attr
@@ -481,6 +481,10 @@ class SharingSearchThread(SearchThread):
         self.max_prune_attr = max_prune_attr
         self.last_prune_attr = 1.0
         self.resources = [1.0]
+
+    @property
+    def running(self) -> int:
+        return len(self._running) or 1
 
     @property
     def estimator(self) -> str:
@@ -600,11 +604,18 @@ class SharingSearchThread(SearchThread):
                     self.obj_best1 = obj
                     self.cost_best = self.cost_last
             self._update_speed()
-            return True
-        return False
+            ret = True
+        else:
+            ret = False
+        try:
+            self._running.remove(trial_id)
+        except KeyError:
+            pass
+        return ret
 
     def _update_speed(self):
         old_speed = self.speed
+        assert self.running > 0
         super()._update_speed()
         print(f"{str(self)} old speed={old_speed} new speed={self.speed}")
 
@@ -623,6 +634,8 @@ class SharingSearchThread(SearchThread):
                     f"{traceback.format_exc()}"
                 )
                 config = None
+        if config is not None:
+            self._running.add(trial_id)
         return config
 
     def on_trial_result(self, trial_id: str, result: Dict):
@@ -1333,6 +1346,8 @@ class ConditionalBlendSearch(BlendSearch):
                 for thread_tuple in local_threads_by_priority
                 if thread_tuple[1].estimator == estimator_to_use
             ]
+            if not local_threads_by_priority_estimator_only:
+                local_threads_by_priority_estimator_only = local_threads_by_priority
 
         local_threads_by_priority_with_estimator = sorted(
             [
@@ -1375,6 +1390,7 @@ class ConditionalBlendSearch(BlendSearch):
         assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         # logger.info(f"reset config to {config}")
         self._init_used = True
+        self._search_thread_pool[0]._running.add(trial_id)
 
         return config, prune_attr, 0
 

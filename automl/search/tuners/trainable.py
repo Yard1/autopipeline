@@ -558,7 +558,7 @@ class SklearnTrainable(Trainable):
                     self.trial_id,
                     "fold_predictions",
                     combined_predictions,
-                    True,
+                    False,
                 )
             except ray.exceptions.ObjectStoreFullError:
                 pass
@@ -568,7 +568,7 @@ class SklearnTrainable(Trainable):
                         self.trial_id,
                         "fitted_estimators",
                         fitted_estimator,
-                        True,
+                        False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass
@@ -578,7 +578,7 @@ class SklearnTrainable(Trainable):
                         self.trial_id,
                         "test_predictions",
                         combined_test_predictions,
-                        True,
+                        False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     pass

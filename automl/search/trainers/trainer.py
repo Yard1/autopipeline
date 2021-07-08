@@ -301,7 +301,7 @@ class Trainer:
                     result["estimator"] = self._create_estimator(
                         result["config"],
                         pipeline_blueprint=pipeline_blueprint,
-                        cache=False,  # TODO make dynamic
+                        cache=self.last_tuner_._cache,  # TODO make dynamic
                     )
         results = {k: v for k, v in results.items() if k not in trial_ids_to_remove}
         results_df = self.last_tuner_.analysis_.results_df
@@ -580,7 +580,8 @@ class Trainer:
         )
         estimator.set_params(**config_called)
         if cache:
-            estimator.memory = dynamic_memory_factory(cache)  # TODO make dynamic
+            memory = dynamic_memory_factory(cache)  # TODO make dynamic
+            estimator.set_params(memory=memory)
         return estimator
 
     def get_ensemble_by_id(self, ensemble_id):
