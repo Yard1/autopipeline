@@ -129,14 +129,14 @@ class AutoML(BaseEstimator):
     ):
         determined_problem_type = None
 
-        if DataType.is_numeric(y.dtype):
-            determined_problem_type = ProblemType.REGRESSION
-        elif DataType.is_categorical(y.dtype):
+        if DataType.is_categorical(y.dtype):
             determined_problem_type = (
                 ProblemType.BINARY
                 if len(y.cat.categories) == 2
                 else ProblemType.MULTICLASS
             )
+        elif DataType.is_numeric(y.dtype):
+            determined_problem_type = ProblemType.REGRESSION
         elif problem_type is None:
             raise ValueError("Could not determine problem type.")
         else:

@@ -130,7 +130,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
@@ -367,7 +367,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         try:
             ensemble.fit(
                 X,

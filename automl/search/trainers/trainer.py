@@ -335,20 +335,20 @@ class Trainer:
 
         gc.collect()
 
-        # with ray_context(
-        #    global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
-        # ), joblib.parallel_backend("ray_caching"):
-        X_stack, X_test_stack = self._create_ensembles(
-            X,
-            y,
-            results,
-            results_df,
-            pipeline_blueprint,
-            X_test=X_test,
-            y_test=y_test,
-            X_test_original=X_test_original,
-            y_test_original=y_test_original,
-        )
+        with ray_context(
+           global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
+        ), joblib.parallel_backend("ray_caching"):
+            X_stack, X_test_stack = self._create_ensembles(
+                X,
+                y,
+                results,
+                results_df,
+                pipeline_blueprint,
+                X_test=X_test,
+                y_test=y_test,
+                X_test_original=X_test_original,
+                y_test_original=y_test_original,
+            )
         del self.last_tuner_.fold_predictions_
         del self.last_tuner_.test_predictions_
         if self.current_stacking_level >= self.stacking_level:

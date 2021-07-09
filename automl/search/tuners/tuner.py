@@ -385,12 +385,6 @@ class RayTuneTuner(Tuner):
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
             "cache": self._cache,
         }
-        tune_kwargs["run_or_experiment"] = type(
-            "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
-        )
-        tune_kwargs["run_or_experiment"] = with_parameters(
-            tune_kwargs["run_or_experiment"], **params
-        )
         gc.collect()
         with ray_context(
             global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
@@ -400,6 +394,14 @@ class RayTuneTuner(Tuner):
             except ray.exceptions.RayActorError:
                 ray.kill(ray.get_actor("ray_cache"), no_restart=True)
                 ray_cache = RayStore.options(name="ray_cache").remote()
+
+            params["ray_cache_actor"] = ray_cache
+            tune_kwargs["run_or_experiment"] = type(
+                "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
+            )
+            tune_kwargs["run_or_experiment"] = with_parameters(
+                tune_kwargs["run_or_experiment"], **params
+            )
 
             self.analysis_ = tune.run(**tune_kwargs)
 

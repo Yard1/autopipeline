@@ -93,7 +93,7 @@ def decompress(value):
     return cpickle.loads(lz4.frame.decompress(value))
 
 
-@ray.remote
+@ray.remote(max_restarts=20)
 class RayStore(object):
     @staticmethod
     def compress(value, **kwargs):
@@ -244,6 +244,7 @@ class SklearnTrainable(Trainable):
             self.X_test_ = params.get("X_test_", None)
             self.y_test_ = params.get("y_test_", None)
             self.cache_results = params.get("cache_results", True)
+            self.ray_cache_actor = params.get("ray_cache_actor", None)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -443,7 +444,6 @@ class SklearnTrainable(Trainable):
 
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
-        # with joblib.parallel_backend("ray_caching"):
         print(self.X_.columns)
         scores = self._cross_validate(
             estimator_subclassed,
@@ -545,8 +545,9 @@ class SklearnTrainable(Trainable):
 
         if self.cache_results:
             try:
-                store = ray.get_actor("ray_cache")
-            except ValueError as e:
+                store = self.ray_cache_actor
+                assert store is not None
+            except Exception as e:
                 logger.warning(e)
                 store = None
         else:
@@ -561,6 +562,7 @@ class SklearnTrainable(Trainable):
                     False,
                 )
             except ray.exceptions.ObjectStoreFullError:
+                print("object store full")
                 pass
             if fitted_estimator is not None:
                 try:
@@ -571,6 +573,7 @@ class SklearnTrainable(Trainable):
                         False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
+                    print("object store full")
                     pass
             if combined_test_predictions:
                 try:
@@ -581,11 +584,8 @@ class SklearnTrainable(Trainable):
                         False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
+                    print("object store full")
                     pass
-
-        del combined_predictions
-        del fitted_estimator
-        del combined_test_predictions
 
         logger.debug("done")
         return ret

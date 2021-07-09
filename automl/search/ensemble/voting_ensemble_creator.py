@@ -107,7 +107,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
