@@ -1,3 +1,4 @@
+from automl.search.store import CachedObject
 from copy import deepcopy
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
@@ -18,7 +19,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.utils import shuffle, estimator_html_repr
 
 import joblib
-from ..utils.joblib_backend import register_ray_caching
+from ray.util.joblib import register_ray
 
 from .trainers.trainer import Trainer
 from .cv import get_cv_for_problem_type
@@ -27,18 +28,18 @@ from ..problems import ProblemType
 from ..components import LabelEncoder
 from ..utils import validate_type
 from .utils import flatten_iterable, get_obj_name
-from .utils import ray_context
 
 from automl_models.components.preprocessing.prepare_data import (
     PrepareDataFrame,
     clean_df,
 )
 
+import ray
 import warnings
 import logging
 
 logger = logging.getLogger(__name__)
-register_ray_caching()
+register_ray()
 
 
 # TODO: unique ID
@@ -197,6 +198,8 @@ class AutoML(BaseEstimator):
     ):
         logger.info(make_header("AutoML Fit"))
 
+        ray.init(ignore_reinit_error=True)
+
         self._validate()
 
         if isinstance(y, pd.DataFrame) and y.shape[1] == 1:
@@ -315,7 +318,7 @@ class AutoML(BaseEstimator):
         else:
             pipeline = self._get_pipeline_by_id(id_or_pipeline, refit=False, copy=True)
         html_repr = HTML(estimator_html_repr(pipeline))
-        #self._displays["pipeline_display"].display(html_repr, display_type="html")
+        # self._displays["pipeline_display"].display(html_repr, display_type="html")
         return html_repr
 
     def get_pipeline_by_id(self, id, refit: Union[bool, str] = False):
@@ -333,7 +336,7 @@ class AutoML(BaseEstimator):
         if not isinstance(pipeline, Pipeline):
             pipeline = Pipeline(steps=[("Ensemble", pipeline)])
         if refit:
-            with ray_context(), joblib.parallel_backend("ray_caching"):
+            with joblib.parallel_backend("ray"):
                 if refit == "on_test":
                     pipeline.fit(
                         pd.concat((self.X_, self.X_test_)),
@@ -364,6 +367,9 @@ class AutoML(BaseEstimator):
         return get_obj_name(component)
 
     def _get_result(self, result, stacking_level: int = 0):
+        result = result.copy()
+        if isinstance(result["estimator"], CachedObject):
+            result["estimator"] = result["estimator"].object
         component_names = [
             self._get_component_name(component)
             for name, component in result["estimator"].steps[:-1]

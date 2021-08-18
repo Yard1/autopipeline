@@ -92,6 +92,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         assert "fold_predictions" in kwargs
         assert "refit_estimators" in kwargs
         assert "cv" in kwargs
+        kwargs = self._treat_kwargs(kwargs)
         super().fit_ensemble(
             X,
             y,
@@ -130,7 +131,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
@@ -329,6 +330,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         assert "fold_predictions" in kwargs
         assert "refit_estimators" in kwargs
         assert "cv" in kwargs
+        kwargs = self._treat_kwargs(kwargs)
         super(StackingEnsembleCreator, self).fit_ensemble(
             X,
             y,
@@ -367,7 +369,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         try:
             ensemble.fit(
                 X,

@@ -22,7 +22,6 @@ xgboost = "*"
 configspace = "*"
 hpbandster = "*"
 shap = "*"
-boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
 flaml = "==0.5.6"
 hebo = "*"
 xxhash = "*"
@@ -32,9 +31,15 @@ plotly = "*"
 tabulate = "*"
 openml = "*"
 scikit-learn-intelex = "*"
-ray = {extras = ["tune"], version = "*"}
 spacy = "==2.3.7"
 fastai = "*"
+
+[packages.boruta]
+git = "https://github.com/scikit-learn-contrib/boruta_py.git"
+
+[packages.ray]
+extras = ["tune"]
+version = ">=1.4.1"
 
 [requires]
 python_version = "3.8"

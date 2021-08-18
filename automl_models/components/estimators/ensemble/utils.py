@@ -1,4 +1,5 @@
 import numpy as np
+import ray
 from copy import deepcopy
 from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
 from sklearn.model_selection import cross_val_predict
@@ -39,13 +40,18 @@ def fit_single_estimator_if_not_fitted(
     cloning_function=clone,
     force_refit=False,
 ):
+    if hasattr(estimator, "_ray_cached_object"):
+        cache = estimator._ray_cached_object
+        estimator = cache.object
+    else:
+        cache = None
     try:
         assert not force_refit
         check_is_fitted(estimator)
         return estimator
     except (NotFittedError, AssertionError):
         print(f"fitting estimator {estimator}", flush=True)
-        return _fit_single_estimator(
+        ret = _fit_single_estimator(
             cloning_function(estimator),
             X,
             y,
@@ -53,6 +59,10 @@ def fit_single_estimator_if_not_fitted(
             message_clsname=message_clsname,
             message=message,
         )
+        if cache:
+            ret._ray_cached_object = cache
+            cache.object = ret
+        return ret
 
 
 def _get_average_preds_from_repeated_cv(predictions: list, estimator):
@@ -159,18 +169,33 @@ def get_cv_predictions(
             )
         else:
             print(f"doing cv for {est}.{meth}")
-            predictions_new.append(
-                _cross_val_predict_repeated(
-                    clone(est),
-                    X,
-                    y,
-                    cv=deepcopy(cv),
-                    method=meth,
-                    n_jobs=n_jobs,
-                    fit_params=fit_params,
-                    verbose=verbose,
+            if hasattr(est, "_ray_cached_object"):
+                cache = est._ray_cached_object
+            else:
+                cache = None
+            try:
+                predictions_new = ray.get(
+                    cache.store_actor.get.remote(cache.key, "fold_predictions")
                 )
-            )
+            except Exception:
+                predictions_new.append(
+                    _cross_val_predict_repeated(
+                        clone(est),
+                        X,
+                        y,
+                        cv=deepcopy(cv),
+                        method=meth,
+                        n_jobs=n_jobs,
+                        fit_params=fit_params,
+                        verbose=verbose,
+                    )
+                )
+                if cache:
+                    ray.get(
+                        cache.store_actor.put.remote(
+                            cache.key, "fold_predictions", predictions_new
+                        )
+                    )
     return predictions_new
 
 

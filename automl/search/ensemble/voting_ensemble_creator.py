@@ -65,6 +65,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> BaseEstimator:
+        kwargs = self._treat_kwargs(kwargs)
         super().fit_ensemble(
             X,
             y,
@@ -107,7 +108,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         gc.collect()
         logger.debug("fitting ensemble")
         print("fitting ensemble")
-        ensemble.n_jobs = -1  # TODO make dynamic
+        ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,
             y,

@@ -2,12 +2,10 @@ import numpy as np
 import gc
 import time
 from copy import deepcopy
-from collections import defaultdict
+from ray.tune.utils.placement_groups import PlacementGroupFactory
 from sklearn.base import clone
 
-from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
-from sklearn.metrics import make_scorer
 from sklearn.model_selection._validation import (
     indexable,
     check_cv,
@@ -25,15 +23,10 @@ from sklearn.model_selection._split import _RepeatedSplits
 import ray
 import ray.exceptions
 
-import joblib
-
 from ray.tune import Trainable
-from ray.tune.resources import Resources
-import ray.cloudpickle as cpickle
 
-import lz4.frame
+from ray.util.joblib import register_ray
 
-from ...utils.joblib_backend import register_ray_caching
 from .utils import treat_config, split_list_into_chunks
 from ..utils import score_test
 from ..metrics.scorers import make_scorer_with_error_score
@@ -81,55 +74,6 @@ class _SubsampleMetaSplitterWithStratify(_SubsampleMetaSplitter):
                     stratify=_safe_indexing(y, test_idx) if self.stratify else None,
                 )
             yield train_idx, test_idx
-
-
-def compress(value, **kwargs):
-    if "compression_level" not in kwargs:
-        kwargs["compression_level"] = 9
-    return lz4.frame.compress(cpickle.dumps(value), **kwargs)
-
-
-def decompress(value):
-    return cpickle.loads(lz4.frame.decompress(value))
-
-
-@ray.remote(max_restarts=20)
-class RayStore(object):
-    @staticmethod
-    def compress(value, **kwargs):
-        if "compression_level" not in kwargs:
-            kwargs["compression_level"] = 9
-        return lz4.frame.compress(cpickle.dumps(value), **kwargs)
-
-    @staticmethod
-    def decompress(value):
-        return cpickle.loads(lz4.frame.decompress(value))
-
-    def __init__(self) -> None:
-        self.values = defaultdict(dict)
-
-    def get(self, key, store_name, pop=False, decompress=True):
-        if pop:
-            v = self.values[store_name].pop(key)
-        else:
-            v = self.values[store_name][key]
-        if not decompress:
-            return v
-        return RayStore.decompress(v)
-
-    def put(self, key, store_name, value, compress=True):
-        self.values[store_name][key] = RayStore.compress(value) if compress else value
-        if compress:
-            del value
-
-    def get_all_keys(self, store_name) -> list:
-        return list(self.values[store_name].keys())
-
-    def get_all_refs(self, store_name, pop=False) -> list:
-        r = [
-            self.get(key, store_name, pop=pop) for key in self.get_all_keys(store_name)
-        ]
-        return r
 
 
 @ray.remote
@@ -252,7 +196,7 @@ class SklearnTrainable(Trainable):
 
         # forward-compatbility
         logger.debug("training")
-        register_ray_caching()
+        register_ray()
         r = self._train()
 
         gc.collect()
@@ -281,12 +225,7 @@ class SklearnTrainable(Trainable):
 
     @classmethod
     def default_resource_request(cls, config):
-        return Resources(
-            # cpu=cls.N_JOBS,
-            cpu=1,
-            gpu=0,
-            extra_cpu=cls.N_JOBS,
-        )
+        return PlacementGroupFactory([{"CPU": 1}] * cls.N_JOBS)
 
     def _cross_validate(
         self,
@@ -344,7 +283,6 @@ class SklearnTrainable(Trainable):
         ]
 
         results = ray.get(results_futures)
-        del results_futures
 
         # For callabe scoring, the return type is only know after calling. If the
         # return type is a dictionary, the error scores can now be inserted with
@@ -559,7 +497,6 @@ class SklearnTrainable(Trainable):
                     self.trial_id,
                     "fold_predictions",
                     combined_predictions,
-                    False,
                 )
             except ray.exceptions.ObjectStoreFullError:
                 print("object store full")
@@ -570,7 +507,6 @@ class SklearnTrainable(Trainable):
                         self.trial_id,
                         "fitted_estimators",
                         fitted_estimator,
-                        False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     print("object store full")
@@ -581,7 +517,6 @@ class SklearnTrainable(Trainable):
                         self.trial_id,
                         "test_predictions",
                         combined_test_predictions,
-                        False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     print("object store full")

@@ -1,3 +1,4 @@
+from automl.search.store import CachedSklearn
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
@@ -19,11 +20,14 @@ import io
 
 import joblib
 import ray
-from ...utils.joblib_backend import register_ray_caching
-from ...utils.joblib_backend.ray_backend import multiprocessing_cache
+from ray.util.joblib import register_ray
+from ...utils.joblib_backend.ray_backend import (
+    multiprocessing_cache,
+    register_ray_caching,
+)
 
+register_ray()
 register_ray_caching()
-
 
 from ..ensemble import (
     EnsembleStrategy,
@@ -38,7 +42,11 @@ from ..ensemble import (
     VotingSoftEnsembleCreator,
     VotingSoftByMetricEnsembleCreator,
 )
-from ..utils import ray_context, score_test, stack_estimator
+from ..ensemble.ray import (
+    ray_fit_ensemble,
+    ray_fit_ensemble_and_return_stacked_preds_remote,
+)
+from ..utils import score_test, stack_estimator
 from ..metrics.metrics import optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
@@ -298,11 +306,16 @@ class Trainer:
                 if trial_id in self.last_tuner_.fitted_estimators_:
                     result["estimator"] = self.last_tuner_.fitted_estimators_[trial_id]
                 else:
-                    result["estimator"] = self._create_estimator(
+                    est = self._create_estimator(
                         result["config"],
                         pipeline_blueprint=pipeline_blueprint,
                         cache=self.last_tuner_._cache,  # TODO make dynamic
                     )
+                    cached_est = CachedSklearn(
+                        self.last_tuner_.ray_cache_name_, "fitted_estimators", trial_id
+                    )
+                    cached_est.object = est
+                    result["estimator"] = cached_est
         results = {k: v for k, v in results.items() if k not in trial_ids_to_remove}
         results_df = self.last_tuner_.analysis_.results_df
         results_df = results_df[results_df.index.isin(set(results))]
@@ -310,7 +323,16 @@ class Trainer:
         self.all_results_df_.append(results_df)
         return results, results_df, pipeline_blueprint
 
-    def _fit_one_layer(self, X, y, X_test=None, y_test=None, X_test_original=None, y_test_original=None, groups=None):
+    def _fit_one_layer(
+        self,
+        X,
+        y,
+        X_test=None,
+        y_test=None,
+        X_test_original=None,
+        y_test_original=None,
+        groups=None,
+    ):
         self.current_stacking_level += 1
         logger.debug(f"current_stacking_level: {self.current_stacking_level}")
         logger.debug(X.columns)
@@ -335,9 +357,7 @@ class Trainer:
 
         gc.collect()
 
-        with ray_context(
-           global_checkpoint_s=self.tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
-        ), joblib.parallel_backend("ray_caching"):
+        with joblib.parallel_backend("ray"):
             X_stack, X_test_stack = self._create_ensembles(
                 X,
                 y,
@@ -405,17 +425,39 @@ class Trainer:
             "refit_estimators": False,
             "cv": self.cv_,
         }
+
+        # cpus_available = ray.available_resources()["CPU"]
+
+        ray_ensemble_config = ray.put(ensemble_config)
+        ray_scoring_dict = ray.put(self.scoring_dict)
+        ray_jobs = [
+            ray_fit_ensemble_and_return_stacked_preds_remote.remote(
+                self.main_stacking_ensemble, ray_ensemble_config, ray_scoring_dict
+            )
+        ]
+        ray_jobs += [
+            ray_fit_ensemble.remote(ensemble, ray_ensemble_config, ray_scoring_dict)
+            for ensemble in self.secondary_ensembles or []
+        ]
+        ray_results = ray.get(ray_jobs)
+
+        main_result = ray_results.pop(0)
         (
             main_stacking_ensemble_fitted,
             X_stack,
             X_test_stack,
-        ) = self.main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
-            **ensemble_config
-        )
-        # TODO come up with a way to reuse fitted estimators
+        ) = main_result[0]
+        scores = {self.main_stacking_ensemble._ensemble_name: main_result[1]}
+        scores = {
+            **scores,
+            **{
+                ensemble._ensemble_name: ray_results[i][1]
+                for i, ensemble in enumerate(self.secondary_ensembles or [])
+            },
+        }
         fitted_ensembles = {
-            ensemble._ensemble_name: ensemble.fit_ensemble(**ensemble_config)
-            for ensemble in self.secondary_ensembles or []
+            ensemble._ensemble_name: ray_results[i][0]
+            for i, ensemble in enumerate(self.secondary_ensembles or [])
         }
         fitted_ensembles[
             self.main_stacking_ensemble._ensemble_name
@@ -423,52 +465,22 @@ class Trainer:
 
         self.ensemble_results_.append({})
         self.ensembles_.append(fitted_ensembles)
-        for ensemble_name, ensemble in fitted_ensembles.items():
-            self._score_ensemble(
-                ensemble,
-                ensemble_name,
-                X,
-                y,
-                X_test=X_test_original,
-                y_test=y_test_original,
-            )
-            try:
-                ensemble.set_params(n_jobs=None)
-            except Exception:
-                pass
+
+        for ensemble_name, score in scores.items():
+            self._score_ensemble(ensemble_name, score)
+
         return X_stack, X_test_stack
 
     def _score_ensemble(
         self,
-        ensemble,
         ensemble_name,
-        X,
-        y,
-        X_test=None,
-        y_test=None,
+        scores,
     ):
-        if X_test is None:
-            return
-        logger.debug("scoring ensemble")
-        print("scoring ensemble")
-        scoring = self.scoring_dict
-        scores, _ = score_test(
-            ensemble,
-            X,
-            y,
-            X_test,
-            y_test,
-            scoring,
-            refit=False,
-            error_score=np.nan,
-        )
         if self.problem_type == ProblemType.BINARY:
             scores["optimized_precision"] = optimized_precision(
                 scores["accuracy"], scores["recall"], scores["specificity"]
             )
         self.ensemble_results_[-1][ensemble_name] = scores
-        if hasattr(ensemble, "_saved_test_predictions"):
-            del ensemble._saved_test_predictions
 
     def _create_dynamic_ensemble(self, X, y):
         # TODO fix
@@ -578,6 +590,8 @@ class Trainer:
             self.last_tuner_.hyperparameter_names_,
             self.random_state,
         )
+        if "maxBins" in config_called:
+            raise ValueError(str(estimator) + str(config_called))
         estimator.set_params(**config_called)
         if cache:
             memory = dynamic_memory_factory(cache)  # TODO make dynamic
@@ -620,5 +634,13 @@ class Trainer:
         self.ensemble_results_ = []
         self.meta_columns_ = []
 
-        self._fit_one_layer(X, y, X_test=X_test, y_test=y_test, X_test_original=X_test, y_test_original=y_test, groups=groups)
+        self._fit_one_layer(
+            X,
+            y,
+            X_test=X_test,
+            y_test=y_test,
+            X_test_original=X_test,
+            y_test_original=y_test,
+            groups=groups,
+        )
         return self

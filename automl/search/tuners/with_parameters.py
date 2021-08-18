@@ -1,5 +1,7 @@
 import inspect
-from ray.tune.utils.trainable import parameter_registry, detect_checkpoint_function
+import ray
+from ray.tune.utils.trainable import detect_checkpoint_function
+from ray.tune.registry import _ParameterRegistry
 
 
 def with_parameters(trainable, **kwargs):
@@ -76,6 +78,9 @@ def with_parameters(trainable, **kwargs):
             f"or classes that inherit from `tune.Trainable()`. Got type: "
             f"{type(trainable)}."
         )
+
+    parameter_registry = _ParameterRegistry()
+    ray.worker._post_init_hooks.append(parameter_registry.flush)
 
     # Objects are moved into the object store
     prefix = f"{str(trainable)}_"

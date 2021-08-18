@@ -17,9 +17,9 @@ from sklearn.model_selection._search import ParameterGrid
 
 from .with_parameters import with_parameters
 
-from .trainable import SklearnTrainable, RayStore
+from .trainable import SklearnTrainable
+from ..store import RayStore
 from .utils import get_all_tunable_params
-from ..utils import ray_context
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
 from ...components.transformers.passthrough import Passthrough
@@ -168,7 +168,9 @@ class Tuner(ABC):
         self.default_grid_ += preset_configurations
 
         if self.secondary_pipeline_blueprint:
-            self.secondary_grid_ = self._get_default_components(self.secondary_pipeline_blueprint)
+            self.secondary_grid_ = self._get_default_components(
+                self.secondary_pipeline_blueprint
+            )
         else:
             self.secondary_grid_ = []
 
@@ -192,9 +194,14 @@ class Tuner(ABC):
         if self.secondary_grid_:
             for config in self.secondary_grid_:
                 str_config = {
-                    k: str(v) for k, v in config.items() if not isinstance(v, Passthrough)
+                    k: str(v)
+                    for k, v in config.items()
+                    if not isinstance(v, Passthrough)
                 }
-                if str_config not in default_grid_list_dict and str_config not in secondary_grid_list_dict:
+                if (
+                    str_config not in default_grid_list_dict
+                    and str_config not in secondary_grid_list_dict
+                ):
                     secondary_grid_list_dict.append(str_config)
                     secondary_grid_list_no_dups.append(config)
 
@@ -247,7 +254,7 @@ class RayTuneTuner(Tuner):
             "fail_fast": False,  # TODO change to False when ready
             # "resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
-            "max_failures": 2
+            "max_failures": 2,
         }
         super().__init__(
             problem_type=problem_type,
@@ -291,7 +298,10 @@ class RayTuneTuner(Tuner):
         # this is just to ensure constant order
         self._shuffle_default_grid()
         _, self.component_strings_, self.hyperparameter_names_ = get_all_tunable_params(
-            self.secondary_pipeline_blueprint if self.secondary_pipeline_blueprint else self.pipeline_blueprint, use_extended=self.use_extended
+            self.secondary_pipeline_blueprint
+            if self.secondary_pipeline_blueprint
+            else self.pipeline_blueprint,
+            use_extended=self.use_extended,
         )
         for conf in self.default_grid_:
             for k, v in conf.items():
@@ -308,47 +318,21 @@ class RayTuneTuner(Tuner):
         self.fitted_estimators_ = {}
 
         logger.debug("getting estimators from ray object store")
-        trial_ids = ray.get(ray_cache.get_all_keys.remote("fitted_estimators"))
-        fitted_estimators = ray.get(
-            [
-                ray_cache.get.remote(
-                    key, "fitted_estimators", pop=True, decompress=False
-                )
-                for key in trial_ids
-            ]
+        self.fitted_estimators_ = ray.get(
+            ray_cache.get_all_cached_objects.remote("fitted_estimators")
         )
-        #fitted_estimators = [RayStore.decompress(val) for val in fitted_estimators]
-        self.fitted_estimators_ = dict(zip(trial_ids, fitted_estimators))
 
         logger.debug("getting fold predictions from ray object store")
-        trial_ids = ray.get(ray_cache.get_all_keys.remote("fold_predictions"))
         fold_predictions = ray.get(
-            [
-                ray_cache.get.remote(
-                    key, "fold_predictions", pop=True, decompress=False
-                )
-                for key in trial_ids
-            ]
+            ray_cache.get_all_cached_objects.remote("fold_predictions")
         )
-
-        #fold_predictions = [val for val in fold_predictions]
-        fold_predictions = dict(zip(trial_ids, fold_predictions))
         for key in self.analysis_.results.keys():
             self.fold_predictions_[key] = fold_predictions.get(key, {})
 
         logger.debug("getting test predictions from ray object store")
-        trial_ids = ray.get(ray_cache.get_all_keys.remote("test_predictions"))
         test_predictions = ray.get(
-            [
-                ray_cache.get.remote(
-                    key, "test_predictions", pop=True, decompress=False
-                )
-                for key in trial_ids
-            ]
+            ray_cache.get_all_cached_objects.remote("test_predictions")
         )
-
-        #test_predictions = [val for val in test_predictions]
-        test_predictions = dict(zip(trial_ids, test_predictions))
         for key in self.analysis_.results.keys():
             self.test_predictions_[key] = test_predictions.get(key, {})
 
@@ -386,32 +370,36 @@ class RayTuneTuner(Tuner):
             "cache": self._cache,
         }
         gc.collect()
-        with ray_context(
-            global_checkpoint_s=tune_kwargs.pop("TUNE_GLOBAL_CHECKPOINT_S", 10)
-        ):
+        self.ray_cache_name_ = "ray_cache"
+        try:
+            self.ray_cache_ = ray.get_actor(self.ray_cache_name_)
+        except Exception:
             try:
-                ray_cache = RayStore.options(name="ray_cache").remote()
-            except ray.exceptions.RayActorError:
-                ray.kill(ray.get_actor("ray_cache"), no_restart=True)
-                ray_cache = RayStore.options(name="ray_cache").remote()
+                self.ray_cache_ = RayStore.options(
+                    name=self.ray_cache_name_, lifetime="detached"
+                ).remote(name=self.ray_cache_name_)
+            except Exception:
+                try:
+                    ray.kill(ray.get_actor(self.ray_cache_name_), no_restart=True)
+                except Exception:
+                    pass
+                self.ray_cache_ = RayStore.options(
+                    name=self.ray_cache_name_, lifetime="detached"
+                ).remote(name=self.ray_cache_name_)
 
-            params["ray_cache_actor"] = ray_cache
-            tune_kwargs["run_or_experiment"] = type(
-                "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
-            )
-            tune_kwargs["run_or_experiment"] = with_parameters(
-                tune_kwargs["run_or_experiment"], **params
-            )
+        params["ray_cache_actor"] = self.ray_cache_
+        tune_kwargs["run_or_experiment"] = type(
+            "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
+        )
+        tune_kwargs["run_or_experiment"] = with_parameters(
+            tune_kwargs["run_or_experiment"], **params
+        )
 
-            self.analysis_ = tune.run(**tune_kwargs)
+        self.analysis_ = tune.run(**tune_kwargs)
 
-            gc.collect()
+        self._get_objects_from_ray_store(self.ray_cache_)
 
-            self._get_objects_from_ray_store(ray_cache)
-
-            ray.kill(ray_cache, no_restart=True)
-
-            gc.collect()
+        gc.collect()
 
     def _search(self, X, y, X_test=None, y_test=None, groups=None):
         self._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
