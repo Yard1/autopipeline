@@ -82,6 +82,8 @@ def get_obj_name(obj: Any) -> str:
 class ray_context:
     DEFAULT_CONFIG = {
         "ignore_reinit_error": True,
+        "namespace": "automl",
+        "_temp_dir": "/home/ubuntu/automl/ray"
         # "configure_logging": False,
         # "include_dashboard": True,
         # "local_mode": True,
@@ -92,6 +94,9 @@ class ray_context:
         self.global_checkpoint_s = global_checkpoint_s
         self.ray_config = {**self.DEFAULT_CONFIG, **ray_config}
         self.ray_init = False
+
+    def init(self):
+        return self.__enter__()
 
     def __enter__(self):
         self.ray_init = ray.is_initialized()
@@ -115,6 +120,8 @@ def stack_estimator(estimator, stack):
     if isinstance(estimator, CachedObject):
         estimator = estimator.object
     if stack:
+        if isinstance(stack, CachedObject):
+            stack = stack.object
         stack = deepcopy(stack)
         stack.final_estimator = estimator
         stack.final_estimator_ = estimator

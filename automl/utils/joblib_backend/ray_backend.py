@@ -84,9 +84,9 @@ class CachingPool(Pool):
         except PicklingError:
             return obj
         if not multiprocessing_cache.is_in_cache(obj_hash):
-            print(f"putting {obj_hash} ({type(obj)}) in multiprocessing cache")
+            #print(f"putting {obj_hash} ({type(obj)}) in multiprocessing cache")
             multiprocessing_cache.put(obj_hash, obj)
-        print(f"accessing {obj_hash} ({type(obj)}) from multiprocessing cache")
+        #print(f"accessing {obj_hash} ({type(obj)}) from multiprocessing cache")
         return multiprocessing_cache.get_reference(obj_hash)
 
 

@@ -111,14 +111,16 @@ class StackingEnsembleCreator(EnsembleCreator):
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
-
+        print(
+            f"getting estimators for {self._ensemble_name}"
+        )
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
 
-        logger.debug(
+        print(
             f"creating stacking classifier {self._ensemble_name} with {len(estimators)}"
         )
         ensemble = self.ensemble_class(
@@ -128,9 +130,8 @@ class StackingEnsembleCreator(EnsembleCreator):
             n_jobs=None,
         )()
         logger.debug("ensemble created")
-        gc.collect()
         logger.debug("fitting ensemble")
-        print("fitting ensemble")
+        print(f"fitting ensemble {self}")
         ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,
@@ -162,7 +163,6 @@ class StackingEnsembleCreator(EnsembleCreator):
         return ensemble, X_stack, X_test_stack
 
     def clear_stacked_predictions(self, ensemble):
-        ensemble.stacked_predictions_ = None
         del ensemble.stacked_predictions_
 
     def fit_ensemble(
@@ -349,14 +349,16 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
-
+        print(
+            f"getting estimators for {self._ensemble_name}"
+        )
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
 
-        logger.debug(
+        print(
             f"creating stacking classifier {self._ensemble_name} with {len(estimators)}"
         )
         ensemble = self.ensemble_class(
@@ -366,9 +368,8 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             n_jobs=None,
         )()
         logger.debug("ensemble created")
-        gc.collect()
         logger.debug("fitting ensemble")
-        print("fitting ensemble")
+        print(f"fitting ensemble {self}")
         ensemble.n_jobs = 1  # TODO make dynamic
         try:
             ensemble.fit(

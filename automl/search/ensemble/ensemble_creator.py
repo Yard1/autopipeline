@@ -63,7 +63,6 @@ class EnsembleCreator(ABC):
                 )
                 for trial_result in trials_for_ensembling
             ]
-        gc.collect()
         return ret
 
     def select_trial_ids_for_ensemble(
@@ -105,4 +104,3 @@ class EnsembleCreator(ABC):
         self.select_trial_ids_for_ensemble(
             X, y, results, results_df, pipeline_blueprint
         )
-        gc.collect()

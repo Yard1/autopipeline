@@ -42,7 +42,6 @@ def fit_single_estimator_if_not_fitted(
 ):
     if hasattr(estimator, "_ray_cached_object"):
         cache = estimator._ray_cached_object
-        estimator = cache.object
     else:
         cache = None
     try:
@@ -50,19 +49,26 @@ def fit_single_estimator_if_not_fitted(
         check_is_fitted(estimator)
         return estimator
     except (NotFittedError, AssertionError):
-        print(f"fitting estimator {estimator}", flush=True)
-        ret = _fit_single_estimator(
-            cloning_function(estimator),
-            X,
-            y,
-            sample_weight=sample_weight,
-            message_clsname=message_clsname,
-            message=message,
-        )
-        if cache:
-            ret._ray_cached_object = cache
-            cache.object = ret
-        return ret
+        try:
+            assert cache
+            cache.clear_cache()
+            ret = cache.object
+            check_is_fitted(estimator)
+            return estimator
+        except (NotFittedError, AssertionError):
+            print(f"fitting estimator {estimator}", flush=True)
+            ret = _fit_single_estimator(
+                cloning_function(estimator),
+                X,
+                y,
+                sample_weight=sample_weight,
+                message_clsname=message_clsname,
+                message=message,
+            )
+            if cache:
+                ret._ray_cached_object = cache
+                cache.object = ret
+            return ret
 
 
 def _get_average_preds_from_repeated_cv(predictions: list, estimator):

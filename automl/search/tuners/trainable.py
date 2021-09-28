@@ -1,8 +1,10 @@
 import numpy as np
 import gc
+import sys
 import time
 from copy import deepcopy
 from ray.tune.utils.placement_groups import PlacementGroupFactory
+from ray.tune.resources import Resources
 from sklearn.base import clone
 
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
@@ -180,8 +182,8 @@ class SklearnTrainable(Trainable):
             self.fit_params = params.get("fit_params", None)
             self.scoring = params.get("scoring", None)
             self.metric_name = params["metric_name"]
-            self.cv = deepcopy(params.get("cv", 5))
-            self.random_state = deepcopy(params.get("random_state", None))
+            self.cv = params.get("cv", 5)
+            self.random_state = params.get("random_state", None)
             self.prune_attr = params.get("prune_attr", None)
             self.const_values = params.get("const_values", {})
             self.cache = params.get("cache", None)
@@ -199,7 +201,6 @@ class SklearnTrainable(Trainable):
         register_ray()
         r = self._train()
 
-        gc.collect()
         return r
 
     def _make_scoring_dict(self):
@@ -225,7 +226,12 @@ class SklearnTrainable(Trainable):
 
     @classmethod
     def default_resource_request(cls, config):
-        return PlacementGroupFactory([{"CPU": 1}] * cls.N_JOBS)
+        return Resources(
+            cpu=0,
+            gpu=0,
+            extra_cpu=cls.N_JOBS,
+            extra_gpu=0
+        )
 
     def _cross_validate(
         self,
@@ -382,7 +388,7 @@ class SklearnTrainable(Trainable):
 
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
-        print(self.X_.columns)
+        #print(self.X_.columns)
         scores = self._cross_validate(
             estimator_subclassed,
             self.X_,
@@ -497,6 +503,7 @@ class SklearnTrainable(Trainable):
                     self.trial_id,
                     "fold_predictions",
                     combined_predictions,
+                    compress=False,
                 )
             except ray.exceptions.ObjectStoreFullError:
                 print("object store full")
@@ -517,12 +524,14 @@ class SklearnTrainable(Trainable):
                         self.trial_id,
                         "test_predictions",
                         combined_test_predictions,
+                        compress=False,
                     )
                 except ray.exceptions.ObjectStoreFullError:
                     print("object store full")
                     pass
 
         logger.debug("done")
+        ret["size"] = sys.getsizeof(fitted_estimator)
         return ret
 
     def reset_config(self, new_config):

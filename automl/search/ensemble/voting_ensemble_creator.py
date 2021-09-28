@@ -84,7 +84,7 @@ class VotingEnsembleCreator(EnsembleCreator):
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
-        logger.debug(f"creating voting classifier {self._ensemble_name}")
+        print(f"creating voting classifier {self._ensemble_name}")
         weights = [self.weight_function_(trial) for trial in trials_for_ensembling]
         trials_for_ensembling = [
             results[k]
@@ -92,12 +92,15 @@ class VotingEnsembleCreator(EnsembleCreator):
             if weights[idx] > 0
         ]
         weights = [weight for weight in weights if weight > 0]
+        print(
+            f"getting estimators for {self._ensemble_name}"
+        )
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level, previous_stack
         )
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
-        logger.debug(f"final number of estimators: {len(estimators)}")
+        print(f"final number of estimators: {len(estimators)}")
         ensemble = self.ensemble_class(
             estimators=estimators,
             weights=weights,
@@ -105,9 +108,8 @@ class VotingEnsembleCreator(EnsembleCreator):
             **self.ensemble_args_,
         )()
         logger.debug("ensemble created")
-        gc.collect()
         logger.debug("fitting ensemble")
-        print("fitting ensemble")
+        print(f"fitting ensemble {self}")
         ensemble.n_jobs = 1  # TODO make dynamic
         ensemble.fit(
             X,

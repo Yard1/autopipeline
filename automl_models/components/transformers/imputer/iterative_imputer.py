@@ -17,9 +17,9 @@ from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
 lightgbm_imputer_config = {
     "n_jobs": 1,
-    "n_estimators": 1000,
+    "n_estimators": 512,
     "class_weight": "balanced",
-    "silent": True,
+    "verbose": -10,
     #"learning_rate": 0.05,
     "early_stopping_condition": 5000,
 }
@@ -128,7 +128,6 @@ class PandasIterativeImputer(PandasDataFrameTransformerMixin, _BaseImputer):
 
                 X_imputed.update(prediction)
                 X_imputed = X_imputed.astype(self.dtypes_)
-                gc.collect()
 
             if self.classifiers_:
                 gamma_newcat = new_gamma_newcat / self.n_catmissing_

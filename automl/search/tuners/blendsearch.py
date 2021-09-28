@@ -56,6 +56,8 @@ from ...utils.display import IPythonDisplay
 
 GlobalSearch = ConditionalOptunaSearch
 
+def print(*args, **kwargs):
+    pass
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):

@@ -46,7 +46,7 @@ class LGBMClassifier(GradientBoosterEstimator):
         "reg_lambda": 1.0,
         "random_state": 0,
         "n_jobs": 1,
-        "silent": True,
+        "verbose": -1,
     }
 
     _default_tuning_grid = {
@@ -94,7 +94,7 @@ class LGBMRegressor(GradientBoosterEstimator):
         "reg_lambda": 1.0,
         "random_state": 0,
         "n_jobs": 1,
-        "silent": True,
+        "verbose": -1,
     }
 
     _default_tuning_grid = {

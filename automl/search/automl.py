@@ -27,7 +27,7 @@ from ..components import DataType, ComponentLevel
 from ..problems import ProblemType
 from ..components import LabelEncoder
 from ..utils import validate_type
-from .utils import flatten_iterable, get_obj_name
+from .utils import flatten_iterable, get_obj_name, ray_context
 
 from automl_models.components.preprocessing.prepare_data import (
     PrepareDataFrame,
@@ -198,7 +198,7 @@ class AutoML(BaseEstimator):
     ):
         logger.info(make_header("AutoML Fit"))
 
-        ray.init(ignore_reinit_error=True)
+        ray_context().init()
 
         self._validate()
 

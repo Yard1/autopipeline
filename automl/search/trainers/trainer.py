@@ -1,8 +1,9 @@
-from automl.search.store import CachedSklearn
+from automl.search.store import CachedObject, CachedSklearn
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
 from typing import List, Optional, Union, Tuple
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -131,33 +132,33 @@ class Trainer:
             or [
                 VotingEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=50, percentile_threshold=15
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=50, percentile_threshold=15
                     ),
                     problem_type=self.problem_type,
                 ),
-                SelectFromModelStackingEnsembleCreator(
-                    ensemble_strategy=EnsembleBest(
-                        configurations_to_select=200, percentile_threshold=1
-                    ),
-                    problem_type=self.problem_type,
-                ),
+                # SelectFromModelStackingEnsembleCreator(
+                #     ensemble_strategy=EnsembleBest(
+                #         configurations_to_select=100, percentile_threshold=1
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
             ]
             + [
                 VotingSoftEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=50, percentile_threshold=15
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingSoftByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=50, percentile_threshold=15
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -175,10 +176,15 @@ class Trainer:
             "tuner_plot_display": IPythonDisplay("tuner_plot_display"),
         }
 
-    def get_main_stacking_ensemble_at_level(self, stacking_level):
+    def get_main_stacking_ensemble_at_level(
+        self, stacking_level, get_from_cache: bool = True
+    ):
         if stacking_level < 0:
             return None
-        return self.ensembles_[stacking_level][self.main_stacking_ensemble_name]
+        ret = self.ensembles_[stacking_level][self.main_stacking_ensemble_name]
+        if get_from_cache and isinstance(ret, CachedObject):
+            ret = ret.object
+        return ret
 
     @property
     def previous_main_stacking_ensemble(self):
@@ -357,18 +363,20 @@ class Trainer:
 
         gc.collect()
 
-        with joblib.parallel_backend("ray"):
-            X_stack, X_test_stack = self._create_ensembles(
-                X,
-                y,
-                results,
-                results_df,
-                pipeline_blueprint,
-                X_test=X_test,
-                y_test=y_test,
-                X_test_original=X_test_original,
-                y_test_original=y_test_original,
-            )
+        # with joblib.parallel_backend("ray"):
+        X_stack, X_test_stack = self._create_ensembles(
+            X,
+            y,
+            results,
+            results_df,
+            pipeline_blueprint,
+            X_test=X_test,
+            y_test=y_test,
+            X_test_original=X_test_original,
+            y_test_original=y_test_original,
+        )
+        self.last_tuner_.ray_cache_.clean.remote("fold_predictions")
+        self.last_tuner_.ray_cache_.clean.remote("test_predictions")
         del self.last_tuner_.fold_predictions_
         del self.last_tuner_.test_predictions_
         if self.current_stacking_level >= self.stacking_level:
@@ -401,6 +409,7 @@ class Trainer:
         y_test=None,
         X_test_original=None,
         y_test_original=None,
+        save_to_ray: bool = True,
     ):
         ensemble_config = {
             "X": X,
@@ -415,7 +424,9 @@ class Trainer:
             else self.scoring_dict["balanced_accuracy"],
             "random_state": self.random_state,
             "current_stacking_level": self.current_stacking_level,
-            "previous_stack": self.previous_main_stacking_ensemble,
+            "previous_stack": self.get_main_stacking_ensemble_at_level(
+                self.current_stacking_level - 1, get_from_cache=False
+            ),
             "X_test": X_test,
             "y_test": y_test,
             "X_test_original": X_test_original,
@@ -426,39 +437,64 @@ class Trainer:
             "cv": self.cv_,
         }
 
+        print("creating ensembles")
+
         # cpus_available = ray.available_resources()["CPU"]
 
         ray_ensemble_config = ray.put(ensemble_config)
         ray_scoring_dict = ray.put(self.scoring_dict)
+        print("starting ensemble jobs")
+
         ray_jobs = [
             ray_fit_ensemble_and_return_stacked_preds_remote.remote(
-                self.main_stacking_ensemble, ray_ensemble_config, ray_scoring_dict
+                self.main_stacking_ensemble,
+                ray_ensemble_config,
+                ray_scoring_dict,
+                ray_cache_actor=self.last_tuner_.ray_cache_,
             )
         ]
         ray_jobs += [
-            ray_fit_ensemble.remote(ensemble, ray_ensemble_config, ray_scoring_dict)
+            ray_fit_ensemble.remote(
+                ensemble,
+                ray_ensemble_config,
+                ray_scoring_dict,
+                ray_cache_actor=self.last_tuner_.ray_cache_,
+            )
             for ensemble in self.secondary_ensembles or []
         ]
+
         ray_results = ray.get(ray_jobs)
 
-        main_result = ray_results.pop(0)
+        print("ensemble jobs returned")
+
+        def index_of_first(lst, pred):
+            for i, v in enumerate(lst):
+                if pred(v):
+                    return i
+            return None
+
+        main_result = ray_results.pop(
+            index_of_first(ray_results, lambda x: len(x) > 2)
+        )
         (
             main_stacking_ensemble_fitted,
             X_stack,
             X_test_stack,
-        ) = main_result[0]
-        scores = {self.main_stacking_ensemble._ensemble_name: main_result[1]}
-        scores = {
-            **scores,
-            **{
-                ensemble._ensemble_name: ray_results[i][1]
+            score
+        ) = main_result
+        scores = {self.main_stacking_ensemble._ensemble_name: score}
+        if ray_results:
+            scores = {
+                **scores,
+                **{
+                    ensemble._ensemble_name: ray_results[i][1]
+                    for i, ensemble in enumerate(self.secondary_ensembles or [])
+                },
+            }
+            fitted_ensembles = {
+                ensemble._ensemble_name: ray_results[i][0]
                 for i, ensemble in enumerate(self.secondary_ensembles or [])
-            },
-        }
-        fitted_ensembles = {
-            ensemble._ensemble_name: ray_results[i][0]
-            for i, ensemble in enumerate(self.secondary_ensembles or [])
-        }
+            }
         fitted_ensembles[
             self.main_stacking_ensemble._ensemble_name
         ] = main_stacking_ensemble_fitted
@@ -496,13 +532,13 @@ class Trainer:
     def _create_final_stack(self):
         # TODO change isinstance
         if len(self.ensembles_) <= 1:
-            return self.ensembles_[-1][self.main_stacking_ensemble_name]
+            return self.get_main_stacking_ensemble_at_level(-1)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
         ):
             cloned_ensembles = [
-                deepcopy(ensembles[self.main_stacking_ensemble_name])
-                for ensembles in self.ensembles_
+                self.get_main_stacking_ensemble_at_level(i)
+                for i, _ in enumerate(self.ensembles_)
             ]
         for idx in range(0, len(cloned_ensembles) - 1):
             cloned_ensembles[idx].passthrough = True
@@ -601,7 +637,10 @@ class Trainer:
     def get_ensemble_by_id(self, ensemble_id):
         check_is_fitted(self)
         stacking_level, ensemble_name = ensemble_id.split("_")
-        return self.ensembles_[int(stacking_level)][ensemble_name]
+        ret = self.ensembles_[int(stacking_level)][ensemble_name]
+        if isinstance(ret, CachedObject):
+            ret = ret.object
+        return ret
 
     def get_pipeline_by_id(self, id):
         check_is_fitted(self)
