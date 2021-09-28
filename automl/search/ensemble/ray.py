@@ -59,7 +59,7 @@ def cache_ensemble(
     return ray.get(ray_cache_actor.get_cached_object.remote(key, ENSEMBLE_STORE_NAME))
 
 
-@ray.remote(num_cpus=4, max_calls=1, num_returns=4)
+@ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble_and_return_stacked_preds_remote(
     main_stacking_ensemble: StackingEnsembleCreator,
     ensemble_config,
@@ -88,7 +88,7 @@ def ray_fit_ensemble_and_return_stacked_preds_remote(
     return main_stacking_ensemble_fitted, X_stack, X_test_stack, scores
 
 
-@ray.remote(num_cpus=4, max_calls=1, num_returns=2)
+@ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble(
     ensemble: EnsembleCreator,
     ensemble_config,

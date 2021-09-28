@@ -443,8 +443,6 @@ class Trainer:
 
         ray_ensemble_config = ray.put(ensemble_config)
         ray_scoring_dict = ray.put(self.scoring_dict)
-        print("starting ensemble jobs")
-
         ray_jobs = [
             ray_fit_ensemble_and_return_stacked_preds_remote.remote(
                 self.main_stacking_ensemble,
@@ -462,8 +460,14 @@ class Trainer:
             )
             for ensemble in self.secondary_ensembles or []
         ]
+        print("starting ensemble jobs")
 
-        ray_results = ray.get(ray_jobs)
+        def to_iterator(obj_ids):
+            while obj_ids:
+                done, obj_ids = ray.wait(obj_ids)
+                yield ray.get(done[0])
+
+        ray_results = [x for x in tqdm(to_iterator(ray_jobs), total=len(ray_jobs))]
 
         print("ensemble jobs returned")
 
