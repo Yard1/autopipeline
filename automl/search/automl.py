@@ -1,4 +1,3 @@
-from automl.search.store import CachedObject
 from copy import deepcopy
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
@@ -368,8 +367,6 @@ class AutoML(BaseEstimator):
 
     def _get_result(self, result, stacking_level: int = 0):
         result = result.copy()
-        if isinstance(result["estimator"], CachedObject):
-            result["estimator"] = result["estimator"].object
         component_names = [
             self._get_component_name(component)
             for name, component in result["estimator"].steps[:-1]

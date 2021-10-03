@@ -1,4 +1,3 @@
-from automl.search.store import CachedObject
 import contextlib
 from copy import deepcopy
 import io
@@ -43,8 +42,6 @@ class EnsembleCreator(ABC):
     def _treat_kwargs(self, kwargs: dict) -> dict:
         kwargs = kwargs.copy()
         for k in kwargs:
-            if isinstance(kwargs[k], CachedObject):
-                kwargs[k] = kwargs[k].object
             if isinstance(kwargs[k], dict):
                 kwargs[k] = self._treat_kwargs(kwargs[k])
         return kwargs

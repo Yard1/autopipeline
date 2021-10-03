@@ -8,7 +8,7 @@ import ray
 from ray.tune.utils import flatten_dict, unflatten_dict
 
 from joblib._store_backends import StoreBackendBase, StoreBackendMixin
-from ...search.store import RayStore
+# from ...search.store import RayStore
 
 
 class RayStoreBackend(StoreBackendMixin, StoreBackendBase):

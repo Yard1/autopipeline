@@ -17,7 +17,6 @@ from sklearn.metrics._scorer import (
 )
 from .metrics.scorers import MultimetricScorerWithErrorScore
 from ..components.component import Component
-from .store import CachedObject
 
 
 def score_test(
@@ -117,11 +116,7 @@ class ray_context:
 
 
 def stack_estimator(estimator, stack):
-    if isinstance(estimator, CachedObject):
-        estimator = estimator.object
     if stack:
-        if isinstance(stack, CachedObject):
-            stack = stack.object
         stack = deepcopy(stack)
         stack.final_estimator = estimator
         stack.final_estimator_ = estimator

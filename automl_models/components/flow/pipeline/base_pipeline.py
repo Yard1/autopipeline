@@ -11,6 +11,19 @@ from ...utils import validate_type
 
 
 class BasePipeline(_ImblearnPipeline):
+    def _transform(self, X):
+        Xt = X
+        for _, _, transform in self._iter():
+            Xt = transform.transform(Xt)
+        return Xt
+
+    def _inverse_transform(self, X):
+        Xt = X
+        reverse_iter = reversed(list(self._iter()))
+        for _, _, transform in reverse_iter:
+            Xt = transform.inverse_transform(Xt)
+        return Xt
+
     def set_params(self, **kwargs):
         # ConfigSpace workaround
         kwargs = {k: (None if v == "!None" else v) for k, v in kwargs.items()}
@@ -22,7 +35,7 @@ class BasePipeline(_ImblearnPipeline):
         if fit and isinstance(X, pd.DataFrame):
             self.X_columns_ = X.columns
             self.X_dtypes_ = X.dtypes
-        else:
+        elif not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X, columns=self.X_columns_)
             X = X.astype(self.X_dtypes_)
         if y is not None:

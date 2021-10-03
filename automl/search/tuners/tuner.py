@@ -18,7 +18,6 @@ from sklearn.model_selection._search import ParameterGrid
 from .with_parameters import with_parameters
 
 from .trainable import SklearnTrainable
-from ..store import RayStore
 from .utils import get_all_tunable_params
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
@@ -312,29 +311,6 @@ class RayTuneTuner(Tuner):
                 if str(v) in self.component_strings_:
                     conf[k] = str(v)
 
-    def _get_objects_from_ray_store(self, ray_cache):
-        self.fold_predictions_ = {}
-        self.test_predictions_ = {}
-        self.fitted_estimators_ = {}
-
-        logger.debug("getting estimators from ray object store")
-        self.fitted_estimators_ = ray.get(
-            ray_cache.get_all_cached_objects.remote("fitted_estimators")
-        )
-
-        logger.debug("getting fold predictions from ray object store")
-        fold_predictions = ray.get(
-            ray_cache.get_all_cached_objects.remote("fold_predictions")
-        )
-        for key in self.analysis_.results.keys():
-            self.fold_predictions_[key] = fold_predictions.get(key, {})
-
-        logger.debug("getting test predictions from ray object store")
-        test_predictions = ray.get(
-            ray_cache.get_all_cached_objects.remote("test_predictions")
-        )
-        for key in self.analysis_.results.keys():
-            self.test_predictions_[key] = test_predictions.get(key, {})
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
@@ -370,24 +346,7 @@ class RayTuneTuner(Tuner):
             "cache": self._cache,
         }
         gc.collect()
-        self.ray_cache_name_ = "ray_cache"
-        try:
-            self.ray_cache_ = ray.get_actor(self.ray_cache_name_)
-        except Exception:
-            try:
-                self.ray_cache_ = RayStore.options(
-                    name=self.ray_cache_name_, lifetime="detached"
-                ).remote(name=self.ray_cache_name_)
-            except Exception:
-                try:
-                    ray.kill(ray.get_actor(self.ray_cache_name_), no_restart=True)
-                except Exception:
-                    pass
-                self.ray_cache_ = RayStore.options(
-                    name=self.ray_cache_name_, lifetime="detached"
-                ).remote(name=self.ray_cache_name_)
 
-        params["ray_cache_actor"] = self.ray_cache_
         tune_kwargs["run_or_experiment"] = type(
             "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
         )
@@ -396,8 +355,6 @@ class RayTuneTuner(Tuner):
         )
 
         self.analysis_ = tune.run(**tune_kwargs)
-
-        self._get_objects_from_ray_store(self.ray_cache_)
 
         gc.collect()
 

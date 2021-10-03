@@ -1,4 +1,3 @@
-from automl.search.store import CachedObject, CachedSklearn
 from sklearn.utils.validation import check_is_fitted
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
@@ -177,13 +176,11 @@ class Trainer:
         }
 
     def get_main_stacking_ensemble_at_level(
-        self, stacking_level, get_from_cache: bool = True
+        self, stacking_level
     ):
         if stacking_level < 0:
             return None
         ret = self.ensembles_[stacking_level][self.main_stacking_ensemble_name]
-        if get_from_cache and isinstance(ret, CachedObject):
-            ret = ret.object
         return ret
 
     @property
@@ -309,19 +306,12 @@ class Trainer:
                 logger.debug(f"removing {trial_id}")
                 continue
             if "config" in result:
-                if trial_id in self.last_tuner_.fitted_estimators_:
-                    result["estimator"] = self.last_tuner_.fitted_estimators_[trial_id]
-                else:
-                    est = self._create_estimator(
-                        result["config"],
-                        pipeline_blueprint=pipeline_blueprint,
-                        cache=self.last_tuner_._cache,  # TODO make dynamic
-                    )
-                    cached_est = CachedSklearn(
-                        self.last_tuner_.ray_cache_name_, "fitted_estimators", trial_id
-                    )
-                    cached_est.object = est
-                    result["estimator"] = cached_est
+                est = self._create_estimator(
+                    result["config"],
+                    pipeline_blueprint=pipeline_blueprint,
+                    cache=self.last_tuner_._cache,  # TODO make dynamic
+                )
+                result["estimator"] = est
         results = {k: v for k, v in results.items() if k not in trial_ids_to_remove}
         results_df = self.last_tuner_.analysis_.results_df
         results_df = results_df[results_df.index.isin(set(results))]
@@ -375,10 +365,6 @@ class Trainer:
             X_test_original=X_test_original,
             y_test_original=y_test_original,
         )
-        self.last_tuner_.ray_cache_.clean.remote("fold_predictions")
-        self.last_tuner_.ray_cache_.clean.remote("test_predictions")
-        del self.last_tuner_.fold_predictions_
-        del self.last_tuner_.test_predictions_
         if self.current_stacking_level >= self.stacking_level:
             # logger.debug("fitting final ensemble", flush=True)
             # self.final_ensemble_ = self._create_final_stack()
@@ -425,14 +411,12 @@ class Trainer:
             "random_state": self.random_state,
             "current_stacking_level": self.current_stacking_level,
             "previous_stack": self.get_main_stacking_ensemble_at_level(
-                self.current_stacking_level - 1, get_from_cache=False
+                self.current_stacking_level - 1
             ),
             "X_test": X_test,
             "y_test": y_test,
             "X_test_original": X_test_original,
             "y_test_original": y_test_original,
-            "fold_predictions": self.last_tuner_.fold_predictions_,
-            "test_predictions": self.last_tuner_.test_predictions_,
             "refit_estimators": False,
             "cv": self.cv_,
         }
@@ -441,22 +425,22 @@ class Trainer:
 
         # cpus_available = ray.available_resources()["CPU"]
 
-        ray_ensemble_config = ray.put(ensemble_config)
-        ray_scoring_dict = ray.put(self.scoring_dict)
+        ray_ensemble_config = ensemble_config
+        ray_scoring_dict = self.scoring_dict
         ray_jobs = [
-            ray_fit_ensemble_and_return_stacked_preds_remote.remote(
+            ray_fit_ensemble_and_return_stacked_preds_remote(
                 self.main_stacking_ensemble,
                 ray_ensemble_config,
                 ray_scoring_dict,
-                ray_cache_actor=self.last_tuner_.ray_cache_,
+                #ray_cache_actor=self.last_tuner_.ray_cache_,
             )
         ]
         ray_jobs += [
-            ray_fit_ensemble.remote(
+            ray_fit_ensemble(
                 ensemble,
                 ray_ensemble_config,
                 ray_scoring_dict,
-                ray_cache_actor=self.last_tuner_.ray_cache_,
+                #ray_cache_actor=self.last_tuner_.ray_cache_,
             )
             for ensemble in self.secondary_ensembles or []
         ]
@@ -467,7 +451,7 @@ class Trainer:
                 done, obj_ids = ray.wait(obj_ids)
                 yield ray.get(done[0])
 
-        ray_results = [x for x in tqdm(to_iterator(ray_jobs), total=len(ray_jobs))]
+        ray_results = ray_jobs
 
         print("ensemble jobs returned")
 
@@ -642,8 +626,6 @@ class Trainer:
         check_is_fitted(self)
         stacking_level, ensemble_name = ensemble_id.split("_")
         ret = self.ensembles_[int(stacking_level)][ensemble_name]
-        if isinstance(ret, CachedObject):
-            ret = ret.object
         return ret
 
     def get_pipeline_by_id(self, id):

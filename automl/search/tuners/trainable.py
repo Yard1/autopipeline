@@ -190,7 +190,6 @@ class SklearnTrainable(Trainable):
             self.X_test_ = params.get("X_test_", None)
             self.y_test_ = params.get("y_test_", None)
             self.cache_results = params.get("cache_results", True)
-            self.ray_cache_actor = params.get("ray_cache_actor", None)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -320,29 +319,6 @@ class SklearnTrainable(Trainable):
 
         return ret
 
-    def _combine_cv_repeat(self, chunk):
-        predictions, test_indices = zip(*chunk)
-        predictions = np.concatenate(predictions)
-        test_indices = np.concatenate(test_indices)
-        inv_test_indices = np.empty(len(test_indices), dtype=int)
-        inv_test_indices[test_indices] = np.arange(len(test_indices))
-        return predictions[inv_test_indices]
-
-    def _combine_cv_predictions(self, predictions, train_test_indices):
-        if isinstance(self.cv, _RepeatedSplits):
-            repeats = self.cv.n_repeats
-        else:
-            repeats = 1
-        _, test_indices = zip(*train_test_indices)
-        predictions_with_indices = list(zip(predictions, test_indices))
-        combined_predictions = [
-            array_shrink(self._combine_cv_repeat(repeat), int2uint=True)
-            for repeat in split_list_into_chunks(
-                predictions_with_indices, len(predictions_with_indices) // repeats
-            )
-        ]
-        return combined_predictions
-
     def _train(self):
         time_cv = time.time()
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -375,22 +351,14 @@ class SklearnTrainable(Trainable):
         else:
             subsample_cv = self.cv
 
-        if self.cache_results and not is_early_stopping_on:
-            (
-                estimator_subclassed,
-                original_type,
-            ) = create_dynamically_subclassed_estimator(estimator)
-        else:
-            estimator_subclassed, original_type = estimator, None
-
         # TODO: threshold for binary classification? https://github.com/scikit-learn/scikit-learn/pull/16525/files
         # TODO: prediction time (per row)
 
         scoring_with_dummies = self._make_scoring_dict()
-        logger.debug(f"doing cv on {estimator_subclassed.steps[-1][1]}")
+        logger.debug(f"doing cv on {estimator.steps[-1][1]}")
         #print(self.X_.columns)
         scores = self._cross_validate(
-            estimator_subclassed,
+            estimator,
             self.X_,
             self.y_,
             cv=subsample_cv,
@@ -410,16 +378,6 @@ class SklearnTrainable(Trainable):
             metric: np.mean(scores[f"test_{metric}"]) for metric in self.scoring.keys()
         }
 
-        combined_predictions = {}
-        if self.cache_results and not is_early_stopping_on:
-            combined_predictions = {
-                k: self._combine_cv_predictions(
-                    [x._saved_preds[k] for x in scores["estimator"]],
-                    scores["cv_indices"],
-                )
-                for k in scores["estimator"][0]._saved_preds.keys()
-            }
-
         if self.problem_type == ProblemType.BINARY:
             metrics["optimized_precision"] = optimized_precision(
                 metrics["accuracy"], metrics["recall"], metrics["specificity"]
@@ -432,22 +390,21 @@ class SklearnTrainable(Trainable):
         test_metrics = None
         fitted_estimator = None
         fitted_estimator_list = []
-        combined_test_predictions = {}
 
         if self.X_test_ is not None and not is_early_stopping_on:
             logger.debug("scoring test")
             with set_param_context(
-                estimator_subclassed,
+                estimator,
                 cloned_estimators=fitted_estimator_list,
                 # TODO: look into why setting n_jobs to >1 here leads to way slower results
                 **{
                     k: 1
-                    for k, v in estimator_subclassed.get_params().items()
+                    for k, v in estimator.get_params().items()
                     if k.endswith("n_jobs")
                 },
             ):
                 test_ret = ray_score_test.remote(
-                    estimator_subclassed,
+                    estimator,
                     self.X_,
                     self.y_,
                     self.X_test_,
@@ -458,19 +415,7 @@ class SklearnTrainable(Trainable):
                 test_metrics = {
                     k: v for k, v in test_metrics.items() if k in self.scoring
                 }
-                if self.cache_results:
-                    combined_test_predictions = {
-                        k: array_shrink(
-                            fitted_estimator._saved_preds[k],
-                            int2uint=True,
-                        )
-                        for k in fitted_estimator._saved_preds.keys()
-                    }
-                fitted_estimator_list.append(fitted_estimator)
             fitted_estimator = fitted_estimator_list[0]
-            if original_type is not None:
-                del fitted_estimator._saved_preds
-                fitted_estimator.__class__ = original_type
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],
@@ -486,49 +431,6 @@ class SklearnTrainable(Trainable):
             ret["test_metrics"] = test_metrics
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
-
-        if self.cache_results:
-            try:
-                store = self.ray_cache_actor
-                assert store is not None
-            except Exception as e:
-                logger.warning(e)
-                store = None
-        else:
-            store = None
-
-        if store is not None:
-            try:
-                store.put.remote(
-                    self.trial_id,
-                    "fold_predictions",
-                    combined_predictions,
-                    compress=False,
-                )
-            except ray.exceptions.ObjectStoreFullError:
-                print("object store full")
-                pass
-            if fitted_estimator is not None:
-                try:
-                    store.put.remote(
-                        self.trial_id,
-                        "fitted_estimators",
-                        fitted_estimator,
-                    )
-                except ray.exceptions.ObjectStoreFullError:
-                    print("object store full")
-                    pass
-            if combined_test_predictions:
-                try:
-                    store.put.remote(
-                        self.trial_id,
-                        "test_predictions",
-                        combined_test_predictions,
-                        compress=False,
-                    )
-                except ray.exceptions.ObjectStoreFullError:
-                    print("object store full")
-                    pass
 
         logger.debug("done")
         ret["size"] = sys.getsizeof(fitted_estimator)

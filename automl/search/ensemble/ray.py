@@ -46,25 +46,12 @@ def _score_ensemble(
     return scores
 
 
-def cache_ensemble(
-    ensemble,
-    ensemble_name: str,
-    current_stacking_level: int,
-    ray_cache_actor: ray.ObjectRef,
-):
-    if not ray_cache_actor:
-        return ensemble
-    key = f"{current_stacking_level}_{ensemble_name}"
-    ray.get(ray_cache_actor.put.remote(key, ENSEMBLE_STORE_NAME, ensemble))
-    return ray.get(ray_cache_actor.get_cached_object.remote(key, ENSEMBLE_STORE_NAME))
-
-
-@ray.remote(num_cpus=4, max_calls=1)
+#@ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble_and_return_stacked_preds_remote(
     main_stacking_ensemble: StackingEnsembleCreator,
     ensemble_config,
     scoring_dict,
-    ray_cache_actor: ray.ObjectRef,
+    ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
     with joblib.parallel_backend("sequential"):
@@ -78,32 +65,18 @@ def ray_fit_ensemble_and_return_stacked_preds_remote(
         scores = _score_ensemble(
             main_stacking_ensemble_fitted, ensemble_config, scoring_dict
         )
-    main_stacking_ensemble_fitted = cache_ensemble(
-        main_stacking_ensemble_fitted,
-        main_stacking_ensemble._ensemble_name,
-        ensemble_config["current_stacking_level"],
-        ray_cache_actor,
-    )
-    gc.collect()
     return main_stacking_ensemble_fitted, X_stack, X_test_stack, scores
 
 
-@ray.remote(num_cpus=4, max_calls=1)
+#@ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble(
     ensemble: EnsembleCreator,
     ensemble_config,
     scoring_dict,
-    ray_cache_actor: ray.ObjectRef,
+    ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
     with joblib.parallel_backend("sequential"):
         ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
         scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
-    ensemble_fitted = cache_ensemble(
-        ensemble_fitted,
-        ensemble._ensemble_name,
-        ensemble_config["current_stacking_level"],
-        ray_cache_actor,
-    )
-    gc.collect()
     return ensemble_fitted, scores
