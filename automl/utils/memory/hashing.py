@@ -78,7 +78,10 @@ def fast_hash_pandas_object(
             h = combine_hash_arrays(arrays, 2)
 
     elif isinstance(obj, ABCDataFrame):
-        hashes = (hash_array(series._values) for _, series in obj.items())
+        hashes = (
+            hash_array(series._values, encoding, hash_key, categorize)
+            for _, series in obj.items()
+        )
         num_items = len(obj.columns)
         if index:
             index_hash_generator = (
