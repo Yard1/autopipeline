@@ -1,27 +1,113 @@
+from joblib.memory import NotMemorizedFunc
 import pandas as pd
 import numpy as np
 
 from imblearn.pipeline import Pipeline as _ImblearnPipeline
 from sklearn.utils import _print_elapsed_time
 from sklearn.utils.metaestimators import if_delegate_has_method
-from sklearn.base import is_classifier
+from sklearn.base import is_classifier, clone
+from sklearn.pipeline import check_memory
 from time import time
 
 from ...utils import validate_type
 
 
+def _transform_one(
+    transformer,
+    X,
+):
+    return transformer.transform(X)
+
+
+def _inverse_transform_one(
+    transformer,
+    X,
+):
+    return transformer.inverse_transform(X)
+
+
+def _fit(estimator, X, y, *args, **kwargs):
+    return estimator.fit(X, y, *args, **kwargs)
+
+
+def _fit_transform(estimator, X, y, *args, **kwargs):
+    return estimator.fit_transform(X, y, *args, **kwargs), estimator
+
+
+def _fit_resample(estimator, X, y, *args, **kwargs):
+    return estimator.fit_resample(X, y, *args, **kwargs), estimator
+
+
+def _fit_predict(estimator, X, y, *args, **kwargs):
+    return estimator.fit_predict(X, y, *args, **kwargs), estimator
+
+
+def _predict(estimator, X, *args, **kwargs):
+    return estimator.predict(X, *args, **kwargs)
+
+
+def _predict_proba(estimator, X, *args, **kwargs):
+    return estimator.predict_proba(X, *args, **kwargs)
+
+
+def _predict_log_proba(estimator, X, *args, **kwargs):
+    return estimator.predict_log_proba(X, *args, **kwargs)
+
+
+def _decision_function(estimator, X, *args, **kwargs):
+    return estimator.decision_function(X, *args, **kwargs)
+
+
+def _score(estimator, X, y, *args, **kwargs):
+    return estimator.score(X, y, *args, **kwargs)
+
+
+def _score_samples(estimator, X, *args, **kwargs):
+    return estimator.score_samples(X, *args, **kwargs)
+
+
 class BasePipeline(_ImblearnPipeline):
-    def _transform(self, X):
+    def _memory_cache_if_not_pipeline(self, est, func, memory):
+        if isinstance(est, BasePipeline):
+            return NotMemorizedFunc(func)
+        return memory.cache(func)
+
+    @property
+    def _final_estimator(self):
+        estimator = self.steps[-1][1]
+        return "passthrough" if estimator is None else estimator
+
+    @_final_estimator.setter
+    def _final_estimator(self, estimator):
+        self.steps[-1] = (self.steps[-1][0], estimator)
+
+    def _transform(self, X, with_final: bool = True):
+        X, _ = self._convert_to_df_if_needed(X)
+
+        memory = check_memory(self.memory)
+        transform_one_cached = memory.cache(_transform_one)
+
         Xt = X
-        for _, _, transform in self._iter():
-            Xt = transform.transform(Xt)
+        for _, _, transform in self._iter(with_final=with_final):
+            f = transform_one_cached
+            if isinstance(transform, BasePipeline):
+                f = NotMemorizedFunc(transform_one_cached.func)
+            Xt = f(transform, Xt)
         return Xt
 
     def _inverse_transform(self, X):
+        X, _ = self._convert_to_df_if_needed(X)
+
+        memory = check_memory(self.memory)
+        inverse_transform_one_cached = memory.cache(_inverse_transform_one)
+
         Xt = X
         reverse_iter = reversed(list(self._iter()))
         for _, _, transform in reverse_iter:
-            Xt = transform.inverse_transform(Xt)
+            f = inverse_transform_one_cached
+            if isinstance(transform, BasePipeline):
+                f = NotMemorizedFunc(inverse_transform_one_cached.func)
+            Xt = f(transform, Xt)
         return Xt
 
     def set_params(self, **kwargs):
@@ -61,11 +147,19 @@ class BasePipeline(_ImblearnPipeline):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
+
+        memory = check_memory(self.memory)
+
         with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
             if self._final_estimator != "passthrough":
                 fit_params_last_step = fit_params_steps[self.steps[-1][0]]
                 final_estimator_time_start = time()
-                self._final_estimator.fit(Xt, yt, **fit_params_last_step)
+                fit_cached = self._memory_cache_if_not_pipeline(
+                    self._final_estimator, _fit, memory
+                )
+                self._final_estimator = fit_cached(
+                    self._final_estimator, Xt, yt, **fit_params_last_step
+                )
                 self.final_estimator_fit_time_ = time() - final_estimator_time_start
         return self
 
@@ -74,16 +168,31 @@ class BasePipeline(_ImblearnPipeline):
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
-        last_step = self._final_estimator
+        memory = check_memory(self.memory)
+
         with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
-            if last_step == "passthrough":
+            if self._final_estimator == "passthrough":
                 return Xt
             fit_params_last_step = fit_params_steps[self.steps[-1][0]]
             final_estimator_time_start = time()
-            if hasattr(last_step, "fit_transform"):
-                r = last_step.fit_transform(Xt, yt, **fit_params_last_step)
+            if hasattr(self._final_estimator, "fit_transform"):
+                fit_transform_cached = self._memory_cache_if_not_pipeline(
+                    self._final_estimator, _fit_transform, memory
+                )
+                r, self._final_estimator = fit_transform_cached(
+                    self._final_estimator, Xt, yt, **fit_params_last_step
+                )
             else:
-                r = last_step.fit(Xt, yt, **fit_params_last_step).transform(Xt)
+                fit_cached = self._memory_cache_if_not_pipeline(
+                    self._final_estimator, _fit, memory
+                )
+                self._final_estimator = fit_cached(
+                    self._final_estimator, Xt, yt, **fit_params_last_step
+                )
+                transform_cached = self._memory_cache_if_not_pipeline(
+                    self._final_estimator, _transform_one, memory
+                )
+                r = transform_cached(self._final_estimator, Xt)
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
             return r
 
@@ -91,14 +200,21 @@ class BasePipeline(_ImblearnPipeline):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
-        last_step = self._final_estimator
+
+        memory = check_memory(self.memory)
+
         with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
-            if last_step == "passthrough":
+            if self._final_estimator == "passthrough":
                 return Xt
             fit_params_last_step = fit_params_steps[self.steps[-1][0]]
             final_estimator_time_start = time()
-            if hasattr(last_step, "fit_resample"):
-                r = last_step.fit_resample(Xt, yt, **fit_params_last_step)
+            if hasattr(self._final_estimator, "fit_resample"):
+                fit_resample_cached = self._memory_cache_if_not_pipeline(
+                    self._final_estimator, _fit_resample, memory
+                )
+                r, self._final_estimator = fit_resample_cached(
+                    self._final_estimator, Xt, yt, **fit_params_last_step
+                )
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
             return r
 
@@ -108,47 +224,68 @@ class BasePipeline(_ImblearnPipeline):
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
+        memory = check_memory(self.memory)
+
         fit_params_last_step = fit_params_steps[self.steps[-1][0]]
         with _print_elapsed_time("Pipeline", self._log_message(len(self.steps) - 1)):
             final_estimator_time_start = time()
-            y_pred = self.steps[-1][-1].fit_predict(Xt, yt, **fit_params_last_step)
+            fit_predict_cached = self._memory_cache_if_not_pipeline(
+                self._final_estimator, _fit_predict, memory
+            )
+            y_pred, self._final_estimator = fit_predict_cached(
+                self._final_estimator, Xt, yt, **fit_params_last_step
+            )
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
         return y_pred
 
     @if_delegate_has_method(delegate="_final_estimator")
     def predict(self, X, **predict_params):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super().predict(X=X, **predict_params)
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        predict_cached = self._memory_cache_if_not_pipeline(
+            self._final_estimator, _predict, memory
+        )
+        return predict_cached(self._final_estimator, Xt, **predict_params)
 
     @if_delegate_has_method(delegate="_final_estimator")
-    def predict_proba(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super().predict_proba(X=X)
+    def predict_proba(self, X, **predict_params):
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        predict_proba_cached = self._memory_cache_if_not_pipeline(
+            self._final_estimator, _predict_proba, memory
+        )
+        return predict_proba_cached(self._final_estimator, Xt, **predict_params)
 
     @if_delegate_has_method(delegate="_final_estimator")
-    def decision_function(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super().decision_function(X=X)
+    def decision_function(self, X, **decision_params):
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        decision_function_cached = self._memory_cache_if_not_pipeline(
+            self._final_estimator, _decision_function, memory
+        )
+        return decision_function_cached(self._final_estimator, Xt, **decision_params)
 
     @if_delegate_has_method(delegate="_final_estimator")
-    def score_samples(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super().score_samples(X=X)
+    def score_samples(self, X, **score_params):
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        score_samples_cached = memory.cache(_score_samples)
+        return score_samples_cached(self._final_estimator, Xt, **score_params)
 
     @if_delegate_has_method(delegate="_final_estimator")
-    def predict_log_proba(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super().predict_log_proba(X=X)
-
-    def _transform(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super()._transform(X)
-
-    def _inverse_transform(self, X):
-        X, _ = self._convert_to_df_if_needed(X)
-        return super()._inverse_transform(X)
+    def predict_log_proba(self, X, **predict_params):
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        predict_log_proba_cached = self._memory_cache_if_not_pipeline(
+            self._final_estimator, _predict_log_proba, memory
+        )
+        return predict_log_proba_cached(self._final_estimator, Xt, **predict_params)
 
     @if_delegate_has_method(delegate="_final_estimator")
-    def score(self, X, y=None, sample_weight=None):
-        X, y = self._convert_to_df_if_needed(X, y)
-        return super().score(X=X, y=y, sample_weight=sample_weight)
+    def score(self, X, y=None, **score_params):
+        Xt = self._transform(X, with_final=False)
+        memory = check_memory(self.memory)
+        score_cached = self._memory_cache_if_not_pipeline(
+            self._final_estimator, _score, memory
+        )
+        return score_cached(self._final_estimator, Xt, y, **score_params)

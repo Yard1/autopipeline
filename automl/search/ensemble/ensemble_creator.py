@@ -8,7 +8,7 @@ import numpy as np
 from abc import ABC
 import gc
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from ...components.estimators.ensemble.ensemble import Ensemble
 from .ensemble_strategy import EnsembleStrategy
@@ -47,7 +47,7 @@ class EnsembleCreator(ABC):
         return kwargs
 
     def _get_estimators_for_ensemble(
-        self, trials_for_ensembling, current_stacking_level, previous_stack
+        self, trials_for_ensembling, current_stacking_level
     ):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
@@ -56,7 +56,7 @@ class EnsembleCreator(ABC):
                 (
                     f"meta-{current_stacking_level}_{trial_result['trial_id']}",
                     # deepcopy(trial_result["estimator"]),
-                    stack_estimator(trial_result["estimator"], previous_stack),
+                    clone(trial_result["estimator"]),
                 )
                 for trial_result in trials_for_ensembling
             ]

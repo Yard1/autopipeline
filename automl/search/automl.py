@@ -315,7 +315,7 @@ class AutoML(BaseEstimator):
         if isinstance(id_or_pipeline, Pipeline):
             pipeline = id_or_pipeline
         else:
-            pipeline = self._get_pipeline_by_id(id_or_pipeline, refit=False, copy=True)
+            pipeline = self._get_pipeline_by_id(id_or_pipeline, refit=False, copy=False)
         html_repr = HTML(estimator_html_repr(pipeline))
         # self._displays["pipeline_display"].display(html_repr, display_type="html")
         return html_repr

@@ -1,12 +1,14 @@
 import itertools
 from typing import Optional
 import sys
-import io
 
 import numpy as np
 
 import pickle
 from joblib.hashing import Hasher, NumpyHasher
+
+from sklearn.base import clone
+from sklearn.utils.validation import check_is_fitted, NotFittedError
 
 from pandas.util import hash_pandas_object, hash_array
 from pandas.core.util.hashing import _default_hash_key, hash_tuples, combine_hash_arrays
@@ -107,14 +109,14 @@ def fast_hash_pandas_object(
 
 
 class _FileWriteToHash(object):
-    """ For Pickler, a file-like api that translates file.write(bytes) to
-        hash.update(bytes)
-        From the Pickler docs:
-        - https://docs.python.org/3/library/pickle.html#pickle.Pickler
-        > The file argument must have a write() method that accepts a single
-        > bytes argument. It can thus be an on-disk file opened for binary
-        > writing, an io.BytesIO instance, or any other custom object that meets
-        > this interface.
+    """For Pickler, a file-like api that translates file.write(bytes) to
+    hash.update(bytes)
+    From the Pickler docs:
+    - https://docs.python.org/3/library/pickle.html#pickle.Pickler
+    > The file argument must have a write() method that accepts a single
+    > bytes argument. It can thus be an on-disk file opened for binary
+    > writing, an io.BytesIO instance, or any other custom object that meets
+    > this interface.
     """
 
     def __init__(self, hash):
@@ -122,6 +124,7 @@ class _FileWriteToHash(object):
 
     def write(self, bytes):
         self.hash.update(bytes)
+
 
 class xxHasher(Hasher):
     def __init__(self, hash_name="md5"):
@@ -139,7 +142,7 @@ class xxHasher(Hasher):
             # calls, which will in turn relay to self._hash.update(bytes)
             self.dump(obj)
         except pickle.PicklingError as e:
-            e.args += ('PicklingError while hashing %r: %r' % (obj, e),)
+            e.args += ("PicklingError while hashing %r: %r" % (obj, e),)
             raise
         # dumps = self.stream.getvalue()
         # self._hash.update(dumps)
@@ -170,28 +173,7 @@ class xxNumpyHasher(NumpyHasher):
         else:
             self._getbuffer = memoryview
 
-
-class xxPandasHasher(xxNumpyHasher):
-    def _hash_pandas(self, obj):
-        try:
-            hashed_obj = fast_hash_pandas_object(obj)
-            return (obj.__class__, hashed_obj)
-        except TypeError:
-            return obj
-
     def hash(self, obj, return_digest=True):
-        try:
-            if isinstance(obj, dict):
-                n_obj = (obj.__class__, {k: self._hash_pandas(v) for k, v in obj.items()})
-            elif isinstance(obj, list):
-                n_obj = (obj.__class__, [self._hash_pandas(v) for v in obj])
-            elif isinstance(obj, tuple):
-                n_obj = (obj.__class__, tuple([self._hash_pandas(v) for v in obj]))
-            else:
-                n_obj = self._hash_pandas(obj)
-            obj = n_obj
-        except:
-            pass
         try:
             self.dump(obj)
         except pickle.PicklingError as e:
@@ -202,11 +184,22 @@ class xxPandasHasher(xxNumpyHasher):
         if return_digest:
             return self._hash.hexdigest()
 
+
+class xxPandasHasher(xxNumpyHasher):
+    def _hash_pandas(self, obj):
+        try:
+            hashed_obj = fast_hash_pandas_object(obj)
+            return (obj.__class__, hashed_obj)
+        except TypeError:
+            return None, obj
+
     def save(self, obj):
         """Subclass the save method, to hash ndarray subclass, rather
         than pickling them. Off course, this is a total abuse of
         the Pickler class.
         """
+        klass, obj = self._hash_pandas(obj)
+
         if isinstance(obj, self.np.ndarray) and not (
             obj.dtype.hasobject and obj.ndim > 2
         ):
@@ -241,18 +234,19 @@ class xxPandasHasher(xxNumpyHasher):
             # https://github.com/numpy/numpy/issues/4983. The
             # workaround is to view the array as bytes before
             # taking the memoryview.
-            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint16)))
+            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint8)))
 
             # We store the class, to be able to distinguish between
             # Objects with the same binary content, but different
             # classes.
-            if self.coerce_mmap and isinstance(obj, self.np.memmap):
-                # We don't make the difference between memmap and
-                # normal ndarrays, to be able to reload previously
-                # computed results with memmap.
-                klass = self.np.ndarray
-            else:
-                klass = obj.__class__
+            if not klass:
+                if self.coerce_mmap and isinstance(obj, self.np.memmap):
+                    # We don't make the difference between memmap and
+                    # normal ndarrays, to be able to reload previously
+                    # computed results with memmap.
+                    klass = self.np.ndarray
+                else:
+                    klass = obj.__class__
             # We also return the dtype and the shape, to distinguish
             # different views on the same data with different dtypes.
 
@@ -309,4 +303,3 @@ def hash(obj, hash_name="md5", coerce_mmap=False):
     else:
         hasher = xxHasher(hash_name=hash_name)
     return hasher.hash(obj)
-

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from copy import deepcopy
 
 from joblib import Parallel
 
@@ -12,29 +13,121 @@ from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
 from sklearn.model_selection import check_cv
 from sklearn.base import is_classifier
-from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted
+from sklearn.utils import _print_elapsed_time
 
-from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_method
+from .utils import (
+    get_cv_predictions,
+    fit_single_estimator_if_not_fitted,
+    call_method,
+    cross_val_predict_repeated,
+)
 from ...utils import clone_with_n_jobs_1
 from ...preprocessing import PrepareDataFrame
+from ...flow import BasePipeline
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def _fit_single_estimator(
+    estimator,
+    X,
+    y,
+    sample_weight=None,
+    message_clsname=None,
+    message=None,
+    **fit_kwargs,
+):
+    """Private function used to fit an estimator within a job."""
+    if sample_weight is not None:
+        try:
+            with _print_elapsed_time(message_clsname, message):
+                estimator.fit(X, y, sample_weight=sample_weight, **fit_kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument 'sample_weight'" in str(exc):
+                raise TypeError(
+                    "Underlying estimator {} does not support sample weights.".format(
+                        estimator.__class__.__name__
+                    )
+                ) from exc
+            raise
+    else:
+        with _print_elapsed_time(message_clsname, message):
+            estimator.fit(X, y, **fit_kwargs)
+    return estimator
+
+
+class DeepStackMixin:
+    def transform(self, X, deep: bool = False):
+        ret = self._transform(X)
+        if deep:
+            if hasattr(self, "final_estimator_") and isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                ret = self.final_estimator_.transform(ret)
+        return ret
+
+    def _get_deep_final_estimator(
+        self, est, fitted: bool = False, up_to_stack: bool = False
+    ):
+        if isinstance(est, DeepStackMixin):
+            return est.get_deep_final_estimator(fitted=fitted, up_to_stack=up_to_stack)
+        if up_to_stack:
+            return self
+        return est
+
+    def get_deep_final_estimator(self, fitted: bool = False, up_to_stack: bool = False):
+        if fitted:
+            check_is_fitted(self)
+            return self._get_deep_final_estimator(
+                self.final_estimator_, fitted=fitted, up_to_stack=up_to_stack
+            )
+        return self._get_deep_final_estimator(
+            self.final_estimator, fitted=fitted, up_to_stack=up_to_stack
+        )
+
+    def set_deep_final_estimator(self, estimator):
+        if isinstance(self.final_estimator, DeepStackMixin):
+            return self.final_estimator.set_deep_final_estimator(estimator)
+        self.final_estimator = estimator
+        self.final_estimator_ = estimator
+        return
+
+
 # TODO handle Repeated CV (here and in trainable)
-class PandasStackingClassifier(_StackingClassifier):
+class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
+    def __init__(
+        self,
+        estimators,
+        final_estimator=None,
+        *,
+        cv=None,
+        stack_method="auto",
+        n_jobs=None,
+        passthrough=False,
+        verbose=0,
+        memory=None,
+    ):
+        super().__init__(
+            estimators=estimators,
+            final_estimator=final_estimator,
+            cv=cv,
+            stack_method=stack_method,
+            n_jobs=n_jobs,
+            passthrough=passthrough,
+            verbose=verbose,
+        )
+        self.memory = memory
+
     def fit(
         self,
         X,
         y,
         sample_weight=None,
-        fit_final_estimator=True,
-        refit_estimators=True,
-        predictions=None,
         save_predictions=False,
+        fit_final_estimator=True,
     ):
         """Fit the estimators.
 
@@ -67,7 +160,6 @@ class PandasStackingClassifier(_StackingClassifier):
         self._le = LabelEncoder().fit(y)
         self.classes_ = self._le.classes_
         names, all_estimators = self._validate_estimators()
-        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
         self._validate_final_estimator()
         # else:
         #    self.final_estimator_ = self.final_estimator
@@ -77,27 +169,13 @@ class PandasStackingClassifier(_StackingClassifier):
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est, X, y, sample_weight, force_refit=refit_estimators
-                )
-                for est in all_estimators
-                if est != "drop"
+        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+            delayed(_fit_single_estimator)(
+                clone_with_n_jobs_1(est), X, y, sample_weight
             )
-        except Exception:  # TODO is there a better way to catch exceptions here?
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est,
-                    X,
-                    y,
-                    sample_weight,
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
-                )
-                for est in all_estimators
-                if est != "drop"
-            )
+            for est in all_estimators
+            if est != "drop"
+        )
 
         self.named_estimators_ = Bunch()
         est_fitted_idx = 0
@@ -125,24 +203,30 @@ class PandasStackingClassifier(_StackingClassifier):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        # if not any(self.estimators[0][0] in col for col in X.columns):
-
-        predictions = get_cv_predictions(
-            X,
-            y,
-            all_estimators,
-            self.stack_method_,
-            cv,
-            predictions=predictions,
-            n_jobs=self.n_jobs,
-            fit_params=fit_params,
-            verbose=self.verbose,
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(cross_val_predict_repeated)(
+                clone_with_n_jobs_1(est),
+                X,
+                y,
+                cv=deepcopy(cv),
+                method=meth,
+                n_jobs=self.n_jobs,
+                fit_params=fit_params,
+                verbose=self.verbose,
+            )
+            for est, meth in zip(all_estimators, self.stack_method_)
+            if est != "drop"
         )
+        if save_predictions == "deep" and not isinstance(
+            self.final_estimator_, DeepStackMixin
+        ):
+            save_predictions = True
         X_meta = self._concatenate_predictions(
-            X, predictions, save_predictions=save_predictions
+            X,
+            predictions,
+            save_predictions if isinstance(save_predictions, bool) else False,
         )
-        # else:
-        #    X_meta = X
+
         # Only not None or not 'drop' estimators will be used in transform.
         # Remove the None from the method as well.
         self.stack_method_ = [
@@ -156,48 +240,26 @@ class PandasStackingClassifier(_StackingClassifier):
                 self.final_estimator_.set_params(n_jobs=self.n_jobs)
             except ValueError:
                 pass
+            fit_kwargs = {}
+            if save_predictions == "deep" and isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                fit_kwargs = dict(save_predictions=save_predictions)
+            if self.memory and not isinstance(
+                self.final_estimator_, (BasePipeline, DeepStackMixin)
+            ):
+                self.final_estimator_ = BasePipeline(
+                    [("final_estimator", self.final_estimator_)], memory=self.memory
+                )
             _fit_single_estimator(
-                self.final_estimator_, X_meta, y, sample_weight=sample_weight
+                self.final_estimator_,
+                X_meta,
+                y,
+                sample_weight=sample_weight,
+                **fit_kwargs,
             )
 
         return self
-
-    def _transform(self, X):
-        """Concatenate and return the predictions of the estimators."""
-        check_is_fitted(self)
-
-        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
-            saved_predictions = self._saved_test_predictions
-        else:
-            saved_predictions = [None] * len(self.estimators_)
-
-        assert len(saved_predictions) == len(self.estimators_)
-
-        predictions = Parallel(n_jobs=self.n_jobs)(
-            delayed(call_method)(
-                est_meth[0],
-                est_meth[1],
-                X,
-            )
-            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
-            if est_meth[0] != "drop"
-            and saved_predictions[i] is None
-            or est_meth[1] not in saved_predictions[i]
-        )
-        predictions = list(predictions)
-
-        for i in range(len(saved_predictions)):
-            if (
-                saved_predictions[i] is None
-                or self.stack_method_[i] not in saved_predictions[i]
-            ):
-                saved_predictions[i] = predictions.pop(0)
-            else:
-                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
-
-        predictions = saved_predictions
-
-        return self._concatenate_predictions(X, predictions)
 
     def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
@@ -256,16 +318,36 @@ class PandasStackingClassifier(_StackingClassifier):
         return df
 
 
-class PandasStackingRegressor(_StackingRegressor):
+class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
+    def __init__(
+        self,
+        estimators,
+        final_estimator=None,
+        *,
+        cv=None,
+        n_jobs=None,
+        passthrough=False,
+        verbose=0,
+        memory=None,
+    ):
+        super().__init__(
+            estimators=estimators,
+            final_estimator=final_estimator,
+            cv=cv,
+            stack_method="predict",
+            n_jobs=n_jobs,
+            passthrough=passthrough,
+            verbose=verbose,
+        )
+        self.memory = memory
+
     def fit(
         self,
         X,
         y,
         sample_weight=None,
-        fit_final_estimator=True,
-        refit_estimators=True,
-        predictions=None,
         save_predictions=False,
+        fit_final_estimator=True,
     ):
         """Fit the estimators.
 
@@ -296,7 +378,6 @@ class PandasStackingRegressor(_StackingRegressor):
         )
         self.stacked_predictions_ = None
         names, all_estimators = self._validate_estimators()
-        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
         self._validate_final_estimator()
         # else:
         #    self.final_estimator_ = self.final_estimator
@@ -306,27 +387,13 @@ class PandasStackingRegressor(_StackingRegressor):
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est, X, y, sample_weight, force_refit=refit_estimators
-                )
-                for est in all_estimators
-                if est != "drop"
+        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+            delayed(_fit_single_estimator)(
+                clone_with_n_jobs_1(est), X, y, sample_weight
             )
-        except Exception:  # TODO is there a better way to catch exceptions here?
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est,
-                    X,
-                    y,
-                    sample_weight,
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
-                )
-                for est in all_estimators
-                if est != "drop"
-            )
+            for est in all_estimators
+            if est != "drop"
+        )
 
         self.named_estimators_ = Bunch()
         est_fitted_idx = 0
@@ -354,24 +421,24 @@ class PandasStackingRegressor(_StackingRegressor):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        # if not any(self.estimators[0][0] in col for col in X.columns):
-
-        predictions = get_cv_predictions(
-            X,
-            y,
-            all_estimators,
-            self.stack_method_,
-            cv,
-            predictions=predictions,
-            n_jobs=self.n_jobs,
-            fit_params=fit_params,
-            verbose=self.verbose,
+        predictions = Parallel(n_jobs=self.n_jobs)(
+            delayed(cross_val_predict_repeated)(
+                clone_with_n_jobs_1(est),
+                X,
+                y,
+                cv=deepcopy(cv),
+                method=meth,
+                n_jobs=self.n_jobs,
+                fit_params=fit_params,
+                verbose=self.verbose,
+            )
+            for est, meth in zip(all_estimators, self.stack_method_)
+            if est != "drop"
         )
         X_meta = self._concatenate_predictions(
             X, predictions, save_predictions=save_predictions
         )
-        # else:
-        #    X_meta = X
+
         # Only not None or not 'drop' estimators will be used in transform.
         # Remove the None from the method as well.
         self.stack_method_ = [
@@ -385,46 +452,26 @@ class PandasStackingRegressor(_StackingRegressor):
                 self.final_estimator_.set_params(n_jobs=self.n_jobs)
             except ValueError:
                 pass
+            fit_kwargs = {}
+            if save_predictions == "deep" and isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                fit_kwargs = dict(save_predictions=save_predictions)
+            if self.memory and not isinstance(
+                self.final_estimator_, (BasePipeline, DeepStackMixin)
+            ):
+                self.final_estimator_ = BasePipeline(
+                    [("final_estimator", self.final_estimator_)], memory=self.memory
+                )
             _fit_single_estimator(
-                self.final_estimator_, X_meta, y, sample_weight=sample_weight
+                self.final_estimator_,
+                X_meta,
+                y,
+                sample_weight=sample_weight,
+                **fit_kwargs,
             )
 
         return self
-
-    def _transform(self, X):
-        """Concatenate and return the predictions of the estimators."""
-        check_is_fitted(self)
-
-        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
-            saved_predictions = self._saved_test_predictions
-        else:
-            saved_predictions = [None] * len(self.estimators_)
-
-        assert len(saved_predictions) == len(self.estimators_)
-
-        predictions = Parallel(n_jobs=self.n_jobs)(
-            delayed(call_method)(
-                est_meth[0],
-                est_meth[1],
-                X,
-            )
-            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
-            if est_meth[0] != "drop"
-            and saved_predictions[i] is None
-            or est_meth[1] not in saved_predictions[i]
-        )
-        predictions = list(predictions)
-
-        for i in range(len(saved_predictions)):
-            if (
-                saved_predictions[i] is None
-                or self.stack_method_[i] not in saved_predictions[i]
-            ):
-                saved_predictions[i] = predictions.pop(0)
-            else:
-                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
-
-        predictions = saved_predictions
 
     def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and

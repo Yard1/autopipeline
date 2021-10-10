@@ -21,6 +21,7 @@ import io
 import joblib
 import ray
 from ray.util.joblib import register_ray
+
 from ...utils.joblib_backend.ray_backend import (
     multiprocessing_cache,
     register_ray_caching,
@@ -73,6 +74,7 @@ from automl_models.components.estimators.ensemble import (
     DummyClassifier,
     DESSplitter,
 )
+from automl_models.components.estimators.ensemble.stack import DeepStackMixin
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 specificity_scorer = make_scorer(recall_score, pos_label=0)
@@ -129,38 +131,38 @@ class Trainer:
         self.secondary_ensembles = (
             secondary_ensembles
             or [
-                VotingEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
-                ),
-                VotingByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
-                ),
-                # SelectFromModelStackingEnsembleCreator(
-                #     ensemble_strategy=EnsembleBest(
-                #         configurations_to_select=100, percentile_threshold=1
+                # VotingEnsembleCreator(
+                #     ensemble_strategy=RoundRobinEstimator(
+                #         configurations_to_select=50, percentile_threshold=15
                 #     ),
                 #     problem_type=self.problem_type,
                 # ),
+                # VotingByMetricEnsembleCreator(
+                #     ensemble_strategy=RoundRobinEstimator(
+                #         configurations_to_select=50, percentile_threshold=15
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
+                SelectFromModelStackingEnsembleCreator(
+                    ensemble_strategy=EnsembleBest(
+                        configurations_to_select=100, percentile_threshold=1
+                    ),
+                    problem_type=self.problem_type,
+                ),
             ]
             + [
-                VotingSoftEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
-                ),
-                VotingSoftByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
-                ),
+                # VotingSoftEnsembleCreator(
+                #     ensemble_strategy=RoundRobinEstimator(
+                #         configurations_to_select=50, percentile_threshold=15
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
+                # VotingSoftByMetricEnsembleCreator(
+                #     ensemble_strategy=RoundRobinEstimator(
+                #         configurations_to_select=50, percentile_threshold=15
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
             ]
             if self.problem_type.is_classification()
             else []
@@ -280,7 +282,7 @@ class Trainer:
             pipeline_blueprint=pipeline_blueprint,
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             random_state=self.random_state,
-            cv=self.cv_,
+            cv=deepcopy(self.cv_),
             early_stopping=self.early_stopping,
             cache=self.cache,
             time_budget_s=self.tuning_time // (self.stacking_level + 1),
@@ -327,6 +329,8 @@ class Trainer:
         y_test=None,
         X_test_original=None,
         y_test_original=None,
+        X_original=None,
+        y_original=None,
         groups=None,
     ):
         self.current_stacking_level += 1
@@ -355,8 +359,8 @@ class Trainer:
 
         # with joblib.parallel_backend("ray"):
         X_stack, X_test_stack = self._create_ensembles(
-            X,
-            y,
+            X_original,
+            y_original,
             results,
             results_df,
             pipeline_blueprint,
@@ -381,6 +385,8 @@ class Trainer:
             y_test=y_test,
             X_test_original=X_test_original,
             y_test_original=y_test_original,
+            X_original=X_original,
+            y_original=y_original,
             groups=groups,
         )
 
@@ -417,8 +423,8 @@ class Trainer:
             "y_test": y_test,
             "X_test_original": X_test_original,
             "y_test_original": y_test_original,
-            "refit_estimators": False,
-            "cv": self.cv_,
+            "cv": deepcopy(self.cv_),
+            "cache": self.last_tuner_._cache,  # TODO make dynamic
         }
 
         print("creating ensembles")
@@ -595,6 +601,8 @@ class Trainer:
                 )
 
     def _stack_estimator_if_needed(self, estimator, stacking_level):
+        if isinstance(estimator, DeepStackMixin):
+            return estimator
         stack = self.get_main_stacking_ensemble_at_level(stacking_level)
         return stack_estimator(estimator, stack)
 
@@ -666,6 +674,8 @@ class Trainer:
             y_test=y_test,
             X_test_original=X_test,
             y_test_original=y_test,
+            X_original=X,
+            y_original=y,
             groups=groups,
         )
         return self

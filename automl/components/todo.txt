@@ -1,4 +1,4 @@
-- https://github.com/dreamquark-ai/tabnet
+- https://github.com/dreamquark-ai/tabnet https://www.kaggle.com/neilgibbons/tuning-tabnet-with-optuna
 - XGBoost
 - Naive Bayes
 - ARD for regression

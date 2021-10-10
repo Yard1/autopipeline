@@ -249,7 +249,7 @@ class RayTuneTuner(Tuner):
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
             "verbose": 2,
-            "reuse_actors": False,
+            "reuse_actors": True,
             "fail_fast": False,  # TODO change to False when ready
             # "resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
@@ -327,6 +327,7 @@ class RayTuneTuner(Tuner):
         tune_kwargs["num_samples"] = self.total_num_samples
         tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
         tune_kwargs["callbacks"].append(plot_callback)
+        print(f"columns to tune: {self.X_.columns}")
         params = {
             "X_": self.X_,
             "y_": self.y_,

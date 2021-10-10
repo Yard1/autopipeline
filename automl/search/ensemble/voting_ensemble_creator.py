@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Optional, Union, Tuple
 
 import pandas as pd
@@ -5,7 +6,7 @@ import numpy as np
 import gc
 from abc import ABC
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from ...components.estimators.ensemble import VotingClassifier, VotingRegressor
 from .ensemble_creator import EnsembleCreator
@@ -96,7 +97,7 @@ class VotingEnsembleCreator(EnsembleCreator):
             f"getting estimators for {self._ensemble_name}"
         )
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level, previous_stack
+            trials_for_ensembling, current_stacking_level
         )
         if not estimators:
             raise ValueError("No estimators selected for ensembling!")
@@ -107,14 +108,17 @@ class VotingEnsembleCreator(EnsembleCreator):
             n_jobs=None,
             **self.ensemble_args_,
         )()
+        if previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.final_estimator = ensemble
+            ensemble = stacked_ensemble
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
-            refit_estimators=False,
         )
         test_predictions = kwargs.get("test_predictions", None)
         if test_predictions:

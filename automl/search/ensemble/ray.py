@@ -20,7 +20,7 @@ def _score_ensemble(
     X_test = ensemble_config.get("X_test_original", None)
     y_test = ensemble_config.get("y_test_original", None)
     try:
-        ensemble.set_params(n_jobs=1)
+        ensemble.set_params(n_jobs=-1)
     except Exception:
         pass
     if X_test is None:
@@ -54,17 +54,17 @@ def ray_fit_ensemble_and_return_stacked_preds_remote(
     ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
-    with joblib.parallel_backend("sequential"):
-        (
-            main_stacking_ensemble_fitted,
-            X_stack,
-            X_test_stack,
-        ) = main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
-            **ensemble_config
-        )
-        scores = _score_ensemble(
-            main_stacking_ensemble_fitted, ensemble_config, scoring_dict
-        )
+    #with joblib.parallel_backend("sequential"):
+    (
+        main_stacking_ensemble_fitted,
+        X_stack,
+        X_test_stack,
+    ) = main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
+        **ensemble_config
+    )
+    scores = _score_ensemble(
+        main_stacking_ensemble_fitted, ensemble_config, scoring_dict
+    )
     return main_stacking_ensemble_fitted, X_stack, X_test_stack, scores
 
 
@@ -76,7 +76,7 @@ def ray_fit_ensemble(
     ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
-    with joblib.parallel_backend("sequential"):
-        ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
-        scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
+    #with joblib.parallel_backend("sequential"):
+    ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
+    scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
     return ensemble_fitted, scores

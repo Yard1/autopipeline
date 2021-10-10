@@ -3,9 +3,10 @@ from typing import Optional, Union, Tuple
 import re
 import pandas as pd
 import numpy as np
+from copy import deepcopy
 import gc
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from ...components.estimators.linear_model import (
     LogisticRegressionCV,
@@ -23,6 +24,7 @@ from ...components.flow import Pipeline
 from .ensemble_creator import EnsembleCreator
 from .ensemble_strategy import EnsembleStrategy
 from ...problems.problem_type import ProblemType
+from ...utils.memory import dynamic_memory_factory
 
 from automl_models.components.transformers.misc.select_columns import (
     PandasSelectColumns,
@@ -89,8 +91,6 @@ class StackingEnsembleCreator(EnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
-        assert "fold_predictions" in kwargs
-        assert "refit_estimators" in kwargs
         assert "cv" in kwargs
         kwargs = self._treat_kwargs(kwargs)
         super().fit_ensemble(
@@ -111,11 +111,9 @@ class StackingEnsembleCreator(EnsembleCreator):
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
-        print(
-            f"getting estimators for {self._ensemble_name}"
-        )
+        print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level, previous_stack
+            trials_for_ensembling, current_stacking_level
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
@@ -128,42 +126,37 @@ class StackingEnsembleCreator(EnsembleCreator):
             final_estimator=self.final_estimator_(),
             cv=kwargs["cv"],
             n_jobs=None,
+            memory=dynamic_memory_factory(kwargs.get("cache", None)),
         )()
+        if previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.set_deep_final_estimator(ensemble)
+            ensemble = stacked_ensemble
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         ensemble.fit(
             X,
             y,
-            predictions=[
-                kwargs["fold_predictions"].get(k, None)
-                for k in self.trial_ids_for_ensembling_
-            ]
-            if kwargs["fold_predictions"]
-            else None,
-            refit_estimators=kwargs["refit_estimators"],
-            save_predictions=True,
+            save_predictions="deep",
         )
-        X_stack = ensemble.stacked_predictions_
+        X_stack = ensemble.get_deep_final_estimator(
+            fitted=True, up_to_stack=True
+        ).stacked_predictions_
 
         if X_test_original is not None:
             # TODO optimize this
-            X_test_stack = ensemble.transform(X_test_original)
+            X_test_stack = ensemble.transform(X_test_original, deep=True)
         else:
             X_test_stack = None
-
-        test_predictions = kwargs.get("test_predictions", None)
-        if test_predictions:
-            ensemble._saved_test_predictions = [
-                test_predictions.get(trial_id, None)
-                for trial_id in self.trial_ids_for_ensembling_
-            ]
 
         return ensemble, X_stack, X_test_stack
 
     def clear_stacked_predictions(self, ensemble):
-        del ensemble.stacked_predictions_
+        del ensemble.get_deep_final_estimator(
+            fitted=True, up_to_stack=True
+        ).stacked_predictions_
 
     def fit_ensemble(
         self,
@@ -327,8 +320,6 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
-        assert "fold_predictions" in kwargs
-        assert "refit_estimators" in kwargs
         assert "cv" in kwargs
         kwargs = self._treat_kwargs(kwargs)
         super(StackingEnsembleCreator, self).fit_ensemble(
@@ -349,11 +340,9 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             **kwargs,
         )
         trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
-        print(
-            f"getting estimators for {self._ensemble_name}"
-        )
+        print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
-            trials_for_ensembling, current_stacking_level, previous_stack
+            trials_for_ensembling, current_stacking_level
         )
         if not estimators:
             raise ValueError("No estimators selected for stacking!")
@@ -366,23 +355,24 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             final_estimator=self.final_estimator_(),
             cv=kwargs["cv"],
             n_jobs=None,
+            memory=dynamic_memory_factory(kwargs.get("cache", None)),
         )()
+        if previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.set_deep_final_estimator(ensemble)
+            original_ensemble = ensemble
+            ensemble = stacked_ensemble
+        else:
+            original_ensemble = ensemble
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
-        ensemble.n_jobs = 1  # TODO make dynamic
+        ensemble.n_jobs = -1  # TODO make dynamic
         try:
             ensemble.fit(
                 X,
                 y,
-                predictions=[
-                    kwargs["fold_predictions"].get(k, None)
-                    for k in self.trial_ids_for_ensembling_
-                ]
-                if kwargs["fold_predictions"]
-                else None,
-                refit_estimators=kwargs["refit_estimators"],
-                save_predictions=True,
+                save_predictions="deep",
             )
         except ValueError as e:
             # this is hacky but means we don't have to overwrite sklearn
@@ -393,83 +383,71 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                     re.search(r"should be \d+ and (\d+)", str(e)).group(1)
                 )
                 print(f"Setting max_features to {max_features_to_set}")
-                ensemble.final_estimator.set_params(
+                original_ensemble.final_estimator.set_params(
                     SelectEstimators__max_features=max_features_to_set
                 )
                 ensemble.fit(
                     X,
                     y,
-                    predictions=[
-                        kwargs["fold_predictions"].get(k, None)
-                        for k in self.trial_ids_for_ensembling_
-                    ]
-                    if kwargs["fold_predictions"]
-                    else None,
-                    refit_estimators=kwargs["refit_estimators"],
-                    save_predictions=True,
+                    save_predictions="deep",
                 )
             else:
                 raise e
 
-        X_stack = ensemble.stacked_predictions_
+        original_ensemble = ensemble.get_deep_final_estimator(
+            fitted=True, up_to_stack=True
+        )
+        X_stack = original_ensemble.stacked_predictions_
         print(X_test.columns)
         if X_test_original is not None:
             # TODO optimize this
-            X_test_stack = ensemble.transform(X_test_original)
+            X_test_stack = ensemble.transform(X_test_original, deep=True)
         else:
             X_test_stack = None
 
         # after the first fit, we can discard estimators that were not selected by feature selection
-        columns_selected = ensemble.stacked_predictions_.columns[
-            ensemble.final_estimator_.steps[0][1].get_support()
+        columns_selected = original_ensemble.stacked_predictions_.columns[
+            original_ensemble.final_estimator_.steps[0][1].get_support()
         ]
         estimator_names_to_keep = {
             "_".join(column_name.split("_")[:-1]) for column_name in columns_selected
         }
         indices_to_keep = {
             i
-            for i, estimator in enumerate(ensemble.estimators)
+            for i, estimator in enumerate(original_ensemble.estimators)
             if estimator[0] in estimator_names_to_keep
         }
         print(indices_to_keep)
         estimator_names_to_remove = {
             name
-            for name, _ in ensemble.estimators
+            for name, _ in original_ensemble.estimators
             if name not in estimator_names_to_keep
         }
         print(estimator_names_to_remove)
-        ensemble.estimators = [
+        original_ensemble.estimators = [
             estimator
-            for estimator in ensemble.estimators
+            for estimator in original_ensemble.estimators
             if estimator[0] in estimator_names_to_keep
         ]
-        ensemble.estimators_ = [
+        original_ensemble.estimators_ = [
             estimator
-            for i, estimator in enumerate(ensemble.estimators_)
+            for i, estimator in enumerate(original_ensemble.estimators_)
             if i in indices_to_keep
         ]
         for name in estimator_names_to_remove:
-            del ensemble.named_estimators_[name]
-        ensemble.stack_method_ = [
+            del original_ensemble.named_estimators_[name]
+        original_ensemble.stack_method_ = [
             stack_method
-            for i, stack_method in enumerate(ensemble.stack_method_)
+            for i, stack_method in enumerate(original_ensemble.stack_method_)
             if i in indices_to_keep
         ]
-        ensemble.final_estimator_.steps[0] = (
-            ensemble.final_estimator_.steps[0][0],
+        original_ensemble.final_estimator_.steps[0] = (
+            original_ensemble.final_estimator_.steps[0][0],
             PandasSelectColumns(columns_selected),
         )
-        ensemble.final_estimator.steps[0] = (
-            ensemble.final_estimator.steps[0][0],
+        original_ensemble.final_estimator.steps[0] = (
+            original_ensemble.final_estimator.steps[0][0],
             PandasSelectColumns(columns_selected),
         )
-
-        test_predictions = kwargs.get("test_predictions", None)
-        if test_predictions:
-            ensemble._saved_test_predictions = [
-                test_predictions.get(trial_id, None)
-                for i, trial_id in enumerate(self.trial_ids_for_ensembling_)
-                if i in indices_to_keep
-            ]
 
         return ensemble, X_stack, X_test_stack

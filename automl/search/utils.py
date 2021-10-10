@@ -103,7 +103,7 @@ class ray_context:
             # TODO separate patch dict
             with patch.dict(
                 "os.environ",
-                {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s)},
+                {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s), "TUNE_RESULT_DELIM": "/"},
             ) if "TUNE_GLOBAL_CHECKPOINT_S" not in os.environ else contextlib.nullcontext():
                 ray.init(
                     **self.ray_config
@@ -118,8 +118,6 @@ class ray_context:
 def stack_estimator(estimator, stack):
     if stack:
         stack = deepcopy(stack)
-        stack.final_estimator = estimator
-        stack.final_estimator_ = estimator
-        stack.passthrough = True
+        stack.set_deep_final_estimator(estimator)
         estimator = stack
     return estimator

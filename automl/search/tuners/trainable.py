@@ -415,6 +415,7 @@ class SklearnTrainable(Trainable):
                 test_metrics = {
                     k: v for k, v in test_metrics.items() if k in self.scoring
                 }
+                fitted_estimator_list.append(fitted_estimator)
             fitted_estimator = fitted_estimator_list[0]
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(

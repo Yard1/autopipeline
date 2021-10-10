@@ -85,7 +85,7 @@ def _get_average_preds_from_repeated_cv(predictions: list, estimator):
     return predictions[0]
 
 
-def _cross_val_predict_repeated(
+def cross_val_predict_repeated(
     estimator,
     X,
     y=None,
@@ -185,7 +185,7 @@ def get_cv_predictions(
                 )
             except Exception:
                 predictions_new.append(
-                    _cross_val_predict_repeated(
+                    cross_val_predict_repeated(
                         clone(est),
                         X,
                         y,
