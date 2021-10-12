@@ -203,7 +203,8 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        predictions = Parallel(n_jobs=self.n_jobs)(
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = parallel(
             delayed(cross_val_predict_repeated)(
                 clone_with_n_jobs_1(est),
                 X,
@@ -251,13 +252,17 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
                 self.final_estimator_ = BasePipeline(
                     [("final_estimator", self.final_estimator_)], memory=self.memory
                 )
-            _fit_single_estimator(
-                self.final_estimator_,
-                X_meta,
-                y,
-                sample_weight=sample_weight,
-                **fit_kwargs,
+            fitted_estimator = parallel(
+                delayed(_fit_single_estimator)(
+                    self.final_estimator_,
+                    X_meta,
+                    y,
+                    sample_weight=sample_weight,
+                    **fit_kwargs,
+                )
+                for i in range(1)
             )
+            self.final_estimator_ = fitted_estimator[0]
 
         return self
 
@@ -334,7 +339,6 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             estimators=estimators,
             final_estimator=final_estimator,
             cv=cv,
-            stack_method="predict",
             n_jobs=n_jobs,
             passthrough=passthrough,
             verbose=verbose,
@@ -421,7 +425,8 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        predictions = Parallel(n_jobs=self.n_jobs)(
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = parallel(
             delayed(cross_val_predict_repeated)(
                 clone_with_n_jobs_1(est),
                 X,
@@ -463,13 +468,17 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
                 self.final_estimator_ = BasePipeline(
                     [("final_estimator", self.final_estimator_)], memory=self.memory
                 )
-            _fit_single_estimator(
-                self.final_estimator_,
-                X_meta,
-                y,
-                sample_weight=sample_weight,
-                **fit_kwargs,
+            fitted_estimator = parallel(
+                delayed(_fit_single_estimator)(
+                    self.final_estimator_,
+                    X_meta,
+                    y,
+                    sample_weight=sample_weight,
+                    **fit_kwargs,
+                )
+                for i in range(1)
             )
+            self.final_estimator_ = fitted_estimator[0]
 
         return self
 

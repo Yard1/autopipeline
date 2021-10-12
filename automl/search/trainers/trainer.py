@@ -489,6 +489,8 @@ class Trainer:
                 ensemble._ensemble_name: ray_results[i][0]
                 for i, ensemble in enumerate(self.secondary_ensembles or [])
             }
+        else:
+            fitted_ensembles = {}
         fitted_ensembles[
             self.main_stacking_ensemble._ensemble_name
         ] = main_stacking_ensemble_fitted
@@ -543,7 +545,7 @@ class Trainer:
     def _run_secondary_tuning(self, X, y, pipeline_blueprint, groups=None):
         raise NotImplementedError()
         groupby_list = [
-            f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
+            f"config{DELIM}{k}" for k in pipeline_blueprint.get_all_distributions().keys()
         ]
         groupby_list.reverse()
         grouped_results_df = self.all_results_df_[-1].groupby(by=groupby_list)

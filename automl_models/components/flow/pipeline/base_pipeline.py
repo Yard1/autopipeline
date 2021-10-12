@@ -5,8 +5,8 @@ import numpy as np
 from imblearn.pipeline import Pipeline as _ImblearnPipeline
 from sklearn.utils import _print_elapsed_time
 from sklearn.utils.metaestimators import if_delegate_has_method
-from sklearn.base import is_classifier, clone
-from sklearn.pipeline import check_memory
+from sklearn.base import is_classifier, clone, is_regressor
+from sklearn.pipeline import Pipeline, check_memory
 from time import time
 
 from ...utils import validate_type
@@ -67,6 +67,18 @@ def _score_samples(estimator, X, *args, **kwargs):
 
 
 class BasePipeline(_ImblearnPipeline):
+    def __init__(self, steps, *, memory=None, verbose=False, target_pipeline=None):
+        self.steps = steps
+        self.memory = memory
+        self.verbose = verbose
+        assert target_pipeline is None or isinstance(target_pipeline, Pipeline)
+        self.target_pipeline = target_pipeline
+        self._validate_steps()
+        if target_pipeline:
+            assert is_regressor(self._final_estimator) or is_classifier(
+                self._final_estimator
+            )
+
     def _memory_cache_if_not_pipeline(self, est, func, memory):
         if isinstance(est, BasePipeline):
             return NotMemorizedFunc(func)
@@ -113,6 +125,12 @@ class BasePipeline(_ImblearnPipeline):
     def set_params(self, **kwargs):
         # ConfigSpace workaround
         kwargs = {k: (None if v == "!None" else v) for k, v in kwargs.items()}
+        if self.target_pipeline:
+            self.target_pipeline.set_params(
+                **{k: v for k, v in kwargs.items() if k in ("memory", "verbose")}
+            )
+        else:
+            kwargs = {k: v for k, v in kwargs.items() if not k.startswith("target_pipeline__")}
         return super().set_params(**kwargs)
 
     def _convert_to_df_if_needed(self, X, y=None, fit=False):
@@ -145,6 +163,9 @@ class BasePipeline(_ImblearnPipeline):
 
     def fit(self, X, y=None, **fit_params):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
+        if self.target_pipeline:
+            self.target_pipeline = clone(self.target_pipeline)
+            y = self.target_pipeline.fit_transform(y)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
@@ -165,6 +186,9 @@ class BasePipeline(_ImblearnPipeline):
 
     def fit_transform(self, X, y=None, **fit_params):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
+        if self.target_pipeline:
+            self.target_pipeline = clone(self.target_pipeline)
+            y = self.target_pipeline.fit_transform(y)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
@@ -198,6 +222,9 @@ class BasePipeline(_ImblearnPipeline):
 
     def fit_resample(self, X, y=None, **fit_params):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
+        if self.target_pipeline:
+            self.target_pipeline = clone(self.target_pipeline)
+            y = self.target_pipeline.fit_transform(y)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
@@ -221,6 +248,9 @@ class BasePipeline(_ImblearnPipeline):
     @if_delegate_has_method(delegate="_final_estimator")
     def fit_predict(self, X, y=None, **fit_params):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
+        if self.target_pipeline:
+            self.target_pipeline = clone(self.target_pipeline)
+            y = self.target_pipeline.fit_transform(y)
         fit_params_steps = self._check_fit_params(**fit_params)
         Xt, yt = self._fit(X, y, **fit_params_steps)
 
@@ -236,6 +266,8 @@ class BasePipeline(_ImblearnPipeline):
                 self._final_estimator, Xt, yt, **fit_params_last_step
             )
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
+        if self.target_pipeline:
+            y_pred = self.target_pipeline.inverse_transform(y_pred)
         return y_pred
 
     @if_delegate_has_method(delegate="_final_estimator")
@@ -245,7 +277,10 @@ class BasePipeline(_ImblearnPipeline):
         predict_cached = self._memory_cache_if_not_pipeline(
             self._final_estimator, _predict, memory
         )
-        return predict_cached(self._final_estimator, Xt, **predict_params)
+        y_pred = predict_cached(self._final_estimator, Xt, **predict_params)
+        if self.target_pipeline:
+            y_pred = self.target_pipeline.inverse_transform(y_pred)
+        return y_pred
 
     @if_delegate_has_method(delegate="_final_estimator")
     def predict_proba(self, X, **predict_params):
@@ -283,9 +318,17 @@ class BasePipeline(_ImblearnPipeline):
 
     @if_delegate_has_method(delegate="_final_estimator")
     def score(self, X, y=None, **score_params):
-        Xt = self._transform(X, with_final=False)
-        memory = check_memory(self.memory)
-        score_cached = self._memory_cache_if_not_pipeline(
-            self._final_estimator, _score, memory
-        )
-        return score_cached(self._final_estimator, Xt, y, **score_params)
+        if is_classifier(self._final_estimator):
+            from sklearn.metrics import accuracy_score
+
+            return accuracy_score(y, self.predict(X), **score_params)
+        elif is_regressor:
+            from sklearn.metrics import r2_score
+
+            y_pred = self.predict(X)
+            return r2_score(y, y_pred, **score_params)
+        else:
+            Xt = self._transform(X, with_final=False)
+            memory = check_memory(self.memory)
+            score_cached = memory.cache(_score)
+            return score_cached(self._final_estimator, Xt, **score_params)

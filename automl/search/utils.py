@@ -104,7 +104,7 @@ class ray_context:
             with patch.dict(
                 "os.environ",
                 {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s), "TUNE_RESULT_DELIM": "/"},
-            ) if "TUNE_GLOBAL_CHECKPOINT_S" not in os.environ else contextlib.nullcontext():
+            ):
                 ray.init(
                     **self.ray_config
                     # log_to_driver=self.verbose == 2

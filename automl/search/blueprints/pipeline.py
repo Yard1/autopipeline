@@ -76,6 +76,7 @@ def create_pipeline_blueprint(
         "CombinedScalerTransformer": CombinedScalerTransformer(),
         "MinMaxScaler": MinMaxScaler(),
     }
+    target_transformers = {"QuantileTransformer": QuantileTargetTransformer()}
     binary_encoders = {
         "BinaryEncoder": BinaryEncoder(),
     }
@@ -142,6 +143,10 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
+        (
+            "target_pipeline__TransformTarget",
+            [components["Passthrough"]] + list(target_transformers.values()),
+        ),
         ("Imputer", list(imputers.values())),
         (
             "FeatureSelector",

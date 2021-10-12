@@ -1,10 +1,12 @@
 import pandas as pd
 import numpy as np
 from abc import ABC
+import os
 
 import logging
 
 logger = logging.getLogger(__name__)
+DELIM = os.environ["TUNE_RESULT_DELIM"]
 
 
 class EnsembleStrategy(ABC):
@@ -43,7 +45,7 @@ class RoundRobin(EnsembleStrategy):
             return [x for x in set(results) if x in results_df.index]
         selected_trial_ids = []
         groupby_list = [
-            f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
+            f"config{DELIM}{k}" for k in pipeline_blueprint.get_all_distributions().keys()
         ]
         percentile = np.percentile(
             results_df["mean_validation_score"], self.percentile_threshold
@@ -91,7 +93,7 @@ class RoundRobinEstimator(EnsembleStrategy):
         if self.configurations_to_select < 0:
             return [x for x in set(results) if x in results_df.index]
         selected_trial_ids = []
-        groupby_list = ["config.Estimator"]
+        groupby_list = [f"config{DELIM}Estimator"]
         percentile = np.percentile(
             results_df["mean_validation_score"], self.percentile_threshold
         )
