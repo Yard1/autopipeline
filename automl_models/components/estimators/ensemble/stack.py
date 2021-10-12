@@ -90,6 +90,7 @@ class DeepStackMixin:
 
     def set_deep_final_estimator(self, estimator):
         if isinstance(self.final_estimator, DeepStackMixin):
+            self.passthrough = True
             return self.final_estimator.set_deep_final_estimator(estimator)
         self.final_estimator = estimator
         self.final_estimator_ = estimator
