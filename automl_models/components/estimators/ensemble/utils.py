@@ -6,8 +6,11 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.utils.validation import check_is_fitted, NotFittedError, check_random_state
 from sklearn.model_selection._split import _RepeatedSplits
+from sklearn.utils import _print_elapsed_time
+from sklearn.utils.fixes import delayed
 from pandas.api.types import is_integer_dtype, is_bool_dtype
-from ...utils import split_list_into_chunks
+
+from ...utils import ray_put_if_needed
 
 import logging
 
@@ -143,6 +146,9 @@ def cross_val_predict_repeated(
     )
 
 
+ray_cross_val_predict_repeated = ray.remote(cross_val_predict_repeated)
+
+
 def get_cv_predictions(
     X,
     y,
@@ -205,5 +211,74 @@ def get_cv_predictions(
     return predictions_new
 
 
+def fit_single_estimator(
+    estimator,
+    X,
+    y,
+    sample_weight=None,
+    message_clsname=None,
+    message=None,
+    **fit_kwargs,
+):
+    """Private function used to fit an estimator within a job."""
+    if sample_weight is not None:
+        try:
+            with _print_elapsed_time(message_clsname, message):
+                estimator.fit(X, y, sample_weight=sample_weight, **fit_kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument 'sample_weight'" in str(exc):
+                raise TypeError(
+                    "Underlying estimator {} does not support sample weights.".format(
+                        estimator.__class__.__name__
+                    )
+                ) from exc
+            raise
+    else:
+        with _print_elapsed_time(message_clsname, message):
+            estimator.fit(X, y, **fit_kwargs)
+    return estimator
+
+
+ray_fit_single_estimator = ray.remote(fit_single_estimator)
+
+
+def fit_estimators(parallel, all_estimators, X, y, sample_weight, clone_function):
+    if should_use_ray(parallel):
+        cloned_estimators = [
+            ray_put_if_needed(clone_function(est))
+            for est in all_estimators
+            if est != "drop"
+        ]
+        X_ref = ray_put_if_needed(X)
+        y_ref = ray_put_if_needed(y)
+        sample_weight_ref = ray_put_if_needed(sample_weight)
+        estimators = ray.get(
+            [
+                ray_fit_single_estimator.remote(est, X_ref, y_ref, sample_weight_ref)
+                for est in cloned_estimators
+            ]
+        )
+    else:
+        estimators = parallel(
+            delayed(fit_single_estimator)(clone_function(est), X, y, sample_weight)
+            for est in all_estimators
+            if est != "drop"
+        )
+    return estimators
+
+
 def call_method(obj, method_name, *args, **kwargs):
     return getattr(obj, method_name)(*args, **kwargs)
+
+
+ray_call_method = ray.remote(call_method)
+
+
+def should_use_ray(parallel):
+    return "ray" in parallel._backend.__class__.__name__.lower() or ray.is_initialized()
+
+
+def put_args_if_ray(parallel, *args):
+    if should_use_ray(parallel):
+        return (ray_put_if_needed(arg) for arg in args)
+    return args

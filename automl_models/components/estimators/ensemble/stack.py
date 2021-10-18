@@ -14,49 +14,121 @@ from sklearn.utils.fixes import delayed
 from sklearn.model_selection import check_cv
 from sklearn.base import is_classifier
 from sklearn.utils.validation import check_is_fitted
-from sklearn.utils import _print_elapsed_time
+
 
 from .utils import (
-    get_cv_predictions,
-    fit_single_estimator_if_not_fitted,
     call_method,
+    ray_call_method,
     cross_val_predict_repeated,
+    ray_cross_val_predict_repeated,
+    should_use_ray,
+    put_args_if_ray,
+    fit_single_estimator,
+    ray_fit_single_estimator,
+    fit_estimators,
 )
-from ...utils import clone_with_n_jobs_1
+from ...utils import clone_with_n_jobs_1, ray_put_if_needed
 from ...preprocessing import PrepareDataFrame
 from ...flow import BasePipeline
 
 import logging
+import ray
 
 logger = logging.getLogger(__name__)
 
 
-def _fit_single_estimator(
-    estimator,
-    X,
-    y,
-    sample_weight=None,
-    message_clsname=None,
-    message=None,
-    **fit_kwargs,
+def _get_cv_predictions(
+    parallel, all_estimators, X, y, cv, fit_params, verbose, stack_method, n_jobs
 ):
-    """Private function used to fit an estimator within a job."""
-    if sample_weight is not None:
-        try:
-            with _print_elapsed_time(message_clsname, message):
-                estimator.fit(X, y, sample_weight=sample_weight, **fit_kwargs)
-        except TypeError as exc:
-            if "unexpected keyword argument 'sample_weight'" in str(exc):
-                raise TypeError(
-                    "Underlying estimator {} does not support sample weights.".format(
-                        estimator.__class__.__name__
-                    )
-                ) from exc
-            raise
+    if should_use_ray(parallel):
+        cloned_estimators = [
+            (ray_put_if_needed(clone_with_n_jobs_1(est)), meth)
+            for est, meth in zip(all_estimators, stack_method)
+            if est != "drop"
+        ]
+        X_ref = ray_put_if_needed(X)
+        y_ref = ray_put_if_needed(y)
+        fit_params_ref = ray_put_if_needed(fit_params)
+        predictions = ray.get(
+            [
+                ray_cross_val_predict_repeated.remote(
+                    est,
+                    X_ref,
+                    y_ref,
+                    cv=deepcopy(cv),
+                    method=meth,
+                    n_jobs=n_jobs,
+                    fit_params=fit_params_ref,
+                    verbose=verbose,
+                )
+                for est, meth in cloned_estimators
+            ]
+        )
     else:
-        with _print_elapsed_time(message_clsname, message):
-            estimator.fit(X, y, **fit_kwargs)
-    return estimator
+        predictions = parallel(
+            delayed(cross_val_predict_repeated)(
+                clone_with_n_jobs_1(est),
+                X,
+                y,
+                cv=deepcopy(cv),
+                method=meth,
+                n_jobs=n_jobs,
+                fit_params=fit_params,
+                verbose=verbose,
+            )
+            for est, meth in zip(all_estimators, stack_method)
+            if est != "drop"
+        )
+    return predictions
+
+
+def _fit_final_estimator(
+    parallel, final_estimator, X_meta, y, sample_weight, fit_kwargs
+):
+    if should_use_ray(parallel):
+        estimator_ref = ray_put_if_needed(final_estimator)
+        X_meta_ref = ray_put_if_needed(X_meta)
+        y_ref = ray_put_if_needed(y)
+        sample_weight_ref = ray_put_if_needed(sample_weight)
+        fitted_estimator = [
+            ray.get(
+                ray_fit_single_estimator.remote(
+                    estimator_ref, X_meta_ref, y_ref, sample_weight_ref, **fit_kwargs
+                )
+            )
+        ]
+    else:
+        fitted_estimator = parallel(
+            delayed(fit_single_estimator)(
+                final_estimator,
+                X_meta,
+                y,
+                sample_weight=sample_weight,
+                **fit_kwargs,
+            )
+            for i in range(1)
+        )
+    return fitted_estimator
+
+
+def _get_predictions(parallel, estimators, X, stack_method):
+    if should_use_ray(parallel):
+        estimators = [
+            (ray_put_if_needed(est), meth)
+            for est, meth in zip(estimators, stack_method)
+            if est != "drop"
+        ]
+        X_ref = ray_put_if_needed(X)
+        predictions = ray.get(
+            [ray_call_method.remote(est, meth, X_ref) for est, meth in estimators]
+        )
+    else:
+        predictions = parallel(
+            delayed(call_method)(est, meth, X)
+            for est, meth in zip(estimators, stack_method)
+            if est != "drop"
+        )
+    return predictions
 
 
 class DeepStackMixin:
@@ -166,16 +238,20 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         #    self.final_estimator_ = self.final_estimator
         stack_method = [self.stack_method] * len(all_estimators)
 
+        parallel = Parallel(n_jobs=self.n_jobs)
+        X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
+
         # Fit the base estimators on the whole training data. Those
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-            delayed(_fit_single_estimator)(
-                clone_with_n_jobs_1(est), X, y, sample_weight
-            )
-            for est in all_estimators
-            if est != "drop"
+        self.estimators_ = fit_estimators(
+            parallel,
+            all_estimators,
+            X_ray,
+            y_ray,
+            sample_weight_ray,
+            clone_with_n_jobs_1,
         )
 
         self.named_estimators_ = Bunch()
@@ -204,20 +280,16 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = parallel(
-            delayed(cross_val_predict_repeated)(
-                clone_with_n_jobs_1(est),
-                X,
-                y,
-                cv=deepcopy(cv),
-                method=meth,
-                n_jobs=self.n_jobs,
-                fit_params=fit_params,
-                verbose=self.verbose,
-            )
-            for est, meth in zip(all_estimators, self.stack_method_)
-            if est != "drop"
+        predictions = _get_cv_predictions(
+            parallel,
+            all_estimators,
+            X_ray,
+            y_ray,
+            cv,
+            fit_params,
+            self.verbose,
+            self.stack_method_,
+            1,
         )
         if save_predictions == "deep" and not isinstance(
             self.final_estimator_, DeepStackMixin
@@ -253,15 +325,13 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
                 self.final_estimator_ = BasePipeline(
                     [("final_estimator", self.final_estimator_)], memory=self.memory
                 )
-            fitted_estimator = parallel(
-                delayed(_fit_single_estimator)(
-                    self.final_estimator_,
-                    X_meta,
-                    y,
-                    sample_weight=sample_weight,
-                    **fit_kwargs,
-                )
-                for i in range(1)
+            fitted_estimator = _fit_final_estimator(
+                parallel,
+                self.final_estimator_,
+                X_meta,
+                y_ray,
+                sample_weight_ray,
+                fit_kwargs,
             )
             self.final_estimator_ = fitted_estimator[0]
 
@@ -315,13 +385,22 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             df = self.preprocessor_.fit_transform(meta_df)
         try:
             df.index = X.index
-        except:
+        except Exception:
             pass
         if save_predictions:
             self.stacked_predictions_ = df
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = _get_predictions(
+            parallel, self.estimators_, X, self.stack_method_
+        )
+        return self._concatenate_predictions(X, predictions)
 
 
 class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
@@ -388,16 +467,21 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         #    self.final_estimator_ = self.final_estimator
         stack_method = [self.stack_method] * len(all_estimators)
 
+        parallel = Parallel(n_jobs=self.n_jobs)
+        X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
+
         # Fit the base estimators on the whole training data. Those
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-            delayed(_fit_single_estimator)(
-                clone_with_n_jobs_1(est), X, y, sample_weight
-            )
-            for est in all_estimators
-            if est != "drop"
+        parallel = Parallel(n_jobs=self.n_jobs)
+        self.estimators_ = fit_estimators(
+            parallel,
+            all_estimators,
+            X_ray,
+            y_ray,
+            sample_weight_ray,
+            clone_with_n_jobs_1,
         )
 
         self.named_estimators_ = Bunch()
@@ -427,22 +511,25 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
         parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = parallel(
-            delayed(cross_val_predict_repeated)(
-                clone_with_n_jobs_1(est),
-                X,
-                y,
-                cv=deepcopy(cv),
-                method=meth,
-                n_jobs=self.n_jobs,
-                fit_params=fit_params,
-                verbose=self.verbose,
-            )
-            for est, meth in zip(all_estimators, self.stack_method_)
-            if est != "drop"
+        predictions = _get_cv_predictions(
+            parallel,
+            all_estimators,
+            X_ray,
+            y_ray,
+            cv,
+            fit_params,
+            self.verbose,
+            self.stack_method_,
+            1,
         )
+        if save_predictions == "deep" and not isinstance(
+            self.final_estimator_, DeepStackMixin
+        ):
+            save_predictions = True
         X_meta = self._concatenate_predictions(
-            X, predictions, save_predictions=save_predictions
+            X,
+            predictions,
+            save_predictions if isinstance(save_predictions, bool) else False,
         )
 
         # Only not None or not 'drop' estimators will be used in transform.
@@ -469,15 +556,13 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
                 self.final_estimator_ = BasePipeline(
                     [("final_estimator", self.final_estimator_)], memory=self.memory
                 )
-            fitted_estimator = parallel(
-                delayed(_fit_single_estimator)(
-                    self.final_estimator_,
-                    X_meta,
-                    y,
-                    sample_weight=sample_weight,
-                    **fit_kwargs,
-                )
-                for i in range(1)
+            fitted_estimator = _fit_final_estimator(
+                parallel,
+                self.final_estimator_,
+                X_meta,
+                y_ray,
+                sample_weight_ray,
+                fit_kwargs,
             )
             self.final_estimator_ = fitted_estimator[0]
 
@@ -531,10 +616,19 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             df = self.preprocessor_.fit_transform(meta_df)
         try:
             df.index = X.index
-        except:
+        except Exception:
             pass
         if save_predictions:
             self.stacked_predictions_ = df
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = _get_predictions(
+            parallel, self.estimators_, X, self.stack_method_
+        )
+        return self._concatenate_predictions(X, predictions)

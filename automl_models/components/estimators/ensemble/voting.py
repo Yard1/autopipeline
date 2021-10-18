@@ -1,5 +1,6 @@
 import numpy as np
 
+import ray
 import ray.exceptions
 from joblib import Parallel
 
@@ -13,41 +14,38 @@ from sklearn.ensemble import (
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 
-from .utils import fit_single_estimator_if_not_fitted, call_method
+from .utils import (
+    call_method,
+    ray_put_if_needed,
+    should_use_ray,
+    ray_call_method,
+    fit_estimators,
+)
 from ...utils import clone_with_n_jobs_1
 
 
-def _collect_predictions(obj, X, method):
-    if hasattr(obj, "_saved_test_predictions") and obj._saved_test_predictions:
-        saved_predictions = obj._saved_test_predictions
-    else:
-        saved_predictions = [None] * len(obj.estimators_)
-
-    assert len(saved_predictions) == len(obj.estimators_)
-
-    predictions = Parallel(n_jobs=obj.n_jobs, verbose=int(bool(obj.verbose)))(
-        delayed(call_method)(
-            est,
-            method,
-            X,
+def _get_predictions(parallel, estimators, X, method):
+    if should_use_ray(parallel):
+        estimators = [ray_put_if_needed(est) for est in estimators]
+        X_ref = ray_put_if_needed(X)
+        predictions = ray.get(
+            [ray_call_method.remote(est, method, X_ref) for est in estimators]
         )
-        for i, est in enumerate(obj.estimators_)
-        if saved_predictions[i] is None or method not in saved_predictions[i]
-    )
-    predictions = list(predictions)
-
-    for i in range(len(saved_predictions)):
-        if saved_predictions[i] is None or method not in saved_predictions[i]:
-            saved_predictions[i] = predictions.pop(0)
-        else:
-            saved_predictions[i] = saved_predictions[i][method]
-
-    return saved_predictions
+    else:
+        predictions = parallel(
+            delayed(call_method)(
+                est,
+                method,
+                X,
+            )
+            for i, est in enumerate(estimators)
+        )
+    return predictions
 
 
 # TODO consider accumulation as in _BaseForest to avoid storing all preds
 class PandasVotingClassifier(_VotingClassifier):
-    def fit(self, X, y, sample_weight=None, refit_estimators=True):
+    def fit(self, X, y, sample_weight=None):
         check_classification_targets(y)
         if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:
             raise NotImplementedError(
@@ -73,35 +71,10 @@ class PandasVotingClassifier(_VotingClassifier):
                 % (len(self.weights), len(self.estimators))
             )
 
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    clf,
-                    X,
-                    y,
-                    sample_weight=sample_weight,
-                    message_clsname="Voting",
-                    message=self._log_message(names[idx], idx + 1, len(clfs)),
-                    force_refit=refit_estimators,
-                )
-                for idx, clf in enumerate(clfs)
-                if clf != "drop"
-            )
-        except (ray.exceptions.RayError):
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    clf,
-                    X,
-                    y,
-                    sample_weight=sample_weight,
-                    message_clsname="Voting",
-                    message=self._log_message(names[idx], idx + 1, len(clfs)),
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
-                )
-                for idx, clf in enumerate(clfs)
-                if clf != "drop"
-            )
+        parallel = Parallel(n_jobs=self.n_jobs)
+        self.estimators_ = fit_estimators(
+            parallel, clfs, X, y, sample_weight, clone_with_n_jobs_1
+        )
 
         self.named_estimators_ = Bunch()
 
@@ -151,13 +124,15 @@ class PandasVotingClassifier(_VotingClassifier):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = _collect_predictions(self, X, "predict")
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = _get_predictions(parallel, self.estimators_, X, "predict")
 
         return np.asarray(predictions).T
 
     def _collect_probas(self, X):
         """Collect results from clf.predict_proba calls."""
-        predictions = _collect_predictions(self, X, "predict_proba")
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = _get_predictions(parallel, self.estimators_, X, "predict_proba")
 
         return np.asarray(predictions)
 
@@ -171,9 +146,9 @@ class PandasVotingClassifier(_VotingClassifier):
 
 
 class PandasVotingRegressor(_VotingRegressor):
-    def fit(self, X, y, sample_weight=None, refit_estimators=True):
+    def fit(self, X, y, sample_weight=None):
         """Get common fit operations."""
-        names, clfs = self._validate_estimators()
+        names, regs = self._validate_estimators()
 
         if self.weights is not None and len(self.weights) != len(self.estimators):
             raise ValueError(
@@ -182,35 +157,10 @@ class PandasVotingRegressor(_VotingRegressor):
                 % (len(self.weights), len(self.estimators))
             )
 
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    clf,
-                    X,
-                    y,
-                    sample_weight=sample_weight,
-                    message_clsname="Voting",
-                    message=self._log_message(names[idx], idx + 1, len(clfs)),
-                    force_refit=refit_estimators,
-                )
-                for idx, clf in enumerate(clfs)
-                if clf != "drop"
-            )
-        except (ray.exceptions.RayError):
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    clf,
-                    X,
-                    y,
-                    sample_weight=sample_weight,
-                    message_clsname="Voting",
-                    message=self._log_message(names[idx], idx + 1, len(clfs)),
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
-                )
-                for idx, clf in enumerate(clfs)
-                if clf != "drop"
-            )
+        parallel = Parallel(n_jobs=self.n_jobs)
+        self.estimators_ = fit_estimators(
+            parallel, regs, X, y, sample_weight, clone_with_n_jobs_1
+        )
 
         self.named_estimators_ = Bunch()
 
@@ -247,6 +197,7 @@ class PandasVotingRegressor(_VotingRegressor):
 
     def _predict(self, X):
         """Collect results from clf.predict calls."""
-        predictions = _collect_predictions(self, X, "predict")
+        parallel = Parallel(n_jobs=self.n_jobs)
+        predictions = _get_predictions(parallel, self.estimators_, X, "predict")
 
         return np.asarray(predictions).T

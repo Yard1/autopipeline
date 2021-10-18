@@ -38,6 +38,7 @@ from ...utils.types import array_shrink
 from ...utils.memory import dynamic_memory_factory
 from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 from ...utils.estimators import set_param_context
+from ...utils.tune_callbacks import META_KEY
 
 import logging
 
@@ -225,12 +226,7 @@ class SklearnTrainable(Trainable):
 
     @classmethod
     def default_resource_request(cls, config):
-        return Resources(
-            cpu=0,
-            gpu=0,
-            extra_cpu=cls.N_JOBS,
-            extra_gpu=0
-        )
+        return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
     def _cross_validate(
         self,
@@ -324,6 +320,7 @@ class SklearnTrainable(Trainable):
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
         config = {**self.const_values, **self.estimator_config}
+        config.pop(META_KEY, None)
         config_called = treat_config(
             config, self.component_strings, self.hyperparameter_names, self.random_state
         )
@@ -356,7 +353,7 @@ class SklearnTrainable(Trainable):
 
         scoring_with_dummies = self._make_scoring_dict()
         logger.debug(f"doing cv on {estimator.steps[-1][1]}")
-        #print(self.X_.columns)
+        # print(self.X_.columns)
         scores = self._cross_validate(
             estimator,
             self.X_,

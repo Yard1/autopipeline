@@ -52,6 +52,7 @@ class Tuner(ABC):
         target_metric=None,
         scoring=None,
         display: Optional[IPythonDisplay] = None,
+        stacking_level: int = 0,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
@@ -60,7 +61,8 @@ class Tuner(ABC):
         self.use_extended = use_extended
         self.num_samples = num_samples
         self.time_budget_s = time_budget_s
-        self.display = display or IPythonDisplay("tuner_best_plot_display")
+        self.stacking_level = stacking_level
+        self.display = display
         # TODO reenable
         # assert target_metric in scoring
 
@@ -234,6 +236,9 @@ class RayTuneTuner(Tuner):
         max_concurrent: int = 1,
         trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
+        stacking_level: int = 0,
+        widget: Optional[go.FigureWidget] = None,
+        plot_callback: Optional[BestPlotCallback] = None,
         **tune_kwargs,
     ) -> None:
         self.cache = cache
@@ -242,6 +247,8 @@ class RayTuneTuner(Tuner):
         self.num_samples = num_samples
         self.max_concurrent = max_concurrent
         self.trainable_n_jobs = trainable_n_jobs
+        self.widget = widget
+        self.plot_callback = plot_callback
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
@@ -267,6 +274,7 @@ class RayTuneTuner(Tuner):
             target_metric=target_metric,
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             display=display,
+            stacking_level=stacking_level,
         )
 
     @property
@@ -311,22 +319,33 @@ class RayTuneTuner(Tuner):
                 if str(v) in self.component_strings_:
                     conf[k] = str(v)
 
+    def _configure_callbacks(self, tune_kwargs):
+        # TODO make this better
+        display = self.display or IPythonDisplay("tuner_best_plot_display")
+        if not self.widget:
+            self.widget_ = go.FigureWidget()
+            self.widget_.add_scatter(mode="lines+markers", name="Best validation score")
+            self.widget_.add_scatter(mode="lines+markers", name="Best test score")
+            self.widget_.add_scatter(mode="lines", name="Mean score")
+            self.widget_.add_scatter(mode="markers", name="Validation score")
+            display.display(self.widget_)
+        else:
+            self.widget_ = self.widget
+        callbacks = tune_kwargs.get("callbacks", [])
+        if self.plot_callback:
+            self.plot_callback_ = self.plot_callback
+        else:
+            self.plot_callback_ = BestPlotCallback(
+                widget=self.widget_,
+                metric=self.target_metric,
+            )  # TODO metric
+        tune_kwargs["callbacks"] = callbacks
+        tune_kwargs["callbacks"].append(self.plot_callback_)
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
-        # TODO make this better
-        self.widget_ = go.FigureWidget()
-        self.widget_.add_scatter(mode="lines+markers", name="Best validation score")
-        self.widget_.add_scatter(mode="lines+markers", name="Best test score")
-        self.widget_.add_scatter(mode="lines", name="Mean score")
-        self.widget_.add_scatter(mode="markers", name="Validation score")
-        self.display.display(self.widget_)
-        plot_callback = BestPlotCallback(
-            widget=self.widget_, metric=self.target_metric
-        )  # TODO metric
+        self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
-        tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
-        tune_kwargs["callbacks"].append(plot_callback)
         print(f"columns to tune: {self.X_.columns}")
         params = {
             "X_": self.X_,

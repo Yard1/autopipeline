@@ -62,6 +62,7 @@ def ray_fit_ensemble_and_return_stacked_preds_remote(
     ) = main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
         **ensemble_config
     )
+    assert X_stack is not None
     scores = _score_ensemble(
         main_stacking_ensemble_fitted, ensemble_config, scoring_dict
     )
@@ -77,6 +78,9 @@ def ray_fit_ensemble(
 ):
     register_ray()
     #with joblib.parallel_backend("sequential"):
-    ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
-    scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
+    try:
+        ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
+        scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
+    except Exception:
+        ensemble_fitted, scores = None, None
     return ensemble_fitted, scores

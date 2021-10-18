@@ -51,13 +51,16 @@ from .OptunaTPETuner import ConditionalOptunaSearch, TrialState, RandomSampler
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner
+from ...utils.tune_callbacks import BestPlotCallback, META_KEY
 from ...problems import ProblemType
 from ...utils.display import IPythonDisplay
 
 GlobalSearch = ConditionalOptunaSearch
 
+
 def print(*args, **kwargs):
     pass
+
 
 # TODO: Fix cost_attr in cache
 class PatchedFLOW2(FLOW2):
@@ -711,6 +714,7 @@ class ConditionalBlendSearch(BlendSearch):
         use_extended: bool = False,
         spawn_local_threads: bool = True,
         mem_size=None,
+        meta_info: Optional[dict] = None,
     ):
         self._metric, self._mode = metric, mode
         self._config_constraints = config_constraints
@@ -719,6 +723,7 @@ class ConditionalBlendSearch(BlendSearch):
             space, to_str=True, use_extended=use_extended
         )
         self._time_attr = time_attr
+        self._meta_info = meta_info or {}
 
         self._seed = seed
 
@@ -902,7 +907,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._reached_max_prune_attr,
             self._cost_bounds,
             self._random,
-            self._spawn_local_threads
+            self._spawn_local_threads,
+            self._meta_info
             # self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
@@ -932,7 +938,8 @@ class ConditionalBlendSearch(BlendSearch):
             self._reached_max_prune_attr,
             self._cost_bounds,
             self._random,
-            self._spawn_local_threads
+            self._spawn_local_threads,
+            self._meta_info
             # self._diversification_multipliers,
         ) = save_object
 
@@ -1616,7 +1623,7 @@ class ConditionalBlendSearch(BlendSearch):
         #     )
 
         print(f"{trial_id} final suggestion by {proposing_thread}: {config}")
-
+        config[META_KEY] = {"proposing_thread": proposing_thread, **self._meta_info}
         return config
 
     def _clean_and_enforce_config(self, config, prune_attr) -> dict:
@@ -1749,6 +1756,9 @@ class BlendSearchTuner(RayTuneTuner):
         max_concurrent: int = 1,
         trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
+        stacking_level: int = 0,
+        widget=None,
+        plot_callback:Optional[BestPlotCallback]=None,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
@@ -1767,9 +1777,15 @@ class BlendSearchTuner(RayTuneTuner):
             max_concurrent=max_concurrent,
             trainable_n_jobs=trainable_n_jobs,
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
+            stacking_level=stacking_level,
+            widget=widget,
+            plot_callback=plot_callback,
             **tune_kwargs,
         )
-        self._searcher_kwargs = {"time_attr": "estimator_fit_time"}
+        self._searcher_kwargs = {
+            "time_attr": "estimator_fit_time",
+            "meta_info": {"stacking_level": self.stacking_level},
+        }
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4

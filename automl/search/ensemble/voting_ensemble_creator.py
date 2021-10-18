@@ -110,7 +110,7 @@ class VotingEnsembleCreator(EnsembleCreator):
         )()
         if previous_stack:
             stacked_ensemble = clone(previous_stack)
-            stacked_ensemble.final_estimator = ensemble
+            stacked_ensemble.set_deep_final_estimator(ensemble)
             ensemble = stacked_ensemble
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")

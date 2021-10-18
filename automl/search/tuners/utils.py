@@ -8,6 +8,7 @@ from ...search.stage import AutoMLStage
 from ...components.flow.pipeline import Pipeline
 from ...utils.string import removeprefix
 from ...search.distributions.distributions import CategoricalDistribution
+from ...utils.tune_callbacks import META_KEY
 
 from ..utils import call_component_if_needed
 
@@ -19,8 +20,12 @@ def split_list_into_chunks(lst: list, chunk_size: int) -> list:
     ]
 
 
-def treat_config(config: dict, component_strings: dict, hyperparameter_names: dict, random_state=None) -> dict:
-    config = {k: component_strings.get(v, v) for k, v in config.items()}
+def treat_config(
+    config: dict, component_strings: dict, hyperparameter_names: dict, random_state=None
+) -> dict:
+    config = {
+        k: component_strings.get(v, v) for k, v in config.items() if not k == META_KEY
+    }
     return {
         hyperparameter_names.get(k, k): call_component_if_needed(
             v, random_state=random_state
