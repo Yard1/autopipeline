@@ -45,6 +45,8 @@ def _get_predictions(parallel, estimators, X, method):
 
 # TODO consider accumulation as in _BaseForest to avoid storing all preds
 class PandasVotingClassifier(_VotingClassifier):
+    _is_ensemble = True
+
     def fit(self, X, y, sample_weight=None):
         check_classification_targets(y)
         if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:
@@ -146,6 +148,8 @@ class PandasVotingClassifier(_VotingClassifier):
 
 
 class PandasVotingRegressor(_VotingRegressor):
+    _is_ensemble = True
+
     def fit(self, X, y, sample_weight=None):
         """Get common fit operations."""
         names, regs = self._validate_estimators()

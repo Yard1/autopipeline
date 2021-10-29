@@ -71,7 +71,12 @@ def flatten_iterable(x: list) -> list:
         return [x]
 
 
-def get_obj_name(obj: Any) -> str:
+def get_obj_name(obj: Any, deep: bool = True) -> str:
+    if deep and hasattr(obj, "get_deep_final_estimator"):
+        r = obj.get_deep_final_estimator(up_to_stack=True)
+        if getattr(r.final_estimator, "_is_ensemble", False):
+            return get_obj_name(r.final_estimator, deep=False)
+        return get_obj_name(r, deep=False)
     try:
         return obj.__name__
     except AttributeError:

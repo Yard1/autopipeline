@@ -431,21 +431,21 @@ class Trainer:
         ray_ensemble_config = ensemble_config
         ray_scoring_dict = self.scoring_dict
         ray_jobs = [
-            ray_fit_ensemble_and_return_stacked_preds_remote(
+            (self.main_stacking_ensemble._ensemble_name, ray_fit_ensemble_and_return_stacked_preds_remote(
                 self.main_stacking_ensemble,
                 ray_ensemble_config,
                 ray_scoring_dict,
                 # ray_cache_actor=self.last_tuner_.ray_cache_,
-            )
+            ))
         ]
         if self.current_stacking_level >= self.stacking_level:
             ray_jobs += [
-                ray_fit_ensemble(
+                (ensemble._ensemble_name, ray_fit_ensemble(
                     ensemble,
                     ray_ensemble_config,
                     ray_scoring_dict,
                     # ray_cache_actor=self.last_tuner_.ray_cache_,
-                )
+                ))
                 for ensemble in self.secondary_ensembles or []
             ]
         print("starting ensemble jobs")
@@ -465,27 +465,28 @@ class Trainer:
                     return i
             return None
 
-        main_result = ray_results.pop(index_of_first(ray_results, lambda x: len(x) > 2))
+        main_result = ray_results.pop(0)
+        main_result_name, main_result = main_result
         (main_stacking_ensemble_fitted, X_stack, X_test_stack, score) = main_result
-        scores = {self.main_stacking_ensemble._ensemble_name: score}
+        scores = {main_result_name: score}
         if ray_results:
             scores = {
                 **scores,
                 **{
-                    ensemble._ensemble_name: ray_results[i][1]
-                    for i, ensemble in enumerate(self.secondary_ensembles or [])
-                    if ray_results[i][1]
+                    result[0]: result[1][1]
+                    for i, result in enumerate(ray_results)
+                    if result[1][1]
                 },
             }
             fitted_ensembles = {
-                ensemble._ensemble_name: ray_results[i][0]
-                for i, ensemble in enumerate(self.secondary_ensembles or [])
-                if ray_results[i][0]
+                result[0]: result[1][0]
+                for i, result in enumerate(ray_results)
+                if result[1][0]
             }
         else:
             fitted_ensembles = {}
         fitted_ensembles[
-            self.main_stacking_ensemble._ensemble_name
+            main_result_name
         ] = main_stacking_ensemble_fitted
 
         self.ensemble_results_.append({})

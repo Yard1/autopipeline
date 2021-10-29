@@ -171,6 +171,8 @@ class DeepStackMixin:
 
 # TODO handle Repeated CV (here and in trainable)
 class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
+    _is_ensemble = True
+
     def __init__(
         self,
         estimators,
@@ -404,6 +406,8 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
 
 
 class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
+    _is_ensemble = True
+
     def __init__(
         self,
         estimators,
