@@ -53,7 +53,6 @@ class VotingEnsembleCreator(EnsembleCreator):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -71,7 +70,6 @@ class VotingEnsembleCreator(EnsembleCreator):
             X,
             y,
             results,
-            results_df,
             pipeline_blueprint,
             metric_name,
             metric,
@@ -84,12 +82,12 @@ class VotingEnsembleCreator(EnsembleCreator):
             y_test_original=y_test_original,
             **kwargs,
         )
-        trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
+        trials_for_ensembling = self.select_trials_for_ensemble(results, self.trial_ids_for_ensembling_)
         print(f"creating voting classifier {self._ensemble_name}")
         weights = [self.weight_function_(trial) for trial in trials_for_ensembling]
         trials_for_ensembling = [
-            results[k]
-            for idx, k in enumerate(self.trial_ids_for_ensembling_)
+            trial
+            for idx, trial in enumerate(trials_for_ensembling)
             if weights[idx] > 0
         ]
         weights = [weight for weight in weights if weight > 0]

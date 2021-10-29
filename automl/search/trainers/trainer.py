@@ -32,7 +32,6 @@ register_ray_caching()
 
 from ..ensemble import (
     EnsembleStrategy,
-    RoundRobin,
     EnsembleBest,
     RoundRobinEstimator,
     EnsembleCreator,
@@ -133,19 +132,19 @@ class Trainer:
             or [
                 VotingEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
                     ),
                     problem_type=self.problem_type,
                 ),
                 SelectFromModelStackingEnsembleCreator(
                     ensemble_strategy=EnsembleBest(
-                        configurations_to_select=100, percentile_threshold=1
+                        configurations_to_select=100, percentile_threshold=1, use_only_last_results=False
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -153,13 +152,13 @@ class Trainer:
             + [
                 VotingSoftEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingSoftByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15
+                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -344,7 +343,7 @@ class Trainer:
         else:
             X_test_tuning = None
             y_test_tuning = None
-        results, results_df, pipeline_blueprint = self._tune(
+        results, _, pipeline_blueprint = self._tune(
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
         )
 
@@ -362,8 +361,7 @@ class Trainer:
             X_stack, X_test_stack = self._create_ensembles(
                 X_original,
                 y_original,
-                results,
-                results_df,
+                self.all_results_,
                 pipeline_blueprint,
                 X_test=X_test,
                 y_test=y_test,
@@ -396,7 +394,6 @@ class Trainer:
         X,
         y,
         results,
-        results_df,
         pipeline_blueprint,
         X_test=None,
         y_test=None,
@@ -407,8 +404,7 @@ class Trainer:
         ensemble_config = {
             "X": X,
             "y": y,
-            "results": results,
-            "results_df": results_df,
+            "results": results.copy(),
             "pipeline_blueprint": pipeline_blueprint,
             "metric_name": self.default_metric_name,
             # TODO fix this
@@ -442,21 +438,22 @@ class Trainer:
                 # ray_cache_actor=self.last_tuner_.ray_cache_,
             )
         ]
-        ray_jobs += [
-            ray_fit_ensemble(
-                ensemble,
-                ray_ensemble_config,
-                ray_scoring_dict,
-                # ray_cache_actor=self.last_tuner_.ray_cache_,
-            )
-            for ensemble in self.secondary_ensembles or []
-        ]
+        if self.current_stacking_level >= self.stacking_level:
+            ray_jobs += [
+                ray_fit_ensemble(
+                    ensemble,
+                    ray_ensemble_config,
+                    ray_scoring_dict,
+                    # ray_cache_actor=self.last_tuner_.ray_cache_,
+                )
+                for ensemble in self.secondary_ensembles or []
+            ]
         print("starting ensemble jobs")
 
-        def to_iterator(obj_ids):
-            while obj_ids:
-                done, obj_ids = ray.wait(obj_ids)
-                yield ray.get(done[0])
+        # def to_iterator(obj_ids):
+        #     while obj_ids:
+        #         done, obj_ids = ray.wait(obj_ids)
+        #         yield ray.get(done[0])
 
         ray_results = ray_jobs
 

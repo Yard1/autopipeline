@@ -6,7 +6,7 @@ from typing import List, Optional, Union, Tuple
 import pandas as pd
 import numpy as np
 from abc import ABC
-import gc
+from collections import ChainMap
 
 from sklearn.base import BaseEstimator, clone
 
@@ -67,24 +67,27 @@ class EnsembleCreator(ABC):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
     ) -> List[BaseEstimator]:
         self.trial_ids_for_ensembling_ = self.ensemble_strategy.select_trial_ids(
             X=X,
             y=y,
             results=results,
-            results_df=results_df,
             pipeline_blueprint=pipeline_blueprint,
         )
         return self.trial_ids_for_ensembling_
+
+    def select_trials_for_ensemble(self, results, trial_ids_for_ensembling):
+        if not isinstance(results, list):
+            results = [results]
+        results = dict(ChainMap(*results))
+        return [results[k] for k in trial_ids_for_ensembling]
 
     def fit_ensemble(
         self,
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -99,5 +102,5 @@ class EnsembleCreator(ABC):
     ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)
         self.select_trial_ids_for_ensemble(
-            X, y, results, results_df, pipeline_blueprint
+            X, y, results, pipeline_blueprint
         )

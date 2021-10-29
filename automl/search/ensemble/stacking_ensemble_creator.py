@@ -78,7 +78,6 @@ class StackingEnsembleCreator(EnsembleCreator):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -97,7 +96,6 @@ class StackingEnsembleCreator(EnsembleCreator):
             X,
             y,
             results,
-            results_df,
             pipeline_blueprint,
             metric_name,
             metric,
@@ -110,7 +108,7 @@ class StackingEnsembleCreator(EnsembleCreator):
             y_test_original=y_test_original,
             **kwargs,
         )
-        trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
+        trials_for_ensembling = self.select_trials_for_ensemble(results, self.trial_ids_for_ensembling_)
         print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level
@@ -163,7 +161,6 @@ class StackingEnsembleCreator(EnsembleCreator):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -180,7 +177,6 @@ class StackingEnsembleCreator(EnsembleCreator):
             X,
             y,
             results,
-            results_df,
             pipeline_blueprint,
             metric_name,
             metric,
@@ -201,7 +197,6 @@ class StackingEnsembleCreator(EnsembleCreator):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -218,7 +213,6 @@ class StackingEnsembleCreator(EnsembleCreator):
             X,
             y,
             results,
-            results_df,
             pipeline_blueprint,
             metric_name,
             metric,
@@ -307,7 +301,6 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -326,7 +319,6 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             X,
             y,
             results,
-            results_df,
             pipeline_blueprint,
             metric_name,
             metric,
@@ -339,7 +331,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             y_test_original=y_test_original,
             **kwargs,
         )
-        trials_for_ensembling = [results[k] for k in self.trial_ids_for_ensembling_]
+        trials_for_ensembling = self.select_trials_for_ensemble(results, self.trial_ids_for_ensembling_)
         print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level

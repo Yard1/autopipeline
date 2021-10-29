@@ -123,7 +123,7 @@ def create_pipeline_blueprint(
         "RandomForestRegressor": RandomForestRegressor(),
         "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
         "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
-        "LinearSVC": LinearSVC(),
+        # "LinearSVC": LinearSVC(),  # TODO FIX
         # "LinearSVR": LinearSVR(),  # TODO FIX
         "KNeighborsClassifier": KNeighborsClassifier(),
         "KNeighborsRegressor": KNeighborsRegressor(),

@@ -1,7 +1,10 @@
+from typing import Any, Dict, List
 import pandas as pd
 import numpy as np
 from abc import ABC
 import os
+from collections import ChainMap, defaultdict
+from itertools import cycle, islice
 
 import logging
 
@@ -9,72 +12,74 @@ logger = logging.getLogger(__name__)
 DELIM = os.environ["TUNE_RESULT_DELIM"]
 
 
+def _merge_dicts(dicts: List[dict]) -> dict:
+    if not isinstance(dicts, list):
+        dicts = [dicts]
+    return dict(ChainMap(*dicts))
+
+
+def _discard_below_max_dataset_fraction(results: Dict[str, Any]):
+    max_dataset_fraction = max(
+        (
+            result["dataset_fraction"]
+            for result in results.values()
+            if "dataset_fraction" in result
+        ),
+        default=-np.inf,
+    )
+    return {
+        trial_id: result
+        for trial_id, result in results.items()
+        if result.get("dataset_fraction", 0) >= max_dataset_fraction
+    }
+
+
+def _roundrobin(*iterables):
+    "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
+    # Recipe credited to George Sakkis
+    num_active = len(iterables)
+    nexts = cycle(iter(it).__next__ for it in iterables)  # .next on Python 2
+    while num_active:
+        try:
+            for next in nexts:
+                yield next()
+        except StopIteration:
+            # Remove the iterator we just exhausted from the cycle.
+            num_active -= 1
+            nexts = cycle(islice(nexts, num_active))
+
+
 class EnsembleStrategy(ABC):
     def __init__(
-        self, configurations_to_select: int, percentile_threshold: int
+        self,
+        configurations_to_select: int,
+        percentile_threshold: int,
+        use_only_last_results: bool = True,
     ) -> None:
         self.configurations_to_select = configurations_to_select
         self.percentile_threshold = percentile_threshold
+        self.use_only_last_results = use_only_last_results
         super().__init__()
 
     def select_trial_ids(
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        results: dict,
-        results_df: pd.DataFrame,
+        results: List[Dict[str, Any]],
         pipeline_blueprint,
     ) -> list:
         return None
 
+    def select_results(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if self.use_only_last_results:
+            results = results[-1]
+        return _discard_below_max_dataset_fraction(_merge_dicts(results))
 
-class RoundRobin(EnsembleStrategy):
-    def select_trial_ids(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        results: dict,
-        results_df: pd.DataFrame,
-        pipeline_blueprint,
-    ) -> list:
-        if "dataset_fraction" in results_df.columns:
-            results_df = results_df[
-                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
-            ]  # TODO make dynamic, add a warning if 100% of resource is not reached
-        if self.configurations_to_select < 0:
-            return [x for x in set(results) if x in results_df.index]
-        selected_trial_ids = []
-        groupby_list = [
-            f"config{DELIM}{k}" for k in pipeline_blueprint.get_all_distributions().keys()
-        ]
-        percentile = np.percentile(
-            results_df["mean_validation_score"], self.percentile_threshold
+    def get_percentile(self, results: Dict[str, Any]):
+        return np.percentile(
+            [result["mean_validation_score"] for result in results.values()],
+            self.percentile_threshold,
         )
-        groupby_list.reverse()
-        grouped_results_df = results_df.sort_values(
-            by="mean_validation_score", ascending=False
-        ).groupby(by=groupby_list)
-        group_dfs = [
-            group.sort_values(by="mean_validation_score", ascending=False)
-            for name, group in grouped_results_df
-            if group["mean_validation_score"].max() >= percentile
-        ]
-        idx = 0
-        iter = True
-        while iter and any(len(group) > idx for group in group_dfs):
-            for group in group_dfs:
-                if len(selected_trial_ids) >= self.configurations_to_select:
-                    iter = False
-                    break
-                if len(group) <= idx:
-                    continue
-                logger.debug(selected_trial_ids)
-                logger.debug(idx)
-                logger.debug(len(group))
-                logger.debug(group.iloc[idx].name)
-                selected_trial_ids.append(results[group.iloc[idx].name]["config"])
-            idx += 1
-        return selected_trial_ids
 
 
 class RoundRobinEstimator(EnsembleStrategy):
@@ -82,46 +87,40 @@ class RoundRobinEstimator(EnsembleStrategy):
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        results: dict,
-        results_df: pd.DataFrame,
+        results: List[Dict[str, Any]],
         pipeline_blueprint,
     ) -> list:
-        if "dataset_fraction" in results_df.columns:
-            results_df = results_df[
-                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
-            ]  # TODO make dynamic, add a warning if 100% of resource is not reached
+        results = self.select_results(results)
         if self.configurations_to_select < 0:
-            return [x for x in set(results) if x in results_df.index]
-        selected_trial_ids = []
-        groupby_list = [f"config{DELIM}Estimator"]
-        percentile = np.percentile(
-            results_df["mean_validation_score"], self.percentile_threshold
+            return set(results)
+        percentile = self.get_percentile(results)
+        results_per_estimator = defaultdict(list)
+        for trial_id, result in results.items():
+            if "config" not in result or "Estimator" not in result["config"]:
+                continue
+            results_per_estimator[
+                f"{result['config']['Estimator'].split('(')[0]}_{result['config']['meta']['stacking_level']}"
+            ].append(result)
+        for estimator in results_per_estimator:
+            results_per_estimator[estimator] = sorted(
+                [
+                    result
+                    for result in results_per_estimator[estimator]
+                    if result.get("mean_validation_score", -np.inf) >= percentile
+                ],
+                key=lambda x: x.get("mean_validation_score", -np.inf),
+                reverse=True,
+            )
+        results_per_estimator = list([r for r in results_per_estimator.values() if r])
+        results_per_estimator = sorted(
+            results_per_estimator,
+            key=lambda x: x[0].get("mean_validation_score", -np.inf),
+            reverse=True,
         )
-        grouped_results_df = results_df.sort_values(
-            by="mean_validation_score", ascending=False
-        ).groupby(by=groupby_list)
-        group_dfs = [
-            group.sort_values(by="mean_validation_score", ascending=False)
-            for name, group in grouped_results_df
-        ]
-        group_dfs.sort(key=lambda x: x["mean_validation_score"].max(), reverse=True)
-        group_dfs = [
-            group_df
-            for group_df in group_dfs
-            if group_df.iloc[0]["mean_validation_score"] >= percentile
-        ]
-        idx = 0
-        iter = True
-        while iter and any(len(group) > idx for group in group_dfs):  # TODO optimize
-            for group in group_dfs:
-                if len(selected_trial_ids) >= self.configurations_to_select:
-                    iter = False
-                    break
-                if len(group) <= idx:
-                    continue
-                selected_trial_ids.append(group.iloc[idx].name)
-            idx += 1
-        return selected_trial_ids
+        selected_trials_ids = [
+            result["trial_id"] for result in _roundrobin(*results_per_estimator)
+        ][: self.configurations_to_select]
+        return selected_trials_ids
 
 
 class EnsembleBest(EnsembleStrategy):
@@ -129,23 +128,26 @@ class EnsembleBest(EnsembleStrategy):
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        results: dict,
-        results_df: pd.DataFrame,
+        results: List[Dict[str, Any]],
         pipeline_blueprint,
     ) -> list:
-        if "dataset_fraction" in results_df.columns:
-            results_df = results_df[
-                results_df["dataset_fraction"] >= results_df["dataset_fraction"].max()
-            ]  # TODO make dynamic, add a warning if 100% of resource is not reached
+        results = self.select_results(results)
         if self.configurations_to_select < 0:
-            return [x for x in set(results) if x in results_df.index]
-        percentile = np.percentile(
-            results_df["mean_validation_score"], self.percentile_threshold
+            return set(results)
+        percentile = self.get_percentile(results)
+        sorted_results = sorted(
+            [
+                result
+                for trial_id, result in results.items()
+                if result.get("mean_validation_score", -np.inf) >= percentile
+            ],
+            key=lambda x: x.get("mean_validation_score", -np.inf),
+            reverse=True,
         )
-        sorted_results = results_df[
-            results_df["mean_validation_score"] >= percentile
-        ].sort_values(by="mean_validation_score", ascending=False)
-        return list(sorted_results.index[: self.configurations_to_select])
+        return [
+            result["trial_id"]
+            for result in sorted_results[: self.configurations_to_select]
+        ]
 
 
 class OneRoundRobinThenEnsembleBest(EnsembleStrategy):
@@ -153,8 +155,7 @@ class OneRoundRobinThenEnsembleBest(EnsembleStrategy):
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        results: dict,
-        results_df: pd.DataFrame,
+        results: List[Dict[str, Any]],
         pipeline_blueprint,
     ) -> list:
         return None

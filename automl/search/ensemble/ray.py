@@ -4,6 +4,7 @@ import ray
 import gc
 import numpy as np
 import joblib
+import traceback
 from ray.util.joblib import register_ray
 from ..utils import score_test
 
@@ -78,9 +79,11 @@ def ray_fit_ensemble(
 ):
     register_ray()
     #with joblib.parallel_backend("sequential"):
+    print(f"ray_fit_ensemble {ensemble}")
     try:
         ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)
         scores = _score_ensemble(ensemble_fitted, ensemble_config, scoring_dict)
     except Exception:
+        traceback.print_exc()
         ensemble_fitted, scores = None, None
     return ensemble_fitted, scores

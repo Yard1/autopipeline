@@ -103,7 +103,11 @@ class ray_context:
             # TODO separate patch dict
             with patch.dict(
                 "os.environ",
-                {"TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s), "TUNE_RESULT_DELIM": "/"},
+                {
+                    "TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s),
+                    "TUNE_RESULT_DELIM": "/",
+                    "TUNE_FORCE_TRIAL_CLEANUP_S": "60",
+                },
             ):
                 ray.init(
                     **self.ray_config
