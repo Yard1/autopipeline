@@ -9,7 +9,7 @@ from itertools import cycle, islice
 import logging
 
 logger = logging.getLogger(__name__)
-DELIM = os.environ["TUNE_RESULT_DELIM"]
+DELIM = os.environ.get("TUNE_RESULT_DELIM", "/")
 
 
 def _merge_dicts(dicts: List[dict]) -> dict:

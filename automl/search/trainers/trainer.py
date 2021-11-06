@@ -14,6 +14,7 @@ from collections import defaultdict
 from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils import shuffle
 import scipy.optimize
 import contextlib
 import io
@@ -88,11 +89,12 @@ class Trainer:
         self,
         problem_type: ProblemType,
         cv: Optional[Union[BaseCrossValidator, int]] = None,
+        stacking_cv: Optional[Union[BaseCrossValidator, int]] = None,
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
-        tuning_time: int = 600,
+        tuning_time: Union[int, List[int]] = 600,
         target_metric=None,
         secondary_tuning_strategy: Optional[EnsembleStrategy] = None,
         main_stacking_ensemble: Optional[StackingEnsembleCreator] = None,
@@ -107,6 +109,7 @@ class Trainer:
     ) -> None:
         self.problem_type = problem_type
         self.cv = cv
+        self.stacking_cv = stacking_cv
         self.categorical_columns = categorical_columns
         self.numeric_columns = numeric_columns
         self.level = level
@@ -132,19 +135,25 @@ class Trainer:
             or [
                 VotingEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
+                        configurations_to_select=100,
+                        percentile_threshold=15,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
+                        configurations_to_select=100,
+                        percentile_threshold=15,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
                 SelectFromModelStackingEnsembleCreator(
                     ensemble_strategy=EnsembleBest(
-                        configurations_to_select=100, percentile_threshold=1, use_only_last_results=False
+                        configurations_to_select=100,
+                        percentile_threshold=1,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -152,13 +161,17 @@ class Trainer:
             + [
                 VotingSoftEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
+                        configurations_to_select=100,
+                        percentile_threshold=15,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingSoftByMetricEnsembleCreator(
                     ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100, percentile_threshold=15, use_only_last_results=False
+                        configurations_to_select=100,
+                        percentile_threshold=15,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -274,6 +287,12 @@ class Trainer:
         else:
             secondary_pipeline_blueprint = None
 
+        if isinstance(self.tuning_time, list):
+            assert len(self.tuning_time) == self.stacking_level + 1
+            tuning_time = self.tuning_time[self.current_stacking_level]
+        else:
+            tuning_time = self.tuning_time / (self.stacking_level + 1),
+
         tuner = self.tuner(
             problem_type=self.problem_type,
             pipeline_blueprint=pipeline_blueprint,
@@ -282,13 +301,16 @@ class Trainer:
             cv=deepcopy(self.cv_),
             early_stopping=self.early_stopping,
             cache=self.cache,
-            time_budget_s=self.tuning_time // (self.stacking_level + 1),
+            time_budget_s=tuning_time,
             scoring=self.scoring_dict,
             target_metric=self.target_metric,
             display=self._displays["tuner_plot_display"],
             widget=self.last_tuner_.widget_ if self.last_tuner_ else None,
             plot_callback=self.last_tuner_.plot_callback_ if self.last_tuner_ else None,
             stacking_level=self.current_stacking_level,
+            previous_stack=self.get_main_stacking_ensemble_at_level(
+                self.current_stacking_level - 1
+            ),
             **self.tune_kwargs,
         )
         self.tuners_.append(tuner)
@@ -358,7 +380,7 @@ class Trainer:
         gc.collect()
 
         with joblib.parallel_backend("ray"):
-            X_stack, X_test_stack = self._create_ensembles(
+            self._create_ensembles(
                 X_original,
                 y_original,
                 self.all_results_,
@@ -373,14 +395,11 @@ class Trainer:
             # self.final_ensemble_ = self._create_final_stack()
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
-        self.meta_columns_.extend(X_stack.columns)
         multiprocessing_cache.clear()
         return self._fit_one_layer(
-            pd.concat((X, X_stack), axis=1),
+            X,
             y,
-            X_test=pd.concat((X_test, X_test_stack), axis=1)
-            if X_test is not None
-            else X_test,
+            X_test=X_test,
             y_test=y_test,
             X_test_original=X_test_original,
             y_test_original=y_test_original,
@@ -420,7 +439,7 @@ class Trainer:
             "y_test": y_test,
             "X_test_original": X_test_original,
             "y_test_original": y_test_original,
-            "cv": deepcopy(self.cv_),
+            "cv": deepcopy(self.stacking_cv_),
             "cache": self.last_tuner_._cache,  # TODO make dynamic
         }
 
@@ -431,23 +450,30 @@ class Trainer:
         ray_ensemble_config = ensemble_config
         ray_scoring_dict = self.scoring_dict
         ray_jobs = [
-            (self.main_stacking_ensemble._ensemble_name, ray_fit_ensemble_and_return_stacked_preds_remote(
-                self.main_stacking_ensemble,
-                ray_ensemble_config,
-                ray_scoring_dict,
-                # ray_cache_actor=self.last_tuner_.ray_cache_,
-            ))
-        ]
-        if self.current_stacking_level >= self.stacking_level:
-            ray_jobs += [
-                (ensemble._ensemble_name, ray_fit_ensemble(
-                    ensemble,
+            (
+                self.main_stacking_ensemble._ensemble_name,
+                ray_fit_ensemble_and_return_stacked_preds_remote(
+                    self.main_stacking_ensemble,
                     ray_ensemble_config,
                     ray_scoring_dict,
                     # ray_cache_actor=self.last_tuner_.ray_cache_,
-                ))
+                ),
+            )
+        ]
+        if self.current_stacking_level >= self.stacking_level:
+            ray_jobs += [
+                (
+                    ensemble._ensemble_name,
+                    ray_fit_ensemble(
+                        ensemble,
+                        ray_ensemble_config,
+                        ray_scoring_dict,
+                        # ray_cache_actor=self.last_tuner_.ray_cache_,
+                    ),
+                )
                 for ensemble in self.secondary_ensembles or []
             ]
+
         print("starting ensemble jobs")
 
         # def to_iterator(obj_ids):
@@ -467,7 +493,7 @@ class Trainer:
 
         main_result = ray_results.pop(0)
         main_result_name, main_result = main_result
-        (main_stacking_ensemble_fitted, X_stack, X_test_stack, score) = main_result
+        (main_stacking_ensemble_fitted, score) = main_result
         scores = {main_result_name: score}
         if ray_results:
             scores = {
@@ -485,9 +511,7 @@ class Trainer:
             }
         else:
             fitted_ensembles = {}
-        fitted_ensembles[
-            main_result_name
-        ] = main_stacking_ensemble_fitted
+        fitted_ensembles[main_result_name] = main_stacking_ensemble_fitted
 
         self.ensemble_results_.append({})
         self.ensembles_.append(fitted_ensembles)
@@ -495,7 +519,7 @@ class Trainer:
         for ensemble_name, score in scores.items():
             self._score_ensemble(ensemble_name, score)
 
-        return X_stack, X_test_stack
+        return
 
     def _score_ensemble(
         self,
@@ -654,6 +678,7 @@ class Trainer:
         self.current_stacking_level = -1
 
         self.cv_ = self._get_cv(self.problem_type, self.cv)
+        self.stacking_cv_ = self._get_cv(self.problem_type, self.stacking_cv)
         self.pipeline_blueprints_: List[TopPipeline] = []
         self.secondary_pipeline_blueprints_: List[TopPipeline] = []
         self.tuners_: List[Tuner] = []

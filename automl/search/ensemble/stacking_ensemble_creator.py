@@ -137,21 +137,22 @@ class StackingEnsembleCreator(EnsembleCreator):
         ensemble.fit(
             X,
             y,
-            save_predictions="deep",
+            #save_predictions="deep",
         )
-        X_stack = ensemble.get_deep_final_estimator(
-            fitted=True, up_to_stack=True
-        ).stacked_predictions_
+        # X_stack = ensemble.get_deep_final_estimator(
+        #     fitted=True, up_to_stack=True
+        # ).stacked_predictions_
 
-        if X_test_original is not None:
-            # TODO optimize this
-            X_test_stack = ensemble.transform(X_test_original, deep=True)
-        else:
-            X_test_stack = None
+        # if X_test_original is not None:
+        #     # TODO optimize this
+        #     X_test_stack = ensemble.transform(X_test_original, deep=True)
+        # else:
+        #     X_test_stack = None
 
-        return ensemble, X_stack, X_test_stack
+        return ensemble#, X_stack, X_test_stack
 
     def clear_stacked_predictions(self, ensemble):
+        return
         del ensemble.get_deep_final_estimator(
             fitted=True, up_to_stack=True
         ).stacked_predictions_
@@ -173,7 +174,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> BaseEstimator:
-        ensemble, X_stack, X_test_stack = self._fit_ensemble(
+        ensemble = self._fit_ensemble(
             X,
             y,
             results,
@@ -209,7 +210,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
-        ensemble, X_stack, X_test_stack = self._fit_ensemble(
+        ensemble = self._fit_ensemble(
             X,
             y,
             results,
@@ -226,7 +227,7 @@ class StackingEnsembleCreator(EnsembleCreator):
             **kwargs,
         )
         self.clear_stacked_predictions(ensemble)
-        return ensemble, X_stack, X_test_stack
+        return ensemble
 
 
 class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
@@ -364,7 +365,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             ensemble.fit(
                 X,
                 y,
-                save_predictions="deep",
+                #save_predictions="deep",
             )
         except ValueError as e:
             # this is hacky but means we don't have to overwrite sklearn
@@ -381,7 +382,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                 ensemble.fit(
                     X,
                     y,
-                    save_predictions="deep",
+                    #save_predictions="deep",
                 )
             else:
                 raise e
@@ -389,13 +390,13 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         original_ensemble = ensemble.get_deep_final_estimator(
             fitted=True, up_to_stack=True
         )
-        X_stack = original_ensemble.stacked_predictions_
+        #X_stack = original_ensemble.stacked_predictions_
         print(X_test.columns)
-        if X_test_original is not None:
-            # TODO optimize this
-            X_test_stack = ensemble.transform(X_test_original, deep=True)
-        else:
-            X_test_stack = None
+        # if X_test_original is not None:
+        #     # TODO optimize this
+        #     X_test_stack = ensemble.transform(X_test_original, deep=True)
+        # else:
+        #     X_test_stack = None
 
         # after the first fit, we can discard estimators that were not selected by feature selection
         columns_selected = original_ensemble.stacked_predictions_.columns[
@@ -442,4 +443,4 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             PandasSelectColumns(columns_selected),
         )
 
-        return ensemble, X_stack, X_test_stack
+        return ensemble#, X_stack, X_test_stack

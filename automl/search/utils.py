@@ -111,7 +111,7 @@ class ray_context:
                 {
                     "TUNE_GLOBAL_CHECKPOINT_S": str(self.global_checkpoint_s),
                     "TUNE_RESULT_DELIM": "/",
-                    "TUNE_FORCE_TRIAL_CLEANUP_S": "60",
+                    "TUNE_FORCE_TRIAL_CLEANUP_S": "10",
                 },
             ):
                 ray.init(

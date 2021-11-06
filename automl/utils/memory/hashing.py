@@ -22,6 +22,7 @@ from pandas.core.dtypes.generic import (
 from xxhash import xxh3_128
 
 Pickler = pickle._Pickler
+ATTRIBUTES_TO_IGNORE = set(("verbose", "memory", "n_jobs"))
 
 
 def fast_hash_pandas_object(
@@ -274,7 +275,16 @@ class xxPandasHasher(xxNumpyHasher):
             self._hash.update("_HASHED_DTYPE".encode("utf-8"))
             self._hash.update(pickle.dumps(obj))
             return
+        
+        ignored_attrs = {}
+        if (hasattr(obj, "fit") or hasattr(obj, "transform")):
+            for attr in ATTRIBUTES_TO_IGNORE:
+                if hasattr(obj, attr):
+                    ignored_attrs[attr] = getattr(obj, attr)
+                    setattr(obj, attr, None)
         Hasher.save(self, obj)
+        for attr, value in ignored_attrs.items():
+            setattr(obj, attr, value)
 
 
 def hash(obj, hash_name="md5", coerce_mmap=False):

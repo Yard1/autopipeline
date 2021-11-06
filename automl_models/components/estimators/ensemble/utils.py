@@ -1,3 +1,4 @@
+from joblib.parallel import Parallel
 import numpy as np
 import ray
 from copy import deepcopy
@@ -274,11 +275,13 @@ def call_method(obj, method_name, *args, **kwargs):
 ray_call_method = ray.remote(call_method)
 
 
-def should_use_ray(parallel):
-    return "ray" in parallel._backend.__class__.__name__.lower() or ray.is_initialized()
+def should_use_ray(parallel: Parallel) -> bool:
+    return parallel.n_jobs not in (1, None) and (
+        "ray" in parallel._backend.__class__.__name__.lower() #or ray.is_initialized()
+    )
 
 
-def put_args_if_ray(parallel, *args):
+def put_args_if_ray(parallel: Parallel, *args):
     if should_use_ray(parallel):
         return (ray_put_if_needed(arg) for arg in args)
     return args

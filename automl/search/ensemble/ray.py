@@ -47,38 +47,31 @@ def _score_ensemble(
     return scores
 
 
-#@ray.remote(num_cpus=4, max_calls=1)
+# @ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble_and_return_stacked_preds_remote(
     main_stacking_ensemble: StackingEnsembleCreator,
     ensemble_config,
     scoring_dict,
-    ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
-    #with joblib.parallel_backend("sequential"):
-    (
-        main_stacking_ensemble_fitted,
-        X_stack,
-        X_test_stack,
-    ) = main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(
-        **ensemble_config
+    # with joblib.parallel_backend("sequential"):
+    main_stacking_ensemble_fitted = (
+        main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(**ensemble_config)
     )
-    assert X_stack is not None
     scores = _score_ensemble(
         main_stacking_ensemble_fitted, ensemble_config, scoring_dict
     )
-    return main_stacking_ensemble_fitted, X_stack, X_test_stack, scores
+    return main_stacking_ensemble_fitted, scores
 
 
-#@ray.remote(num_cpus=4, max_calls=1)
+# @ray.remote(num_cpus=4, max_calls=1)
 def ray_fit_ensemble(
     ensemble: EnsembleCreator,
     ensemble_config,
     scoring_dict,
-    ray_cache_actor: ray.ObjectRef = None,
 ):
     register_ray()
-    #with joblib.parallel_backend("sequential"):
+    # with joblib.parallel_backend("sequential"):
     print(f"ray_fit_ensemble {ensemble}")
     try:
         ensemble_fitted = ensemble.fit_ensemble(**ensemble_config)

@@ -53,6 +53,7 @@ class Tuner(ABC):
         scoring=None,
         display: Optional[IPythonDisplay] = None,
         stacking_level: int = 0,
+        previous_stack = None,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
@@ -63,6 +64,7 @@ class Tuner(ABC):
         self.time_budget_s = time_budget_s
         self.stacking_level = stacking_level
         self.display = display
+        self.previous_stack = previous_stack
         # TODO reenable
         # assert target_metric in scoring
 
@@ -239,6 +241,7 @@ class RayTuneTuner(Tuner):
         stacking_level: int = 0,
         widget: Optional[go.FigureWidget] = None,
         plot_callback: Optional[BestPlotCallback] = None,
+        previous_stack = None,
         **tune_kwargs,
     ) -> None:
         self.cache = cache
@@ -275,6 +278,7 @@ class RayTuneTuner(Tuner):
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             display=display,
             stacking_level=stacking_level,
+            previous_stack=previous_stack,
         )
 
     @property
@@ -364,6 +368,7 @@ class RayTuneTuner(Tuner):
             "random_state": self.random_state,
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
             "cache": self._cache,
+            "previous_stack": self.previous_stack,
         }
         gc.collect()
 

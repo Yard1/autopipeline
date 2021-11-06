@@ -6,6 +6,7 @@ from copy import deepcopy
 from ray.tune.utils.placement_groups import PlacementGroupFactory
 from ray.tune.resources import Resources
 from sklearn.base import clone
+import joblib
 
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
 from sklearn.model_selection._validation import (
@@ -30,7 +31,7 @@ from ray.tune import Trainable
 from ray.util.joblib import register_ray
 
 from .utils import treat_config, split_list_into_chunks
-from ..utils import score_test
+from ..utils import score_test, stack_estimator
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
@@ -191,6 +192,7 @@ class SklearnTrainable(Trainable):
             self.X_test_ = params.get("X_test_", None)
             self.y_test_ = params.get("y_test_", None)
             self.cache_results = params.get("cache_results", True)
+            self.previous_stack = params.get("previous_stack", None)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -199,7 +201,8 @@ class SklearnTrainable(Trainable):
         # forward-compatbility
         logger.debug("training")
         register_ray()
-        r = self._train()
+        with joblib.parallel_backend("sequential"):
+            r = self._train()
 
         return r
 
@@ -334,6 +337,9 @@ class SklearnTrainable(Trainable):
         memory = dynamic_memory_factory(self.cache)
 
         estimator.set_params(memory=memory)
+        logger.debug(f"doing cv on {estimator.steps[-1][1]}")
+
+        estimator = stack_estimator(estimator, self.previous_stack)
 
         is_early_stopping_on = prune_attr and prune_attr < 1.0
 
@@ -352,7 +358,6 @@ class SklearnTrainable(Trainable):
         # TODO: prediction time (per row)
 
         scoring_with_dummies = self._make_scoring_dict()
-        logger.debug(f"doing cv on {estimator.steps[-1][1]}")
         # print(self.X_.columns)
         scores = self._cross_validate(
             estimator,

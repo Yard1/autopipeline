@@ -48,6 +48,7 @@ class AutoML(BaseEstimator):
         problem_type: Optional[Union[str, ProblemType]] = None,
         test_size: float = 0.25,
         cv: Union[int, BaseCrossValidator] = 5,
+        stacking_cv: Union[int, BaseCrossValidator] = 5,
         level: Union[str, int, ComponentLevel] = ComponentLevel.COMMON,
         random_state: Optional[int] = None,  # TODO: support other random states
         target_metric=None,
@@ -59,6 +60,7 @@ class AutoML(BaseEstimator):
         self.test_size = test_size
         self.level = level
         self.cv = cv
+        self.stacking_cv = stacking_cv
         self.random_state = random_state
         self.float_dtype = float_dtype
         self.target_metric = target_metric
@@ -83,10 +85,17 @@ class AutoML(BaseEstimator):
         validate_type(
             self.cv, "cv", (int, BaseCrossValidator, _RepeatedSplits)
         )  # use check_cv instead
+        validate_type(
+            self.stacking_cv, "stacking_cv", (int, BaseCrossValidator, _RepeatedSplits)
+        )  # use check_cv instead
         validate_type(self.test_size, "test_size", float)
         if isinstance(self.cv, int) and self.cv < 2:
             raise ValueError(
                 f"If cv is an int, it must be bigger than 2. Got {self.cv}."
+            )
+        if isinstance(self.stacking_cv, int) and self.stacking_cv < 2:
+            raise ValueError(
+                f"If stacking_cv is an int, it must be bigger than 2. Got {self.stacking_cv}."
             )
         if self.test_size < 0 or self.test_size > 0.9:
             raise ValueError("test_size must be in range (0.0, 0.9)")
@@ -246,6 +255,7 @@ class AutoML(BaseEstimator):
         self.problem_type_, y = self._determine_problem_type(problem_type, y)
 
         self.cv_ = get_cv_for_problem_type(self.problem_type_, self.cv)
+        self.stacking_cv_ = get_cv_for_problem_type(self.problem_type_, self.stacking_cv)
 
         y.index = list(X.index)
 
@@ -287,6 +297,7 @@ class AutoML(BaseEstimator):
             random_state=self.random_seed_,
             level=self.level_,
             cv=self.cv_,
+            stacking_cv=self.stacking_cv_,
             categorical_columns=categorical_columns,
             numeric_columns=numeric_columns,
             target_metric=self.target_metric,

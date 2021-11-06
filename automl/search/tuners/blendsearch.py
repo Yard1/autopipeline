@@ -1757,8 +1757,9 @@ class BlendSearchTuner(RayTuneTuner):
         trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
         stacking_level: int = 0,
+        previous_stack=None,
         widget=None,
-        plot_callback:Optional[BestPlotCallback]=None,
+        plot_callback: Optional[BestPlotCallback] = None,
         **tune_kwargs,
     ) -> None:
         self.early_stopping = early_stopping
@@ -1780,6 +1781,7 @@ class BlendSearchTuner(RayTuneTuner):
             stacking_level=stacking_level,
             widget=widget,
             plot_callback=plot_callback,
+            previous_stack=previous_stack,
             **tune_kwargs,
         )
         self._searcher_kwargs = {

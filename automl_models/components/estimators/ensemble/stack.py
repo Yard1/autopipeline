@@ -1,3 +1,4 @@
+from typing import Optional
 import numpy as np
 import pandas as pd
 from copy import deepcopy
@@ -13,7 +14,7 @@ from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
 from sklearn.model_selection import check_cv
 from sklearn.base import is_classifier
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import check_is_fitted, check_memory
 
 
 from .utils import (
@@ -160,9 +161,14 @@ class DeepStackMixin:
             self.final_estimator, fitted=fitted, up_to_stack=up_to_stack
         )
 
-    def set_deep_final_estimator(self, estimator):
+    def set_deep_final_estimator(
+        self, estimator, passthrough: Optional[bool] = True, n_jobs: Optional[int] = 1
+    ):
         if isinstance(self.final_estimator, DeepStackMixin):
-            self.passthrough = True
+            if passthrough is not None:
+                self.passthrough = passthrough
+            if n_jobs is not None:
+                self.n_jobs = n_jobs
             return self.final_estimator.set_deep_final_estimator(estimator)
         self.final_estimator = estimator
         self.final_estimator_ = estimator
@@ -282,16 +288,18 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        predictions = _get_cv_predictions(
-            parallel,
-            all_estimators,
-            X_ray,
-            y_ray,
-            cv,
-            fit_params,
-            self.verbose,
-            self.stack_method_,
-            1,
+        memory = check_memory(self.memory)
+        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs"])
+        predictions = get_cv_predictions_cached(
+            parallel=parallel,
+            all_estimators=all_estimators,
+            X=X_ray,
+            y=y_ray,
+            cv=cv,
+            fit_params=fit_params,
+            verbose=self.verbose,
+            stack_method=self.stack_method_,
+            n_jobs=1,
         )
         if save_predictions == "deep" and not isinstance(
             self.final_estimator_, DeepStackMixin
@@ -478,7 +486,6 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         # base estimators will be used in transform, predict, and
         # predict_proba. They are exposed publicly.
         # if not hasattr(self, "estimators_"):
-        parallel = Parallel(n_jobs=self.n_jobs)
         self.estimators_ = fit_estimators(
             parallel,
             all_estimators,
@@ -514,17 +521,18 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
-        parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = _get_cv_predictions(
-            parallel,
-            all_estimators,
-            X_ray,
-            y_ray,
-            cv,
-            fit_params,
-            self.verbose,
-            self.stack_method_,
-            1,
+        memory = check_memory(self.memory)
+        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs"])
+        predictions = get_cv_predictions_cached(
+            parallel=parallel,
+            all_estimators=all_estimators,
+            X=X_ray,
+            y=y_ray,
+            cv=cv,
+            fit_params=fit_params,
+            verbose=self.verbose,
+            stack_method=self.stack_method_,
+            n_jobs=1,
         )
         if save_predictions == "deep" and not isinstance(
             self.final_estimator_, DeepStackMixin
