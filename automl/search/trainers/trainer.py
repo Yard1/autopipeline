@@ -11,9 +11,15 @@ import gc
 from copy import deepcopy
 from collections import defaultdict
 
-from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
+from sklearn.model_selection import (
+    BaseCrossValidator,
+    KFold,
+    StratifiedKFold,
+    cross_validate,
+)
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.preprocessing import LabelEncoder
+from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.utils import shuffle
 import scipy.optimize
 import contextlib
@@ -47,7 +53,11 @@ from ..ensemble.ray import (
     ray_fit_ensemble,
     ray_fit_ensemble_and_return_stacked_preds_remote,
 )
-from ..utils import score_test, stack_estimator
+from ..utils import (
+    ray_cross_validate,
+    score_test,
+    stack_estimator,
+)
 from ..metrics.metrics import optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
@@ -71,7 +81,6 @@ from automl_models.components.estimators.ensemble import (
     PandasStackingRegressor,
     PandasVotingClassifier,
     PandasVotingRegressor,
-    DummyClassifier,
     DESSplitter,
 )
 from automl_models.components.estimators.ensemble.stack import DeepStackMixin
@@ -291,7 +300,7 @@ class Trainer:
             assert len(self.tuning_time) == self.stacking_level + 1
             tuning_time = self.tuning_time[self.current_stacking_level]
         else:
-            tuning_time = self.tuning_time / (self.stacking_level + 1),
+            tuning_time = (self.tuning_time / (self.stacking_level + 1),)
 
         tuner = self.tuner(
             problem_type=self.problem_type,
@@ -389,6 +398,7 @@ class Trainer:
                 y_test=y_test,
                 X_test_original=X_test_original,
                 y_test_original=y_test_original,
+                groups=groups,
             )
         if self.current_stacking_level >= self.stacking_level:
             # logger.debug("fitting final ensemble", flush=True)
@@ -418,7 +428,8 @@ class Trainer:
         y_test=None,
         X_test_original=None,
         y_test_original=None,
-        save_to_ray: bool = True,
+        groups=None,
+        stacking_groups=None,
     ):
         ensemble_config = {
             "X": X,
@@ -518,6 +529,16 @@ class Trainer:
 
         for ensemble_name, score in scores.items():
             self._score_ensemble(ensemble_name, score)
+
+        if self.cache and self.current_stacking_level < self.stacking_level:
+            estimator = stack_estimator(
+                DummyClassifier(strategy="constant", constant=1)
+                if self.problem_type.is_classification()
+                else DummyRegressor(strategy="constant", constant=1),
+                main_stacking_ensemble_fitted,
+            )
+            cv = deepcopy(self.cv_)
+            cross_validate(estimator, X, y, cv=cv, verbose=1, groups=groups, n_jobs=1)
 
         return
 

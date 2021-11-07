@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_cv_predictions(
-    parallel, all_estimators, X, y, cv, fit_params, verbose, stack_method, n_jobs
+    parallel, all_estimators, X, y, cv, fit_params, verbose, stack_method, n_jobs, X_ray=None, y_ray=None
 ):
     if should_use_ray(parallel):
         cloned_estimators = [
@@ -47,8 +47,8 @@ def _get_cv_predictions(
             for est, meth in zip(all_estimators, stack_method)
             if est != "drop"
         ]
-        X_ref = ray_put_if_needed(X)
-        y_ref = ray_put_if_needed(y)
+        X_ref = ray_put_if_needed(X_ray)
+        y_ref = ray_put_if_needed(y_ray)
         fit_params_ref = ray_put_if_needed(fit_params)
         predictions = ray.get(
             [
@@ -289,12 +289,14 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
         memory = check_memory(self.memory)
-        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs"])
+        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray"])
         predictions = get_cv_predictions_cached(
             parallel=parallel,
             all_estimators=all_estimators,
-            X=X_ray,
-            y=y_ray,
+            X=X,
+            y=y,
+            X_ray=X_ray,
+            y_ray=y_ray,
             cv=cv,
             fit_params=fit_params,
             verbose=self.verbose,
@@ -522,12 +524,14 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             {"sample_weight": sample_weight} if sample_weight is not None else None
         )
         memory = check_memory(self.memory)
-        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs"])
+        get_cv_predictions_cached = memory.cache(_get_cv_predictions, ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray"])
         predictions = get_cv_predictions_cached(
             parallel=parallel,
             all_estimators=all_estimators,
-            X=X_ray,
-            y=y_ray,
+            X=X,
+            y=y,
+            X_ray=X_ray,
+            y_ray=y_ray,
             cv=cv,
             fit_params=fit_params,
             verbose=self.verbose,

@@ -392,6 +392,8 @@ class AutoML(BaseEstimator):
             ),
         }
 
+        d["Stacking Level"] = stacking_level
+
         if "test_metrics" in result:
             d.update(
                 {
@@ -407,7 +409,6 @@ class AutoML(BaseEstimator):
                 }
             )
 
-        d["Stacking Level"] = stacking_level
         d["Total Time (s)"] = result["time_total_s"]
         d["Estimator Fit Time (s)"] = result["estimator_fit_time"]
         d["Dataset Fraction"] = result.get("dataset_fraction", 1.0)
@@ -423,10 +424,11 @@ class AutoML(BaseEstimator):
             "Pipeline": get_obj_name(ensemble),
         }
 
+        d["Stacking Level"] = stacking_level
+
         d.update({f"Test {key}": metric for key, metric in test_metrics.items()})
         d.update({f"Validation {key}": None for key, metric in test_metrics.items()})
 
-        d["Stacking Level"] = stacking_level
         d["Total Time (s)"] = None
         d["Estimator Fit Time (s)"] = None
         d["Dataset Fraction"] = 1.0

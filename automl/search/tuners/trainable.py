@@ -9,19 +9,7 @@ from sklearn.base import clone
 import joblib
 
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
-from sklearn.model_selection._validation import (
-    indexable,
-    check_cv,
-    is_classifier,
-    check_scoring,
-    _check_multimetric_scoring,
-    _insert_error_scores,
-    _normalize_score_results,
-    _aggregate_score_dicts,
-    _fit_and_score,
-)
 from sklearn.utils import resample, _safe_indexing
-from sklearn.model_selection._split import _RepeatedSplits
 
 import ray
 import ray.exceptions
@@ -30,14 +18,12 @@ from ray.tune import Trainable
 
 from ray.util.joblib import register_ray
 
-from .utils import treat_config, split_list_into_chunks
-from ..utils import score_test, stack_estimator
+from .utils import treat_config
+from ..utils import ray_score_test, ray_cross_validate, stack_estimator
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
-from ...utils.types import array_shrink
 from ...utils.memory import dynamic_memory_factory
-from ...utils.dynamic_subclassing import create_dynamically_subclassed_estimator
 from ...utils.estimators import set_param_context
 from ...utils.tune_callbacks import META_KEY
 
@@ -80,68 +66,7 @@ class _SubsampleMetaSplitterWithStratify(_SubsampleMetaSplitter):
             yield train_idx, test_idx
 
 
-@ray.remote
-def ray_fit_and_score(
-    estimator,
-    X,
-    y,
-    scorer,
-    train,
-    test,
-    verbose,
-    parameters,
-    fit_params,
-    return_train_score=False,
-    return_parameters=False,
-    return_n_test_samples=False,
-    return_times=False,
-    return_estimator=False,
-    split_progress=None,
-    candidate_progress=None,
-    error_score=np.nan,
-):
-    return _fit_and_score(
-        estimator=estimator,
-        X=X,
-        y=y,
-        scorer=scorer,
-        train=train,
-        test=test,
-        verbose=verbose,
-        parameters=parameters,
-        fit_params=fit_params,
-        return_train_score=return_train_score,
-        return_parameters=return_parameters,
-        return_n_test_samples=return_n_test_samples,
-        return_times=return_times,
-        return_estimator=return_estimator,
-        split_progress=split_progress,
-        candidate_progress=candidate_progress,
-        error_score=error_score,
-    )
 
-
-@ray.remote(num_returns=2)
-def ray_score_test(
-    estimator,
-    X,
-    y,
-    X_test,
-    y_test,
-    scoring,
-    refit: bool = True,
-    error_score=np.nan,
-):
-    return score_test(
-        estimator=estimator,
-        X=X,
-        y=y,
-        X_test=X_test,
-        y_test=y_test,
-        scoring=scoring,
-        refit=refit,
-        error_score=error_score,
-    )
 
 
 # TODO break this up into a class for classification and for regression
@@ -231,93 +156,6 @@ class SklearnTrainable(Trainable):
     def default_resource_request(cls, config):
         return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
-    def _cross_validate(
-        self,
-        estimator,
-        X,
-        y=None,
-        *,
-        groups=None,
-        scoring=None,
-        cv=None,
-        n_jobs=None,
-        verbose=0,
-        fit_params=None,
-        pre_dispatch="2*n_jobs",
-        return_train_score=False,
-        return_estimator=False,
-        error_score=np.nan,
-    ):
-        """Fast cross validation with Ray, adapted from sklearn.validation.cross_validate"""
-        X, y, groups = indexable(X, y, groups)
-
-        cv = check_cv(cv, y, classifier=is_classifier(estimator))
-
-        if callable(scoring):
-            scorers = scoring
-        elif scoring is None or isinstance(scoring, str):
-            scorers = check_scoring(estimator, scoring)
-        else:
-            scorers = _check_multimetric_scoring(estimator, scoring)
-
-        # TODO do this better - we want the prefix to be dynamic
-        prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
-
-        # We clone the estimator to make sure that all the folds are
-        # independent, and that it is pickle-able.
-        train_test = list(cv.split(X, y, groups))
-
-        results_futures = [
-            ray_fit_and_score.remote(
-                clone(estimator),
-                self.refs[prefix + "X_"],
-                self.refs[prefix + "y_"],
-                scorers,
-                train,
-                test,
-                verbose,
-                None,
-                fit_params,
-                return_train_score=return_train_score,
-                return_times=True,
-                return_estimator=return_estimator,
-                error_score=error_score,
-            )
-            for train, test in train_test
-        ]
-
-        results = ray.get(results_futures)
-
-        # For callabe scoring, the return type is only know after calling. If the
-        # return type is a dictionary, the error scores can now be inserted with
-        # the correct key.
-        if callable(scoring):
-            _insert_error_scores(results, error_score)
-
-        results = _aggregate_score_dicts(results)
-
-        ret = {}
-        ret["fit_time"] = results["fit_time"]
-        ret["score_time"] = results["score_time"]
-
-        if return_estimator:
-            ret["estimator"] = results["estimator"]
-
-        test_scores_dict = _normalize_score_results(results["test_scores"])
-        if return_train_score:
-            train_scores_dict = _normalize_score_results(results["train_scores"])
-
-        for name in test_scores_dict:
-            ret["test_%s" % name] = test_scores_dict[name]
-            if return_train_score:
-                key = "train_%s" % name
-                ret[key] = train_scores_dict[name]
-
-        # added in automl
-        ret["cv_indices"] = train_test
-
-        return ret
-
     def _train(self):
         time_cv = time.time()
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -359,7 +197,11 @@ class SklearnTrainable(Trainable):
 
         scoring_with_dummies = self._make_scoring_dict()
         # print(self.X_.columns)
-        scores = self._cross_validate(
+
+        # TODO do this better - we want the prefix to be dynamic
+        prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
+
+        scores = ray_cross_validate(
             estimator,
             self.X_,
             self.y_,
@@ -371,6 +213,8 @@ class SklearnTrainable(Trainable):
             scoring=scoring_with_dummies,
             fit_params=self.fit_params,
             n_jobs=self.N_JOBS,
+            X_ref=self.refs[prefix + "X_"],
+            y_ref=self.refs[prefix + "y_"]
             # return_train_score=self.return_train_score,
         )
         logger.debug("cv done")

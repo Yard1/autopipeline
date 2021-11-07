@@ -18,22 +18,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class DummyClassifier(ClassifierMixin, BaseEstimator):
-    def __init__(self, id, preds, pred_probas) -> None:
-        self.id = id
-        self.preds = preds
-        self.pred_probas = pred_probas
-
-    def fit(self, X, y):
-        return self
-
-    def predict(self, X):
-        return self.preds
-
-    def predict_proba(self, X):
-        return self.pred_probas
-
-
 def fit_single_estimator_if_not_fitted(
     estimator,
     X,

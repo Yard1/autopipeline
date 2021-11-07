@@ -130,6 +130,7 @@ class StackingEnsembleCreator(EnsembleCreator):
             stacked_ensemble = clone(previous_stack)
             stacked_ensemble.set_deep_final_estimator(ensemble)
             ensemble = stacked_ensemble
+        ensemble.set_params(passthrough=False)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
@@ -357,6 +358,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             ensemble = stacked_ensemble
         else:
             original_ensemble = ensemble
+        ensemble.set_params(passthrough=False)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
