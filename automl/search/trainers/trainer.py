@@ -158,14 +158,14 @@ class Trainer:
                     ),
                     problem_type=self.problem_type,
                 ),
-                SelectFromModelStackingEnsembleCreator(
-                    ensemble_strategy=EnsembleBest(
-                        configurations_to_select=100,
-                        percentile_threshold=1,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
-                ),
+                # SelectFromModelStackingEnsembleCreator(
+                #     ensemble_strategy=EnsembleBest(
+                #         configurations_to_select=100,
+                #         percentile_threshold=1,
+                #         use_only_last_results=False,
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
             ]
             + [
                 VotingSoftEnsembleCreator(
@@ -300,7 +300,7 @@ class Trainer:
             assert len(self.tuning_time) == self.stacking_level + 1
             tuning_time = self.tuning_time[self.current_stacking_level]
         else:
-            tuning_time = (self.tuning_time / (self.stacking_level + 1),)
+            tuning_time = self.tuning_time / (self.stacking_level + 1)
 
         tuner = self.tuner(
             problem_type=self.problem_type,

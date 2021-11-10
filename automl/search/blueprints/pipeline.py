@@ -15,6 +15,9 @@ from ...components.component import Component, ComponentLevel, ComponentConfig
 from ...components.estimators.linear_model.linear_model_estimator import (
     LinearModelEstimator,
 )
+from ...components.estimators.neural_network.neural_network_estimator import (
+    NeuralNetworkEstimator,
+)
 from ...components.estimators.knn.knn_estimator import KNNEstimator
 from ...utils import validate_type
 
@@ -23,7 +26,7 @@ from automl_models.components.flow.column_transformer import make_column_selecto
 
 def _scaler_passthrough_condition(config, stage) -> bool:
     return config.estimator is None or not isinstance(
-        config.estimator, (LinearModelEstimator, KNNEstimator)
+        config.estimator, (LinearModelEstimator, KNNEstimator, NeuralNetworkEstimator)
     )
 
 
@@ -127,6 +130,8 @@ def create_pipeline_blueprint(
         # "LinearSVR": LinearSVR(),  # TODO FIX
         "KNeighborsClassifier": KNeighborsClassifier(),
         "KNeighborsRegressor": KNeighborsRegressor(),
+        "FTTransformerClassifier": FTTransformerClassifier(),
+        "FTTransformerRegressor": FTTransformerRegressor(),
     }
     components = {
         **passthrough,

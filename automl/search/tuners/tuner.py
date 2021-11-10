@@ -300,7 +300,7 @@ class RayTuneTuner(Tuner):
     def _shuffle_default_grid(self):
         # default python hash is different on every run
         self.default_grid_.sort(
-            key=lambda x: xxd_hash(tuple((k, v) for k, v in x.items()))
+            key=lambda x: xxd_hash(tuple(k for k in x))
         )
         np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
 

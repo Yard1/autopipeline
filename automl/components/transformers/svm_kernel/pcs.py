@@ -7,7 +7,6 @@ from ....search.distributions import (
 )
 from ...component import ComponentConfig
 from ....search.stage import AutoMLStage
-from ...estimators.linear_model.linear_model_estimator import LinearModelEstimator
 
 from automl_models.components.transformers.svm_kernel.pcs import (
     PolynomialCountSketchDynamicNComponents,

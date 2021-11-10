@@ -3,6 +3,7 @@ from ..transformer import DataType
 from ...component import ComponentLevel, ProblemType, ComponentConfig
 from ....search.stage import AutoMLStage
 from ...estimators.linear_model.linear_model_estimator import LinearModelEstimator
+from ...estimators.neural_network.neural_network_estimator import NeuralNetworkEstimator
 from automl_models.components.transformers.scaler.quantile_transformer import (
     PandasQuantileTransformer,
 )
@@ -44,5 +45,5 @@ class QuantileTargetTransformer(Scaler):
         super_check = super().is_component_valid(config, stage)
         return super_check and (
             config.estimator is None
-            or isinstance(config.estimator, LinearModelEstimator)
+            or isinstance(config.estimator, (LinearModelEstimator, NeuralNetworkEstimator))
         )

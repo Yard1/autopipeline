@@ -172,6 +172,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
+        self.dir = 2**(min(4, self.dim))
         # self.dir = (
         # max(self.dim // 4, 2)  # max number of trials without improvement
         # )
@@ -687,7 +688,7 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_AFTER = 100
+    _FORCE_GS_EVERY_N_ITER = 8
     _MAX_GS_RETRIES = 2
 
     def __init__(
@@ -879,7 +880,11 @@ class ConditionalBlendSearch(BlendSearch):
                 max_prune_attr=self._ls.max_resource,
             )
         }
-        self._last_global_search = 0
+        self._iters_without_new_best = 0
+
+    @property
+    def _metric_target_sign(self):
+        return self._metric_target * self._ls.metric_op
 
     @property
     def _global_search_thread(self):
@@ -899,7 +904,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._suggested_configs,
             self._conditional_space,
             self._time_attr,
-            self._last_global_search,
+            self._iters_without_new_best,
             self._points_to_evaluate,
             self._secondary_points_to_evaluate,
             self._init_finished,
@@ -930,7 +935,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._suggested_configs,
             self._conditional_space,
             self._time_attr,
-            self._last_global_search,
+            self._iters_without_new_best,
             self._points_to_evaluate,
             self._secondary_points_to_evaluate,
             self._init_finished,
@@ -1031,6 +1036,7 @@ class ConditionalBlendSearch(BlendSearch):
                 ]
                 self._points_to_evaluate = self._secondary_points_to_evaluate
                 self._init_finished = True
+                self._iters_without_new_best = 0
                 # self._last_global_search = np.inf
                 # _, _, local_threads_by_priority = self._select_thread()
                 # for thread_id, _, _ in local_threads_by_priority[2:]:
@@ -1117,6 +1123,7 @@ class ConditionalBlendSearch(BlendSearch):
             # update target metric if improved
             if (result[self._metric] - self._metric_target) * self._ls.metric_op < 0:
                 self._metric_target = result[self._metric]
+                self._iters_without_new_best = 0
             if create_condition:
                 # thread creator
                 self._search_thread_pool[self._thread_count] = SharingSearchThread(
@@ -1250,7 +1257,7 @@ class ConditionalBlendSearch(BlendSearch):
         estimators_in_threads = {
             thread_tuple[1].estimator for thread_tuple in local_threads
         }
-        print(f"best global score={self._metric_target * self._ls.metric_op}")
+        print(f"best global score={self._metric_target_sign}")
         for estimator, state in self._estimator_states.items():
             if estimator not in estimators_in_threads:
                 inv.append(0)
@@ -1265,7 +1272,7 @@ class ConditionalBlendSearch(BlendSearch):
                         self._ls.max_resource / state.resource,
                     ),
                 )
-            gap = state.best_score - (self._metric_target * self._ls.metric_op)
+            gap = state.best_score - (self._metric_target_sign)
             if gap > 0:
                 delta_loss = (
                     state.best_score_old - state.best_score
@@ -1495,18 +1502,19 @@ class ConditionalBlendSearch(BlendSearch):
         self._use_rs = False
         if self._init_used and not self._points_to_evaluate:
             choice, backup, local_threads_by_priority = self._select_thread()
+            self._iters_without_new_best += 1
             if choice < 0:
                 print(f"skipping choice={choice}")
                 return None  # timeout
             elif choice:
-                if self._last_global_search >= self._FORCE_GS_AFTER and backup:
+                if (
+                    self._iters_without_new_best >= self._FORCE_GS_EVERY_N_ITER
+                    and backup
+                ):
                     choice = 0
-                else:
-                    self._last_global_search += 1 * int(self._reached_max_prune_attr)
-            if not choice:
-                self._last_global_search = 0
+                    self._iters_without_new_best = 0
             print(
-                f"{trial_id}: choice={choice}, backup={backup}, self._last_global_search={self._last_global_search}"
+                f"{trial_id}: choice={choice}, backup={backup}, self._iters_without_new_best={self._iters_without_new_best}"
             )
 
             proposing_thread = choice

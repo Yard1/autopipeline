@@ -84,7 +84,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             multivariate=True,
             group=True,
             constant_liar=True,
-            n_ei_candidates=512,
+            n_ei_candidates=2**13,
         )
         assert isinstance(self._sampler, BaseSampler), (
             "You can only pass an instance of `optuna.samplers.BaseSampler` "
