@@ -255,7 +255,10 @@ class PatchedFLOW2(FLOW2):
         return np.around(super()._round(resource), 2)
 
     def _is_trial_better(self, trial_id: str, obj: float) -> bool:
-        if self._resource and self._resource < self._configs[trial_id][self.prune_attr]:
+        if (
+            self._resource
+            and self._resource < self._configs[trial_id][0][self.prune_attr]
+        ):
             diff = 0
         else:
             diff = np.abs(self.best_obj * self._tol)
@@ -976,15 +979,17 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
-        if (
-            not self._init_finished
-            and sum(
+        self._init_finished = (
+            not self._points_to_evaluate_trials
+            or sum(
                 1
                 for i in self._points_to_evaluate_trials.values()
                 if i[1][f"config/{META_KEY}/init"]
             )
-            < self._points_to_evaluate_len
-        ):
+            >= self._points_to_evaluate_len
+        )
+
+        if not self._init_finished:
             self._points_to_evaluate_trials[trial_id] = (
                 trial_id,
                 result,
