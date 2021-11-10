@@ -172,7 +172,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = 2**(min(4, self.dim))
+        self.dir = 2 ** (min(4, self.dim))
         # self.dir = (
         # max(self.dim // 4, 2)  # max number of trials without improvement
         # )
@@ -778,6 +778,7 @@ class ConditionalBlendSearch(BlendSearch):
             ]
 
         self._points_to_evaluate = points_to_evaluate
+        self._points_to_evaluate_len = len(points_to_evaluate)
         self._secondary_points_to_evaluate = secondary_points_to_evaluate
         self._init_finished = False
         self._points_to_evaluate_trials = {}
@@ -906,6 +907,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._time_attr,
             self._iters_without_new_best,
             self._points_to_evaluate,
+            self._points_to_evaluate_len,
             self._secondary_points_to_evaluate,
             self._init_finished,
             self._points_to_evaluate_trials,
@@ -937,6 +939,7 @@ class ConditionalBlendSearch(BlendSearch):
             self._time_attr,
             self._iters_without_new_best,
             self._points_to_evaluate,
+            self._points_to_evaluate_len,
             self._secondary_points_to_evaluate,
             self._init_finished,
             self._points_to_evaluate_trials,
@@ -973,7 +976,15 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
-        if self._points_to_evaluate and not self._init_finished:
+        if (
+            not self._init_finished
+            and sum(
+                1
+                for i in self._points_to_evaluate_trials.values()
+                if i[1][f"config/{META_KEY}/init"]
+            )
+            < self._points_to_evaluate_len
+        ):
             self._points_to_evaluate_trials[trial_id] = (
                 trial_id,
                 result,
@@ -1500,6 +1511,7 @@ class ConditionalBlendSearch(BlendSearch):
         print(f"suggest {trial_id}, {len(self._points_to_evaluate)}")
         prune_attr = None
         self._use_rs = False
+        init = False
         if not self._points_to_evaluate:
             if not self._init_used:
                 choice, backup = 0
@@ -1598,6 +1610,7 @@ class ConditionalBlendSearch(BlendSearch):
                 self._gs_admissible_min.update(self._ls_bound_min)
                 self._gs_admissible_max.update(self._ls_bound_max)
         else:  # use init config
+            init = True
             (
                 config,
                 prune_attr,
@@ -1632,7 +1645,11 @@ class ConditionalBlendSearch(BlendSearch):
         #     )
 
         print(f"{trial_id} final suggestion by {proposing_thread}: {config}")
-        config[META_KEY] = {"proposing_thread": proposing_thread, **self._meta_info}
+        config[META_KEY] = {
+            "proposing_thread": proposing_thread,
+            "init": init,
+            **self._meta_info,
+        }
         return config
 
     def _clean_and_enforce_config(self, config, prune_attr) -> dict:

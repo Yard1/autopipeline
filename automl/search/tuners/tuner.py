@@ -259,7 +259,7 @@ class RayTuneTuner(Tuner):
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
             "verbose": 2,
-            "reuse_actors": False,
+            "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
             # "resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
