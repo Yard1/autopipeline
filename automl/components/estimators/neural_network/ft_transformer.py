@@ -28,7 +28,8 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "max_epochs": 100,
         "batch_size": 512,
         "verbose": 1,
-        "device": "cpu"
+        "device": "cpu",
+        "n_iter_no_change": 5
     }
 
     _default_tuning_grid = {}
@@ -54,7 +55,8 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "max_epochs": 100,
         "batch_size": 512,
         "verbose": 0,
-        "device": "cpu"
+        "device": "cpu",
+        "n_iter_no_change": 5
     }
 
     _default_tuning_grid = {}

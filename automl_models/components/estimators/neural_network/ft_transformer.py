@@ -14,10 +14,11 @@ class FTTransformerClassifier(NeuralNetClassifier):
         *,
         optimizer=torch.optim.AdamW,
         criterion=torch.nn.CrossEntropyLoss,
-        train_split=ValidSplit(0.1, stratified=True),
+        train_split=ValidSplit(0.2, stratified=True),
         classes=None,
         early_stopping: bool = True,
         random_state=None,
+        n_iter_no_change=5,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-4)
@@ -34,11 +35,17 @@ class FTTransformerClassifier(NeuralNetClassifier):
         )
         self.early_stopping = early_stopping
         self.random_state = random_state
+        self.n_iter_no_change = n_iter_no_change
 
     @property
     def _default_callbacks(self):
         return super()._default_callbacks + (
-            [("early_stopping", EarlyStopping(monitor="valid_loss", patience=10))]
+            [
+                (
+                    "early_stopping",
+                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
+                )
+            ]
             if self.early_stopping
             else []
         )
@@ -92,9 +99,10 @@ class FTTransformerRegressor(NeuralNetRegressor):
         *,
         optimizer=torch.optim.AdamW,
         criterion=torch.nn.MSELoss,
-        train_split=ValidSplit(0.1, stratified=False),
+        train_split=ValidSplit(0.2, stratified=False),
         early_stopping: bool = True,
         random_state=None,
+        n_iter_no_change=5,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-4)
@@ -111,11 +119,17 @@ class FTTransformerRegressor(NeuralNetRegressor):
 
         self.early_stopping = early_stopping
         self.random_state = random_state
+        self.n_iter_no_change = n_iter_no_change
 
     @property
     def _default_callbacks(self):
         return super()._default_callbacks + (
-            [("early_stopping", EarlyStopping(monitor="valid_loss", patience=10))]
+            [
+                (
+                    "early_stopping",
+                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
+                )
+            ]
             if self.early_stopping
             else []
         )
