@@ -1500,19 +1500,22 @@ class ConditionalBlendSearch(BlendSearch):
         print(f"suggest {trial_id}, {len(self._points_to_evaluate)}")
         prune_attr = None
         self._use_rs = False
-        if self._init_used and not self._points_to_evaluate:
-            choice, backup, local_threads_by_priority = self._select_thread()
-            self._iters_without_new_best += 1
-            if choice < 0:
-                print(f"skipping choice={choice}")
-                return None  # timeout
-            elif choice:
-                if (
-                    self._iters_without_new_best >= self._FORCE_GS_EVERY_N_ITER
-                    and backup
-                ):
-                    choice = 0
-                    self._iters_without_new_best = 0
+        if not self._points_to_evaluate:
+            if not self._init_used:
+                choice, backup = 0
+            else:
+                choice, backup, local_threads_by_priority = self._select_thread()
+                self._iters_without_new_best += 1
+                if choice < 0:
+                    print(f"skipping choice={choice}")
+                    return None  # timeout
+                elif choice:
+                    if (
+                        self._iters_without_new_best >= self._FORCE_GS_EVERY_N_ITER
+                        and backup
+                    ):
+                        choice = 0
+                        self._iters_without_new_best = 0
             print(
                 f"{trial_id}: choice={choice}, backup={backup}, self._iters_without_new_best={self._iters_without_new_best}"
             )
@@ -1594,8 +1597,6 @@ class ConditionalBlendSearch(BlendSearch):
                 print("")
                 self._gs_admissible_min.update(self._ls_bound_min)
                 self._gs_admissible_max.update(self._ls_bound_max)
-        elif not self._init_finished and not self._points_to_evaluate:
-            return
         else:  # use init config
             (
                 config,

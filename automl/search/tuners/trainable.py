@@ -97,7 +97,7 @@ class SklearnTrainable(Trainable):
                 stopping if it is set to true.
 
         """
-        logger.debug("setup")
+        print("setup")
         if params:
             self.X_ = params["X_"]
             self.y_ = params["y_"]
@@ -169,13 +169,13 @@ class SklearnTrainable(Trainable):
             prune_attr = config_called.pop(self.prune_attr, None)
         else:
             prune_attr = None
-        logger.debug(f"trial prune_attr: {prune_attr}")
+        print(f"trial prune_attr: {prune_attr}")
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self.cache)
 
         estimator.set_params(memory=memory)
-        logger.debug(f"doing cv on {estimator.steps[-1][1]}")
+        print(f"doing cv on {estimator.steps[-1][1]}")
 
         estimator = stack_estimator(estimator, self.previous_stack)
 
@@ -217,7 +217,7 @@ class SklearnTrainable(Trainable):
             y_ref=self.refs[prefix + "y_"]
             # return_train_score=self.return_train_score,
         )
-        logger.debug("cv done")
+        print("cv done")
 
         estimator_fit_time = time.time() - time_cv
         metrics = {
@@ -279,12 +279,12 @@ class SklearnTrainable(Trainable):
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
 
-        logger.debug("done")
-        ret["size"] = sys.getsizeof(fitted_estimator)
+        print("done")
+        #ret["size"] = sys.getsizeof(fitted_estimator)
         return ret
 
     def reset_config(self, new_config):
-        logger.debug("reset_config")
+        print("reset_config")
         self.estimator_config = new_config
         gc.collect()
         return True
