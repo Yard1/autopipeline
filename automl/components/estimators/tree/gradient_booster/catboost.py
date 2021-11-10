@@ -76,9 +76,9 @@ class CatBoostClassifierMulticlass(GradientBoosterEstimator):
             get_catboost_n_estimators, cost_bounds="upper"
         ),
         "max_depth": IntUniformDistribution(4, 10, cost_bounds="upper"),
-        "learning_rate": UniformDistribution(
-            lower=0.005, upper=0.2, log=True, cost_bounds="lower"
-        ),
+        # "learning_rate": UniformDistribution(
+        #     lower=0.005, upper=0.2, log=True, cost_bounds="lower"
+        # ),
     }
     _default_tuning_grid_extended = {
         "auto_class_weights": CategoricalDistribution(
