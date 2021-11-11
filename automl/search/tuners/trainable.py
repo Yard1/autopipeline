@@ -311,6 +311,5 @@ class SklearnTrainable(Trainable):
         return True
 
     def save_checkpoint(self, tmp_checkpoint_dir):
-        if self.estimator:
-            joblib.dump(self.estimator, os.path.join(tmp_checkpoint_dir, "pipeline.pkl"))
+        joblib.dump(self.estimator, os.path.join(tmp_checkpoint_dir, "pipeline.pkl"))
         return tmp_checkpoint_dir
