@@ -118,6 +118,8 @@ class SklearnTrainable(Trainable):
             self.y_test_ = params.get("y_test_", None)
             self.cache_results = params.get("cache_results", True)
             self.previous_stack = params.get("previous_stack", None)
+            self.N_JOBS = params.get("n_jobs", 1)
+            self.n_jobs_per_fold = params.get("n_jobs_per_fold", 1)
         assert self.X_ is not None
         self.estimator_config = config
 
@@ -152,9 +154,9 @@ class SklearnTrainable(Trainable):
             scoring["dummy_decision_function_scorer"] = dummy_decision_function_scorer
         return scoring
 
-    @classmethod
-    def default_resource_request(cls, config):
-        return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
+    #@classmethod
+    #def default_resource_request(cls, config):
+        #return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
     def _train(self):
         time_cv = time.time()
@@ -177,7 +179,19 @@ class SklearnTrainable(Trainable):
         estimator.set_params(memory=memory)
         print(f"doing cv on {estimator.steps[-1][1]}")
 
-        estimator = stack_estimator(estimator, self.previous_stack)
+        n_jobs_per_fold = self.n_jobs_per_fold
+
+        estimator.set_params(
+            **{
+                k: n_jobs_per_fold
+                for k, v in estimator.get_params().items()
+                if k.endswith("n_jobs") or k.endswith("thread_count")
+            }
+        )
+
+        if self.previous_stack:
+            self.previous_stack.set_params(n_jobs=n_jobs_per_fold)
+            estimator = stack_estimator(estimator, self.previous_stack)
 
         is_early_stopping_on = prune_attr and prune_attr < 1.0
 
@@ -201,19 +215,11 @@ class SklearnTrainable(Trainable):
         # TODO do this better - we want the prefix to be dynamic
         prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
 
-        estimator.set_params(
-            **{
-                k: self.N_JOBS // self.cv.get_n_splits(self.X_, self.y_)
-                for k, v in estimator.get_params().items()
-                if k.endswith("n_jobs")
-            }
-        )
-
         print({
-                k: self.N_JOBS // self.cv.get_n_splits(self.X_, self.y_)
-                for k, v in estimator.get_params().items()
-                if k.endswith("n_jobs")
-            })
+            k: v
+            for k, v in estimator.get_params().items()
+            if k.endswith("n_jobs") or k.endswith("thread_count")
+        })
 
         scores = ray_cross_validate(
             estimator,

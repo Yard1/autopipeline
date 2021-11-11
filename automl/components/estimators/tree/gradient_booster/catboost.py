@@ -35,6 +35,7 @@ class CatBoostClassifierBinary(GradientBoosterEstimator):
         "verbose": False,
         "random_state": None,
         "auto_class_weights": "Balanced",
+        "thread_count": 1,
     }
 
     _default_tuning_grid = {
@@ -69,6 +70,7 @@ class CatBoostClassifierMulticlass(GradientBoosterEstimator):
         "verbose": False,
         "random_state": None,
         "auto_class_weights": "Balanced",
+        "thread_count": 1,
     }
 
     _default_tuning_grid = {

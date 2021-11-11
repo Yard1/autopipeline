@@ -38,7 +38,8 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         max_features=None,
         importance_getter="auto",
         n_estimators=100,
-        random_state=None
+        random_state=None,
+        n_jobs=None
     ):
         if estimator == "LGBMRegressor":
             estimator = LGBMRegressor(**_lightgbm_rf_config)
@@ -54,6 +55,7 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         )
         self.random_state = random_state
         self.n_estimators = n_estimators
+        self.n_jobs = n_jobs
 
     def _get_tree_num(self, n_feat):
         depth = None
@@ -76,6 +78,10 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         self._is_classification_ = is_classifier(self.estimator)
         try:
             self.estimator.set_params(random_state=self.random_state)
+        except Exception:
+            pass
+        try:
+            self.estimator.set_params(n_jobs=self.n_jobs)
         except Exception:
             pass
         # if (

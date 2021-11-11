@@ -10,6 +10,7 @@ from abc import ABC
 import ray
 import ray.exceptions
 from ray import tune
+from ray.tune.utils.placement_groups import PlacementGroupFactory
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
@@ -261,7 +262,6 @@ class RayTuneTuner(Tuner):
             "verbose": 2,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
-            # "resources_per_trial": {"cpu": self.trainable_n_jobs},
             "stop": {"training_iteration": 1},
             "max_failures": 0,
         }
@@ -351,6 +351,11 @@ class RayTuneTuner(Tuner):
         self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
         print(f"columns to tune: {self.X_.columns}")
+        n_jobs_per_fold = max(1, self.trainable_n_jobs // self.cv.get_n_splits(self.X_, self.y_))
+        bundles = self.trainable_n_jobs // n_jobs_per_fold
+
+        tune_kwargs["resources_per_trial"] = PlacementGroupFactory([{"CPU": 0.001}] + [{"CPU": n_jobs_per_fold}] * bundles)
+
         params = {
             "X_": self.X_,
             "y_": self.y_,
@@ -369,15 +374,18 @@ class RayTuneTuner(Tuner):
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
             "cache": self._cache,
             "previous_stack": self.previous_stack,
+            "n_jobs": self.trainable_n_jobs,
+            "n_jobs_per_fold": n_jobs_per_fold
         }
         gc.collect()
 
         tune_kwargs["run_or_experiment"] = type(
-            "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
+            "SklearnTrainable", (SklearnTrainable,), {}
         )
         tune_kwargs["run_or_experiment"] = with_parameters(
             tune_kwargs["run_or_experiment"], **params
         )
+
 
         self.analysis_ = tune.run(**tune_kwargs)
 

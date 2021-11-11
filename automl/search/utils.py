@@ -68,8 +68,10 @@ def ray_cross_validate(
     X_ref = X_ref if X_ref is not None else ray.put(X)
     y_ref = y_ref if y_ref is not None else ray.put(y)
 
+    ray_fit_and_score_cpus = ray_fit_and_score.options(num_cpus=n_jobs)
+
     results_futures = [
-        ray_fit_and_score.remote(
+        ray_fit_and_score_cpus.remote(
             clone(estimator),
             X_ref,
             y_ref,
