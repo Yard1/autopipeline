@@ -67,22 +67,24 @@ class FTTransformerClassifier(NeuralNetClassifier):
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
         torch.set_num_threads(self.n_jobs)
-        X = X[sorted(X.columns)]
-        X_num = X.select_dtypes(exclude="category")
-        X_cat = X.select_dtypes(include="category")
-        self.set_params(
-            module__n_num_features=X_num.shape[1],
-            module__cat_cardinalities=X_cat.nunique().to_list(),
-            module__d_out=y.nunique(),
-            module__last_layer_query_idx=[-1],
-        )
         self.train_split.random_state = self.random_state
         torch.random.manual_seed(self.random_state)
-        return super().fit(
-            {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
-            y.to_numpy("int64"),
-            **fit_params
-        )
+        if isinstance(X, pd.DataFrame):
+            X = X[sorted(X.columns)]
+            X_num = X.select_dtypes(exclude="category")
+            X_cat = X.select_dtypes(include="category")
+            self.set_params(
+                module__n_num_features=X_num.shape[1],
+                module__cat_cardinalities=X_cat.nunique().to_list(),
+                module__d_out=y.nunique(),
+                module__last_layer_query_idx=[-1],
+            )
+            return super().fit(
+                {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
+                y.to_numpy("int64"),
+                **fit_params
+            )
+        return super().fit(X, y, **fit_params)
 
     def predict_proba(self, X):
         torch.set_num_threads(self.n_jobs)
@@ -155,22 +157,24 @@ class FTTransformerRegressor(NeuralNetRegressor):
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
         torch.set_num_threads(self.n_jobs)
-        X = X[sorted(X.columns)]
-        X_num = X.select_dtypes(exclude="category")
-        X_cat = X.select_dtypes(include="category")
-        self.set_params(
-            module__n_num_features=X_num.shape[1],
-            module__cat_cardinalities=X_cat.nunique().to_list(),
-            module__d_out=1,
-            module__last_layer_query_idx=[-1],
-        )
         self.train_split.random_state = self.random_state
         torch.random.manual_seed(self.random_state)
-        return super().fit(
-            {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
-            y.to_numpy("int64"),
-            **fit_params
-        )
+        if isinstance(X, pd.DataFrame):
+            X = X[sorted(X.columns)]
+            X_num = X.select_dtypes(exclude="category")
+            X_cat = X.select_dtypes(include="category")
+            self.set_params(
+                module__n_num_features=X_num.shape[1],
+                module__cat_cardinalities=X_cat.nunique().to_list(),
+                module__d_out=1,
+                module__last_layer_query_idx=[-1],
+            )
+            return super().fit(
+                {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
+                y.to_numpy("int64"),
+                **fit_params
+            )
+        return super().fit(X, y, **fit_params)
 
     def predict(self, X):
         torch.set_num_threads(self.n_jobs)
