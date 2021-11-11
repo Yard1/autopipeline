@@ -19,7 +19,7 @@ from ray.tune import Trainable
 from ray.util.joblib import register_ray
 
 from .utils import treat_config
-from ..utils import ray_score_test, ray_cross_validate, stack_estimator
+from ..utils import score_test, ray_cross_validate, stack_estimator
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
@@ -201,6 +201,20 @@ class SklearnTrainable(Trainable):
         # TODO do this better - we want the prefix to be dynamic
         prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
 
+        estimator.set_params(
+            **{
+                k: self.N_JOBS // self.cv.get_n_splits(self.X_, self.y_)
+                for k, v in estimator.get_params().items()
+                if k.endswith("n_jobs")
+            }
+        )
+
+        print({
+                k: self.N_JOBS // self.cv.get_n_splits(self.X_, self.y_)
+                for k, v in estimator.get_params().items()
+                if k.endswith("n_jobs")
+            })
+
         scores = ray_cross_validate(
             estimator,
             self.X_,
@@ -244,12 +258,12 @@ class SklearnTrainable(Trainable):
                 cloned_estimators=fitted_estimator_list,
                 # TODO: look into why setting n_jobs to >1 here leads to way slower results
                 **{
-                    k: 1
+                    k: self.N_JOBS
                     for k, v in estimator.get_params().items()
                     if k.endswith("n_jobs")
                 },
             ):
-                test_ret = ray_score_test.remote(
+                test_ret = score_test(
                     estimator,
                     self.X_,
                     self.y_,
@@ -257,7 +271,7 @@ class SklearnTrainable(Trainable):
                     self.y_test_,
                     scoring_with_dummies,
                 )
-                test_metrics, fitted_estimator = ray.get(test_ret)
+                test_metrics, fitted_estimator = test_ret
                 test_metrics = {
                     k: v for k, v in test_metrics.items() if k in self.scoring
                 }
