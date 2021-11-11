@@ -19,6 +19,7 @@ class FTTransformerClassifier(NeuralNetClassifier):
         early_stopping: bool = True,
         random_state=None,
         n_iter_no_change=5,
+        n_jobs=1,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-4)
@@ -36,6 +37,7 @@ class FTTransformerClassifier(NeuralNetClassifier):
         self.early_stopping = early_stopping
         self.random_state = random_state
         self.n_iter_no_change = n_iter_no_change
+        self.n_jobs = n_jobs
 
     @property
     def _default_callbacks(self):
@@ -64,6 +66,7 @@ class FTTransformerClassifier(NeuralNetClassifier):
         return self
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
+        torch.set_num_threads(self.n_jobs)
         X = X[sorted(X.columns)]
         X_num = X.select_dtypes(exclude="category")
         X_cat = X.select_dtypes(include="category")
@@ -82,6 +85,7 @@ class FTTransformerClassifier(NeuralNetClassifier):
         )
 
     def predict_proba(self, X):
+        torch.set_num_threads(self.n_jobs)
         if isinstance(X, pd.DataFrame):
             X = X[sorted(X.columns)]
             X_num = X.select_dtypes(exclude="category")
@@ -103,6 +107,7 @@ class FTTransformerRegressor(NeuralNetRegressor):
         early_stopping: bool = True,
         random_state=None,
         n_iter_no_change=5,
+        n_jobs = 1,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-4)
@@ -120,6 +125,7 @@ class FTTransformerRegressor(NeuralNetRegressor):
         self.early_stopping = early_stopping
         self.random_state = random_state
         self.n_iter_no_change = n_iter_no_change
+        self.n_jobs = n_jobs
 
     @property
     def _default_callbacks(self):
@@ -148,6 +154,7 @@ class FTTransformerRegressor(NeuralNetRegressor):
         return self
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
+        torch.set_num_threads(self.n_jobs)
         X = X[sorted(X.columns)]
         X_num = X.select_dtypes(exclude="category")
         X_cat = X.select_dtypes(include="category")
@@ -166,6 +173,7 @@ class FTTransformerRegressor(NeuralNetRegressor):
         )
 
     def predict(self, X):
+        torch.set_num_threads(self.n_jobs)
         if isinstance(X, pd.DataFrame):
             X = X[sorted(X.columns)]
             X_num = X.select_dtypes(exclude="category")
