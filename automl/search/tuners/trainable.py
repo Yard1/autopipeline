@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import gc
 import sys
@@ -5,6 +6,7 @@ import time
 from copy import deepcopy
 from ray.tune.utils.placement_groups import PlacementGroupFactory
 from ray.tune.resources import Resources
+from ray.util.placement_group import get_current_placement_group
 from sklearn.base import clone
 import joblib
 
@@ -19,7 +21,7 @@ from ray.tune import Trainable
 from ray.util.joblib import register_ray
 
 from .utils import treat_config
-from ..utils import score_test, ray_cross_validate, stack_estimator
+from ..utils import ray_score_test, ray_cross_validate, stack_estimator
 from ..metrics.scorers import make_scorer_with_error_score
 from ..metrics.metrics import optimized_precision
 from ...problems.problem_type import ProblemType
@@ -122,6 +124,7 @@ class SklearnTrainable(Trainable):
             self.n_jobs_per_fold = params.get("n_jobs_per_fold", 1)
         assert self.X_ is not None
         self.estimator_config = config
+        self.estimator = None
 
     def step(self):
 
@@ -159,6 +162,7 @@ class SklearnTrainable(Trainable):
         #return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
     def _train(self):
+        self.estimator = None
         time_cv = time.time()
         estimator = self.pipeline_blueprint(random_state=self.random_state)
 
@@ -221,6 +225,23 @@ class SklearnTrainable(Trainable):
             if k.endswith("n_jobs") or k.endswith("thread_count")
         })
 
+        test_ret = None
+        if self.X_test_ is not None and not is_early_stopping_on:
+            print("scoring test")
+            print({
+                k: v
+                for k, v in estimator.get_params().items()
+                if k.endswith("n_jobs") or k.endswith("thread_count")
+            })
+            test_ret = ray_score_test.options(num_cpus=n_jobs_per_fold, placement_group=get_current_placement_group()).remote(
+                estimator,
+                self.X_,
+                self.y_,
+                self.X_test_,
+                self.y_test_,
+                scoring_with_dummies,
+            )
+
         scores = ray_cross_validate(
             estimator,
             self.X_,
@@ -228,11 +249,11 @@ class SklearnTrainable(Trainable):
             cv=subsample_cv,
             groups=self.groups_,
             error_score="raise",
-            return_estimator=True,
+            return_estimator=False,
             verbose=1,
             scoring=scoring_with_dummies,
             fit_params=self.fit_params,
-            n_jobs=self.N_JOBS,
+            n_jobs=n_jobs_per_fold,
             X_ref=self.refs[prefix + "X_"],
             y_ref=self.refs[prefix + "y_"]
             # return_train_score=self.return_train_score,
@@ -251,38 +272,14 @@ class SklearnTrainable(Trainable):
 
         del scores
 
-        ret = {}
-
         test_metrics = None
-        fitted_estimator = None
-        fitted_estimator_list = []
 
-        if self.X_test_ is not None and not is_early_stopping_on:
-            logger.debug("scoring test")
-            with set_param_context(
-                estimator,
-                cloned_estimators=fitted_estimator_list,
-                # TODO: look into why setting n_jobs to >1 here leads to way slower results
-                **{
-                    k: self.N_JOBS
-                    for k, v in estimator.get_params().items()
-                    if k.endswith("n_jobs")
-                },
-            ):
-                test_ret = score_test(
-                    estimator,
-                    self.X_,
-                    self.y_,
-                    self.X_test_,
-                    self.y_test_,
-                    scoring_with_dummies,
-                )
-                test_metrics, fitted_estimator = test_ret
-                test_metrics = {
-                    k: v for k, v in test_metrics.items() if k in self.scoring
-                }
-                fitted_estimator_list.append(fitted_estimator)
-            fitted_estimator = fitted_estimator_list[0]
+        if test_ret:
+            test_metrics, fitted_estimator = ray.get(test_ret)
+            self.estimator = fitted_estimator
+            test_metrics = {
+                k: v for k, v in test_metrics.items() if k in self.scoring
+            }
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],
@@ -290,6 +287,10 @@ class SklearnTrainable(Trainable):
                     test_metrics["specificity"],
                 )
             logger.debug("scoring test done")
+        else:
+            self.estimator = estimator
+
+        ret = {}
 
         ret["mean_validation_score"] = metrics[self.metric_name]
         ret["estimator_fit_time"] = estimator_fit_time
@@ -308,3 +309,8 @@ class SklearnTrainable(Trainable):
         self.estimator_config = new_config
         gc.collect()
         return True
+
+    def save_checkpoint(self, tmp_checkpoint_dir):
+        if self.estimator:
+            joblib.dump(self.estimator, os.path.join(tmp_checkpoint_dir, "pipeline.pkl"))
+        return tmp_checkpoint_dir

@@ -1,1 +1,2 @@
 from .ft_transformer import FTTransformerClassifier, FTTransformerRegressor
+from .fastai_nn import FastAINNClassifier, FastAINNRegressor

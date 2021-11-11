@@ -264,6 +264,7 @@ class RayTuneTuner(Tuner):
             "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
             "max_failures": 0,
+            "checkpoint_at_end": True
         }
         super().__init__(
             problem_type=problem_type,

@@ -25,8 +25,8 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-4,
         "optimizer__weight_decay": 1e-5,
-        "max_epochs": 100,
-        "batch_size": 512,
+        "max_epochs": 30,
+        "batch_size": 256,
         "verbose": 1,
         "device": "cpu",
         "n_iter_no_change": 5
@@ -52,8 +52,8 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-4,
         "optimizer__weight_decay": 1e-5,
-        "max_epochs": 100,
-        "batch_size": 512,
+        "max_epochs": 30,
+        "batch_size": 256,
         "verbose": 0,
         "device": "cpu",
         "n_iter_no_change": 5

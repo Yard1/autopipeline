@@ -1822,12 +1822,12 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
-        if self.early_stopping and self.X_.shape[0] > 100001:
+        if self.early_stopping and self.X_.shape[0]*self.X_.shape[1] > 100001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 50000 / self.X_.shape[0])
+            min_dist = max(min_dist, 500 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)

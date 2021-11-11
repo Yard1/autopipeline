@@ -1,12 +1,13 @@
 from typing import Any, Dict, Tuple, Union
 import ray
 import numpy as np
-import os
 from copy import deepcopy
 from unittest.mock import patch
 import contextlib
 import time
 import traceback
+import joblib
+from ray.util.placement_group import get_current_placement_group
 
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone
 from sklearn.model_selection._validation import _score, _check_multimetric_scoring
@@ -68,8 +69,7 @@ def ray_cross_validate(
     X_ref = X_ref if X_ref is not None else ray.put(X)
     y_ref = y_ref if y_ref is not None else ray.put(y)
 
-    ray_fit_and_score_cpus = ray_fit_and_score.options(num_cpus=n_jobs)
-
+    ray_fit_and_score_cpus = ray_fit_and_score.options(num_cpus=n_jobs, placement_group=get_current_placement_group())
     results_futures = [
         ray_fit_and_score_cpus.remote(
             clone(estimator),

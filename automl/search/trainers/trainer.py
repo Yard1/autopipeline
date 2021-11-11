@@ -400,6 +400,8 @@ class Trainer:
                 y_test_original=y_test_original,
                 groups=groups,
             )
+
+        gc.collect()
         if self.current_stacking_level >= self.stacking_level:
             # logger.debug("fitting final ensemble", flush=True)
             # self.final_ensemble_ = self._create_final_stack()
@@ -664,8 +666,6 @@ class Trainer:
             self.last_tuner_.hyperparameter_names_,
             self.random_state,
         )
-        if "maxBins" in config_called:
-            raise ValueError(str(estimator) + str(config_called))
         estimator.set_params(**config_called)
         if cache:
             memory = dynamic_memory_factory(cache)  # TODO make dynamic

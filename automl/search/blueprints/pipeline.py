@@ -112,8 +112,8 @@ def create_pipeline_blueprint(
         # "DecisionTreeClassifier": DecisionTreeClassifier(),
         # "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
-        "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
-        "LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.0001),
+        #"LogisticRegression_L1": LogisticRegression(l1_ratio=1),
+        #"LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.0001),
         "LinearRegression": LinearRegression(),
         "ElasticNet": ElasticNet(),
         "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.0001),
@@ -132,6 +132,8 @@ def create_pipeline_blueprint(
         "KNeighborsRegressor": KNeighborsRegressor(),
         "FTTransformerClassifier": FTTransformerClassifier(),
         "FTTransformerRegressor": FTTransformerRegressor(),
+        "FastAINNClassifier": FastAINNClassifier(),
+        "FastAINNRegressor": FastAINNRegressor(),
     }
     components = {
         **passthrough,

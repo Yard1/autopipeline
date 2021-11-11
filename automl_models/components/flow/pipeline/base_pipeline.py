@@ -179,7 +179,7 @@ class BasePipeline(_ImblearnPipeline):
                     self._final_estimator, _fit, memory
                 )
                 self._final_estimator = fit_cached(
-                    self._final_estimator, Xt, yt, **fit_params_last_step
+                    clone(self._final_estimator), Xt, yt, **fit_params_last_step
                 )
                 self.final_estimator_fit_time_ = time() - final_estimator_time_start
         return self
@@ -204,14 +204,14 @@ class BasePipeline(_ImblearnPipeline):
                     self._final_estimator, _fit_transform, memory
                 )
                 r, self._final_estimator = fit_transform_cached(
-                    self._final_estimator, Xt, yt, **fit_params_last_step
+                    clone(self._final_estimator), Xt, yt, **fit_params_last_step
                 )
             else:
                 fit_cached = self._memory_cache_if_not_pipeline(
                     self._final_estimator, _fit, memory
                 )
                 self._final_estimator = fit_cached(
-                    self._final_estimator, Xt, yt, **fit_params_last_step
+                    clone(self._final_estimator), Xt, yt, **fit_params_last_step
                 )
                 transform_cached = self._memory_cache_if_not_pipeline(
                     self._final_estimator, _transform_one, memory
@@ -240,7 +240,7 @@ class BasePipeline(_ImblearnPipeline):
                     self._final_estimator, _fit_resample, memory
                 )
                 r, self._final_estimator = fit_resample_cached(
-                    self._final_estimator, Xt, yt, **fit_params_last_step
+                    clone(self._final_estimator), Xt, yt, **fit_params_last_step
                 )
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
             return r
@@ -263,7 +263,7 @@ class BasePipeline(_ImblearnPipeline):
                 self._final_estimator, _fit_predict, memory
             )
             y_pred, self._final_estimator = fit_predict_cached(
-                self._final_estimator, Xt, yt, **fit_params_last_step
+                clone(self._final_estimator), Xt, yt, **fit_params_last_step
             )
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
         if self.target_pipeline:
