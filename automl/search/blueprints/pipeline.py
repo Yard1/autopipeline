@@ -73,7 +73,7 @@ def create_pipeline_blueprint(
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     imputers = {
         "CombinedSimpleImputer": CombinedSimpleImputer(),
-        "IterativeImputer": IterativeImputer(),
+        #"IterativeImputer": IterativeImputer(),
     }
     scalers_normalizers = {
         "CombinedScalerTransformer": CombinedScalerTransformer(),
@@ -88,9 +88,9 @@ def create_pipeline_blueprint(
         "CatBoostEncoderBinary": CatBoostEncoderBinary(),
         "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),
-        "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
-        "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
-        "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
+        #"BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
+        #"BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
+        #"BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
@@ -119,19 +119,19 @@ def create_pipeline_blueprint(
         # "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.0001),
         "LGBMClassifier": LGBMClassifier(),
         "LGBMRegressor": LGBMRegressor(),
-        # "CatBoostClassifierBinary": CatBoostClassifierBinary(),
-        # "CatBoostClassifierMulticlass": CatBoostClassifierMulticlass(),
-        # "CatBoostRegressor": CatBoostRegressor(),
-        # "RandomForestClassifier": RandomForestClassifier(),
-        # "RandomForestRegressor": RandomForestRegressor(),
-        # "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
-        # "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
+        "CatBoostClassifierBinary": CatBoostClassifierBinary(),
+        "CatBoostClassifierMulticlass": CatBoostClassifierMulticlass(),
+        "CatBoostRegressor": CatBoostRegressor(),
+        "RandomForestClassifier": RandomForestClassifier(),
+        "RandomForestRegressor": RandomForestRegressor(),
+        "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
+        "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
         # # "LinearSVC": LinearSVC(),  # TODO FIX
         # # "LinearSVR": LinearSVR(),  # TODO FIX
-        # "KNeighborsClassifier": KNeighborsClassifier(),
-        # "KNeighborsRegressor": KNeighborsRegressor(),
-        # "FTTransformerClassifier": FTTransformerClassifier(),
-        # "FTTransformerRegressor": FTTransformerRegressor(),
+        "KNeighborsClassifier": KNeighborsClassifier(),
+        "KNeighborsRegressor": KNeighborsRegressor(),
+        "FTTransformerClassifier": FTTransformerClassifier(),
+        "FTTransformerRegressor": FTTransformerRegressor(),
     }
     components = {
         **passthrough,
