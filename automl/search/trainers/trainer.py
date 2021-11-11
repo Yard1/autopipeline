@@ -81,7 +81,7 @@ from automl_models.components.estimators.ensemble import (
     PandasStackingRegressor,
     PandasVotingClassifier,
     PandasVotingRegressor,
-    DESSplitter,
+    #DESSplitter,
 )
 from automl_models.components.estimators.ensemble.stack import DeepStackMixin
 
@@ -555,16 +555,16 @@ class Trainer:
             )
         self.ensemble_results_[-1][ensemble_name] = scores
 
-    def _create_dynamic_ensemble(self, X, y):
-        # TODO fix
-        des = DESSplitter(
-            [est for name, est in self.ensembles_[-1].estimators],
-            METADES(DFP=True),
-            random_state=self.random_state,
-            n_jobs=-1,
-        )
-        des.fit(X, y)
-        return des
+    # def _create_dynamic_ensemble(self, X, y):
+    #     # TODO fix
+    #     des = DESSplitter(
+    #         [est for name, est in self.ensembles_[-1].estimators],
+    #         METADES(DFP=True),
+    #         random_state=self.random_state,
+    #         n_jobs=-1,
+    #     )
+    #     des.fit(X, y)
+    #     return des
 
     def _create_final_stack(self):
         # TODO change isinstance
