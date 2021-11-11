@@ -126,7 +126,7 @@ class SklearnTrainable(Trainable):
         # forward-compatbility
         logger.debug("training")
         register_ray()
-        with joblib.parallel_backend("sequential"):
+        with joblib.parallel_backend("threading"):
             r = self._train()
 
         return r
