@@ -3,10 +3,10 @@ from sklearn.base import clone
 import ray
 
 
-def clone_with_n_jobs_1(estimator, *, safe: bool = True):
+def clone_with_n_jobs(estimator, *, n_jobs: bool = 1, safe: bool = True):
     estimator = clone(estimator, safe=safe)
     params = estimator.get_params()
-    params_to_set = {param: 1 for param in params.keys() if param.endswith("n_jobs")}
+    params_to_set = {param: n_jobs for param in params.keys() if param.endswith("n_jobs") or param.endswith("thread_count")}
     estimator.set_params(**params_to_set)
     # clone twice to deal with nested
     estimator = clone(estimator, safe=safe)

@@ -5,7 +5,7 @@ import sys
 import numpy as np
 
 import pickle
-from joblib.hashing import Hasher, NumpyHasher
+from joblib.hashing import Hasher, NumpyHasher, hash as joblib_hash
 
 from sklearn.base import clone
 from sklearn.utils.validation import check_is_fitted, NotFittedError
@@ -22,7 +22,7 @@ from pandas.core.dtypes.generic import (
 from xxhash import xxh3_128
 
 Pickler = pickle._Pickler
-ATTRIBUTES_TO_IGNORE = set(("verbose", "memory", "n_jobs"))
+ATTRIBUTES_TO_IGNORE = set(("verbose", "memory", "n_jobs", "thread_count", "device", "silent"))
 
 
 def fast_hash_pandas_object(
@@ -275,16 +275,26 @@ class xxPandasHasher(xxNumpyHasher):
             self._hash.update("_HASHED_DTYPE".encode("utf-8"))
             self._hash.update(pickle.dumps(obj))
             return
-        
+
+        if not isinstance(obj, type) and hasattr(obj, "__joblib_hash__"):
+            obj = obj.__joblib_hash__()
+
         ignored_attrs = {}
-        if (hasattr(obj, "fit") or hasattr(obj, "transform")):
-            for attr in ATTRIBUTES_TO_IGNORE:
+        attrs_to_ignore = set()
+        if not isinstance(obj, type):
+            if (hasattr(obj, "fit") or hasattr(obj, "transform")):
+                attrs_to_ignore.update(ATTRIBUTES_TO_IGNORE)
+            if hasattr(obj, "__joblib_hash_attrs_to_ignore__"):
+                attrs_to_ignore.update(obj.__joblib_hash_attrs_to_ignore__())
+        if attrs_to_ignore:
+            for attr in attrs_to_ignore:
                 if hasattr(obj, attr):
                     ignored_attrs[attr] = getattr(obj, attr)
                     setattr(obj, attr, None)
         Hasher.save(self, obj)
-        for attr, value in ignored_attrs.items():
-            setattr(obj, attr, value)
+        if attrs_to_ignore:
+            for attr, value in ignored_attrs.items():
+                setattr(obj, attr, value)
 
 
 def hash(obj, hash_name="md5", coerce_mmap=False):

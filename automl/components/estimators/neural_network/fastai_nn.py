@@ -10,8 +10,9 @@ from ....search.distributions import (
     UniformDistribution,
     IntUniformDistribution,
     UniformDistribution,
-    FunctionDistribution,
+    FunctionParameter,
 )
+from .utils import get_category_cardinalities
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -26,12 +27,14 @@ class FastAINNClassifier(NeuralNetworkEstimator):
         "lr": 1e-3,
         "max_epochs": 100,
         "batch_size_power": 8,
-        "verbose": 1,
+        "verbose": 0,
         "device": "cpu",
+        "category_cardinalities": FunctionParameter(get_category_cardinalities),
         "n_iter_no_change": 5,
         "module__layers": (200, 100),
         "module__embed_p": 0.1,
         "module__ps": 0.1,
+        "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
@@ -78,10 +81,12 @@ class FastAINNRegressor(NeuralNetworkEstimator):
         "batch_size_power": 8,
         "verbose": 0,
         "device": "cpu",
+        "category_cardinalities": FunctionParameter(get_category_cardinalities),
         "n_iter_no_change": 5,
         "module__layers": (200, 100),
         "module__embed_p": 0.1,
         "module__ps": 0.1,
+        "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}

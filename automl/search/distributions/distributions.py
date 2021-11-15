@@ -481,6 +481,23 @@ class FunctionDistribution(Distribution):
         return dist
 
 
+class FunctionParameter:
+    """
+    Dynamic parameter.
+
+    Parameters
+    ----------
+    function: callable:
+        Callable that returns a value.
+    """
+
+    def __init__(self, function):
+        self.function = function
+
+    def __call__(self, config, stage):
+        return self.function(config, stage)
+
+
 def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:
     return {k: v.get_skopt() for k, v in distributions.items()}
 

@@ -1,9 +1,11 @@
+from functools import partial
 import numpy as np
 
 import ray
 import ray.exceptions
 from joblib import Parallel
 
+from sklearn.base import clone
 from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEncoder
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
@@ -20,16 +22,23 @@ from .utils import (
     should_use_ray,
     ray_call_method,
     fit_estimators,
+    get_ray_pg,
+    ray_pg_context
 )
-from ...utils import clone_with_n_jobs_1
+from ...utils import clone_with_n_jobs
 
 
-def _get_predictions(parallel, estimators, X, method):
+def _get_predictions(parallel, estimators, X, method, pg=None):
     if should_use_ray(parallel):
         estimators = [ray_put_if_needed(est) for est in estimators]
         X_ref = ray_put_if_needed(X)
         predictions = ray.get(
-            [ray_call_method.remote(est, method, X_ref) for est in estimators]
+            [
+                ray_call_method.options(
+                    placement_group=pg, num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1
+                ).remote(est, method, X_ref)
+                for est in estimators
+            ]
         )
     else:
         predictions = parallel(
@@ -65,6 +74,7 @@ class PandasVotingClassifier(_VotingClassifier):
 
         """Get common fit operations."""
         names, clfs = self._validate_estimators()
+        clfs = [clone(est) for est in clfs]
 
         if self.weights is not None and len(self.weights) != len(self.estimators):
             raise ValueError(
@@ -74,9 +84,17 @@ class PandasVotingClassifier(_VotingClassifier):
             )
 
         parallel = Parallel(n_jobs=self.n_jobs)
-        self.estimators_ = fit_estimators(
-            parallel, clfs, X, y, sample_weight, clone_with_n_jobs_1
-        )
+        pg = get_ray_pg(parallel, self.n_jobs, len(clfs))
+        with ray_pg_context(pg) as pg:
+            self.estimators_ = fit_estimators(
+                parallel,
+                clfs,
+                X,
+                y,
+                sample_weight,
+                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"])) if pg else 1,
+                pg=pg,
+            )
 
         self.named_estimators_ = Bunch()
 
@@ -127,14 +145,20 @@ class PandasVotingClassifier(_VotingClassifier):
     def _predict(self, X):
         """Collect results from clf.predict calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = _get_predictions(parallel, self.estimators_, X, "predict")
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        with ray_pg_context(pg) as pg:
+            predictions = _get_predictions(parallel, self.estimators_, X, "predict", pg=pg)
 
         return np.asarray(predictions).T
 
     def _collect_probas(self, X):
         """Collect results from clf.predict_proba calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = _get_predictions(parallel, self.estimators_, X, "predict_proba")
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        with ray_pg_context(pg) as pg:
+            predictions = _get_predictions(
+                parallel, self.estimators_, X, "predict_proba", pg=pg
+            )
 
         return np.asarray(predictions)
 
@@ -153,6 +177,7 @@ class PandasVotingRegressor(_VotingRegressor):
     def fit(self, X, y, sample_weight=None):
         """Get common fit operations."""
         names, regs = self._validate_estimators()
+        regs = [clone(est) for est in regs]
 
         if self.weights is not None and len(self.weights) != len(self.estimators):
             raise ValueError(
@@ -162,9 +187,17 @@ class PandasVotingRegressor(_VotingRegressor):
             )
 
         parallel = Parallel(n_jobs=self.n_jobs)
-        self.estimators_ = fit_estimators(
-            parallel, regs, X, y, sample_weight, clone_with_n_jobs_1
-        )
+        pg = get_ray_pg(parallel, self.n_jobs, len(regs))
+        with ray_pg_context(pg) as pg:
+            self.estimators_ = fit_estimators(
+                parallel,
+                regs,
+                X,
+                y,
+                sample_weight,
+                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"])) if pg else 1,
+                pg=pg,
+            )
 
         self.named_estimators_ = Bunch()
 
@@ -202,6 +235,8 @@ class PandasVotingRegressor(_VotingRegressor):
     def _predict(self, X):
         """Collect results from clf.predict calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        predictions = _get_predictions(parallel, self.estimators_, X, "predict")
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        with ray_pg_context(pg) as pg:
+            predictions = _get_predictions(parallel, self.estimators_, X, "predict", pg=pg)
 
         return np.asarray(predictions).T

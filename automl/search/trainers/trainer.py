@@ -135,7 +135,7 @@ class Trainer:
         self.stacking_level = stacking_level
         self.main_stacking_ensemble = main_stacking_ensemble or StackingEnsembleCreator(
             ensemble_strategy=RoundRobinEstimator(
-                configurations_to_select=10, percentile_threshold=15
+                configurations_to_select=10, percentile_threshold=5
             ),
             problem_type=self.problem_type,
         )

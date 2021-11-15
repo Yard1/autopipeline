@@ -10,8 +10,9 @@ from ....search.distributions import (
     UniformDistribution,
     IntUniformDistribution,
     UniformDistribution,
-    FunctionDistribution,
+    FunctionParameter,
 )
+from .utils import get_category_cardinalities
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -27,9 +28,11 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "optimizer__weight_decay": 1e-5,
         "max_epochs": 30,
         "batch_size": 256,
-        "verbose": 1,
+        "verbose": 0,
         "device": "cpu",
-        "n_iter_no_change": 5
+        "category_cardinalities": FunctionParameter(get_category_cardinalities),
+        "n_iter_no_change": 5,
+        "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
@@ -40,7 +43,7 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         ProblemType.MULTICLASS,
     }
 
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
 
 class FTTransformerRegressor(NeuralNetworkEstimator):
@@ -56,7 +59,9 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "batch_size": 256,
         "verbose": 0,
         "device": "cpu",
-        "n_iter_no_change": 5
+        "category_cardinalities": FunctionParameter(get_category_cardinalities),
+        "n_iter_no_change": 5,
+        "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
@@ -66,4 +71,4 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         ProblemType.REGRESSION,
     }
 
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE

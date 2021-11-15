@@ -1,6 +1,12 @@
 from joblib.parallel import Parallel
 import numpy as np
 import ray
+import gc
+from ray.util.placement_group import (
+    PlacementGroup,
+    placement_group,
+    remove_placement_group,
+)
 from copy import deepcopy
 from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
 from sklearn.model_selection import cross_val_predict
@@ -227,7 +233,9 @@ def fit_single_estimator(
 ray_fit_single_estimator = ray.remote(fit_single_estimator)
 
 
-def fit_estimators(parallel, all_estimators, X, y, sample_weight, clone_function):
+def fit_estimators(
+    parallel, all_estimators, X, y, sample_weight, clone_function, pg=None
+):
     if should_use_ray(parallel):
         cloned_estimators = [
             ray_put_if_needed(clone_function(est))
@@ -239,7 +247,10 @@ def fit_estimators(parallel, all_estimators, X, y, sample_weight, clone_function
         sample_weight_ref = ray_put_if_needed(sample_weight)
         estimators = ray.get(
             [
-                ray_fit_single_estimator.remote(est, X_ref, y_ref, sample_weight_ref)
+                ray_fit_single_estimator.options(
+                    placement_group=pg,
+                    num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1,
+                ).remote(est, X_ref, y_ref, sample_weight_ref)
                 for est in cloned_estimators
             ]
         )
@@ -261,7 +272,7 @@ ray_call_method = ray.remote(call_method)
 
 def should_use_ray(parallel: Parallel) -> bool:
     return parallel.n_jobs not in (1, None) and (
-        "ray" in parallel._backend.__class__.__name__.lower() #or ray.is_initialized()
+        "ray" in parallel._backend.__class__.__name__.lower()  # or ray.is_initialized()
     )
 
 
@@ -269,3 +280,29 @@ def put_args_if_ray(parallel: Parallel, *args):
     if should_use_ray(parallel):
         return (ray_put_if_needed(arg) for arg in args)
     return args
+
+
+def get_ray_pg(parallel, n_jobs, n_estimators):
+    pg = None
+    if should_use_ray(parallel):
+        n_jobs = min(1, n_jobs) if n_jobs and n_jobs >= 0 else int(ray.cluster_resources()["CPU"])
+        max_cpus_per_node = min(node["Resources"].get("CPU", 1) for node in ray.nodes())
+        n_jobs_per_estimator = max(1, min(n_jobs // n_estimators, max_cpus_per_node))
+        n_bundles = max(1, n_jobs // n_jobs_per_estimator)
+        pg = placement_group([{"CPU": n_jobs_per_estimator}] * n_bundles)
+        print(f"ray_get_pg: pg: {pg.bundle_specs} n_jobs: {n_jobs}")
+    return pg
+
+
+class ray_pg_context:
+    def __init__(self, pg: PlacementGroup):
+        self.pg = pg
+
+    def __enter__(self) -> PlacementGroup:
+        if self.pg:
+            ray.get(self.pg.ready())
+        return self.pg
+
+    def __exit__(self, type, value, traceback):
+        if self.pg:
+            remove_placement_group(self.pg)

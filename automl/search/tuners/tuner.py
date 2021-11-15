@@ -10,6 +10,7 @@ from abc import ABC
 import ray
 import ray.exceptions
 from ray import tune
+from ray.tune.trial import Trial, date_str
 from ray.tune.utils.placement_groups import PlacementGroupFactory
 
 from sklearn.model_selection import cross_validate
@@ -38,6 +39,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _create_dirname(trial: Trial) -> str:
+    return f"{str(trial)}_{date_str()}"
 
 class Tuner(ABC):
     def __init__(
@@ -54,7 +57,7 @@ class Tuner(ABC):
         scoring=None,
         display: Optional[IPythonDisplay] = None,
         stacking_level: int = 0,
-        previous_stack = None,
+        previous_stack=None,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
@@ -242,7 +245,7 @@ class RayTuneTuner(Tuner):
         stacking_level: int = 0,
         widget: Optional[go.FigureWidget] = None,
         plot_callback: Optional[BestPlotCallback] = None,
-        previous_stack = None,
+        previous_stack=None,
         **tune_kwargs,
     ) -> None:
         self.cache = cache
@@ -264,7 +267,8 @@ class RayTuneTuner(Tuner):
             "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
             "max_failures": 0,
-            "checkpoint_at_end": True
+            "checkpoint_at_end": True,
+            "trial_dirname_creator": _create_dirname,
         }
         super().__init__(
             problem_type=problem_type,
@@ -300,9 +304,7 @@ class RayTuneTuner(Tuner):
 
     def _shuffle_default_grid(self):
         # default python hash is different on every run
-        self.default_grid_.sort(
-            key=lambda x: xxd_hash(tuple(k for k in x))
-        )
+        self.default_grid_.sort(key=lambda x: xxd_hash(tuple(k for k in x)))
         np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
@@ -352,10 +354,22 @@ class RayTuneTuner(Tuner):
         self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
         print(f"columns to tune: {self.X_.columns}")
-        n_jobs_per_fold = max(1, self.trainable_n_jobs // self.cv.get_n_splits(self.X_, self.y_))
-        bundles = self.trainable_n_jobs // n_jobs_per_fold
-
-        tune_kwargs["resources_per_trial"] = PlacementGroupFactory([{"CPU": 0.001}] + [{"CPU": n_jobs_per_fold}] * bundles)
+        n_splits = self.cv.get_n_splits(self.X_, self.y_)
+        n_jobs_per_fold = max(
+            1,
+            self.trainable_n_jobs
+            // (
+                n_splits
+                + int(
+                    self.X_test_ is not None
+                    and self.trainable_n_jobs % (n_splits + 1) == 0
+                )
+            ),
+        )
+        bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
+        tune_kwargs["resources_per_trial"] = PlacementGroupFactory(
+            [{"CPU": 0.001}] + [{"CPU": n_jobs_per_fold}] * bundles
+        )
 
         params = {
             "X_": self.X_,
@@ -376,7 +390,7 @@ class RayTuneTuner(Tuner):
             "cache": self._cache,
             "previous_stack": self.previous_stack,
             "n_jobs": self.trainable_n_jobs,
-            "n_jobs_per_fold": n_jobs_per_fold
+            "n_jobs_per_fold": n_jobs_per_fold,
         }
         gc.collect()
 
@@ -386,7 +400,6 @@ class RayTuneTuner(Tuner):
         tune_kwargs["run_or_experiment"] = with_parameters(
             tune_kwargs["run_or_experiment"], **params
         )
-
 
         self.analysis_ = tune.run(**tune_kwargs)
 

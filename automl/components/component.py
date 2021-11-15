@@ -4,7 +4,7 @@ from enum import IntEnum
 from collections import UserDict
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
-
+from ..search.distributions import FunctionParameter
 
 class ComponentLevel(IntEnum):
     NECESSARY = 1
@@ -60,6 +60,7 @@ class Component(ABC):
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters
         self.tuning_grid = tuning_grid or {}
+        self.called_default_parameters = self._default_parameters
 
         for k in self._default_tuning_grid.keys():
             if k not in self._default_parameters:
@@ -91,7 +92,7 @@ class Component(ABC):
     @property
     def final_parameters(self) -> dict:
         return {
-            **self._default_parameters,
+            **self.called_default_parameters,
             **self.parameters,
         }
 
@@ -123,6 +124,10 @@ class Component(ABC):
         }
 
     def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
+        self.called_default_parameters = {
+            k: v(config, stage) if isinstance(v, FunctionParameter) else v
+            for k, v in self._default_parameters.items()
+        }
         self.called_tuning_grid = {
             k: v(config, stage) if callable(v) else v
             for k, v in self._default_tuning_grid.items()

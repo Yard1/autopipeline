@@ -99,7 +99,6 @@ class SklearnTrainable(Trainable):
                 stopping if it is set to true.
 
         """
-        print("setup")
         if params:
             self.X_ = params["X_"]
             self.y_ = params["y_"]
@@ -175,13 +174,13 @@ class SklearnTrainable(Trainable):
             prune_attr = config_called.pop(self.prune_attr, None)
         else:
             prune_attr = None
-        print(f"trial prune_attr: {prune_attr}")
+        #print(f"trial prune_attr: {prune_attr}")
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self.cache)
 
         estimator.set_params(memory=memory)
-        print(f"doing cv on {estimator.steps[-1][1]}")
+        #print(f"doing cv on {estimator.steps[-1][1]}")
 
         n_jobs_per_fold = self.n_jobs_per_fold
 
@@ -219,20 +218,20 @@ class SklearnTrainable(Trainable):
         # TODO do this better - we want the prefix to be dynamic
         prefix = "<class 'automl.search.tuners.tuner.SklearnTrainable'>_"
 
-        print({
-            k: v
-            for k, v in estimator.get_params().items()
-            if k.endswith("n_jobs") or k.endswith("thread_count")
-        })
+        # print({
+        #     k: v
+        #     for k, v in estimator.get_params().items()
+        #     if k.endswith("n_jobs") or k.endswith("thread_count")
+        # })
 
         test_ret = None
         if self.X_test_ is not None and not is_early_stopping_on:
             print("scoring test")
-            print({
-                k: v
-                for k, v in estimator.get_params().items()
-                if k.endswith("n_jobs") or k.endswith("thread_count")
-            })
+            # print({
+            #     k: v
+            #     for k, v in estimator.get_params().items()
+            #     if k.endswith("n_jobs") or k.endswith("thread_count")
+            # })
             test_ret = ray_score_test.options(num_cpus=n_jobs_per_fold, placement_group=get_current_placement_group()).remote(
                 estimator,
                 self.X_,
