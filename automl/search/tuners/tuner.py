@@ -3,7 +3,7 @@ import plotly.graph_objs as go
 from time import sleep
 import numpy as np
 import pandas as pd
-import collections
+import math
 import gc
 from abc import ABC
 
@@ -366,6 +366,7 @@ class RayTuneTuner(Tuner):
                 )
             ),
         )
+        n_jobs_per_fold = int(pow(2, int(math.log(n_jobs_per_fold, 2))))
         bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
         tune_kwargs["resources_per_trial"] = PlacementGroupFactory(
             [{"CPU": 0.001}] + [{"CPU": n_jobs_per_fold}] * bundles

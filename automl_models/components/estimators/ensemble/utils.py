@@ -1,7 +1,7 @@
 from joblib.parallel import Parallel
 import numpy as np
 import ray
-import gc
+import math
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -288,6 +288,7 @@ def get_ray_pg(parallel, n_jobs, n_estimators):
         n_jobs = min(1, n_jobs) if n_jobs and n_jobs >= 0 else int(ray.cluster_resources()["CPU"])
         max_cpus_per_node = min(node["Resources"].get("CPU", 1) for node in ray.nodes())
         n_jobs_per_estimator = max(1, min(n_jobs // n_estimators, max_cpus_per_node))
+        n_jobs_per_estimator = int(pow(2, int(math.log(n_jobs_per_estimator, 2))))
         n_bundles = max(1, n_jobs // n_jobs_per_estimator)
         pg = placement_group([{"CPU": n_jobs_per_estimator}] * n_bundles)
         print(f"ray_get_pg: pg: {pg.bundle_specs} n_jobs: {n_jobs}")

@@ -299,6 +299,7 @@ class SklearnTrainable(Trainable):
         if prune_attr:
             ret["dataset_fraction"] = prune_attr
 
+        ret["done"] = True
         print("done")
         #ret["size"] = sys.getsizeof(fitted_estimator)
         return ret
