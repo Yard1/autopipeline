@@ -172,7 +172,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        self.dir = 2 ** (min(4, self.dim))
+        # self.dir = 2 ** (min(4, self.dim))
         # self.dir = (
         # max(self.dim // 4, 2)  # max number of trials without improvement
         # )
@@ -1533,6 +1533,8 @@ class ConditionalBlendSearch(BlendSearch):
                     ):
                         choice = 0
                         self._iters_without_new_best = 0
+                else:
+                    self._iters_without_new_best = 0
             print(
                 f"{trial_id}: choice={choice}, backup={backup}, self._iters_without_new_best={self._iters_without_new_best}"
             )

@@ -267,7 +267,7 @@ class RayTuneTuner(Tuner):
             "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
             "max_failures": 0,
-            "checkpoint_at_end": True,
+            #"checkpoint_at_end": True,
             "trial_dirname_creator": _create_dirname,
         }
         super().__init__(

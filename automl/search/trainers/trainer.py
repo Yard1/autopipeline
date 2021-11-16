@@ -532,15 +532,15 @@ class Trainer:
         for ensemble_name, score in scores.items():
             self._score_ensemble(ensemble_name, score)
 
-        if self.cache and self.current_stacking_level < self.stacking_level:
-            estimator = stack_estimator(
-                DummyClassifier(strategy="constant", constant=1)
-                if self.problem_type.is_classification()
-                else DummyRegressor(strategy="constant", constant=1),
-                main_stacking_ensemble_fitted,
-            )
-            cv = deepcopy(self.cv_)
-            cross_validate(estimator, X, y, cv=cv, verbose=1, groups=groups, n_jobs=1)
+        # if self.cache and self.current_stacking_level < self.stacking_level:
+        #     estimator = stack_estimator(
+        #         DummyClassifier(strategy="constant", constant=1)
+        #         if self.problem_type.is_classification()
+        #         else DummyRegressor(strategy="constant", constant=1),
+        #         main_stacking_ensemble_fitted,
+        #     )
+        #     cv = deepcopy(self.cv_)
+        #     cross_validate(estimator, X, y, cv=cv, verbose=1, groups=groups, n_jobs=1)
 
         return
 
