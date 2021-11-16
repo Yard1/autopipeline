@@ -172,7 +172,7 @@ class PatchedFLOW2(FLOW2):
 
     def _init_search(self):
         super()._init_search()
-        # self.dir = 2 ** (min(4, self.dim))
+        self.dir = 2 ** (min(5, self.dim))
         # self.dir = (
         # max(self.dim // 4, 2)  # max number of trials without improvement
         # )

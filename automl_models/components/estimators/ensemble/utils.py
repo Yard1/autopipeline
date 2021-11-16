@@ -6,6 +6,7 @@ from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
     remove_placement_group,
+    get_current_placement_group
 )
 from copy import deepcopy
 from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
@@ -271,9 +272,9 @@ ray_call_method = ray.remote(call_method)
 
 
 def should_use_ray(parallel: Parallel) -> bool:
-    return parallel.n_jobs not in (1, None) and (
+    return get_current_placement_group() or (parallel.n_jobs not in (1, None) and (
         "ray" in parallel._backend.__class__.__name__.lower()  # or ray.is_initialized()
-    )
+    ))
 
 
 def put_args_if_ray(parallel: Parallel, *args):
@@ -283,8 +284,10 @@ def put_args_if_ray(parallel: Parallel, *args):
 
 
 def get_ray_pg(parallel, n_jobs, n_estimators):
-    pg = None
+    pg = get_current_placement_group()
     if should_use_ray(parallel):
+        if pg:
+            return pg
         n_jobs = min(1, n_jobs) if n_jobs and n_jobs >= 0 else int(ray.cluster_resources()["CPU"])
         max_cpus_per_node = min(node["Resources"].get("CPU", 1) for node in ray.nodes())
         n_jobs_per_estimator = max(1, min(n_jobs // n_estimators, max_cpus_per_node))

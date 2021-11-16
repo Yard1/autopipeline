@@ -84,7 +84,7 @@ class ConditionalOptunaSearch(OptunaSearch):
             multivariate=True,
             group=True,
             constant_liar=True,
-            n_ei_candidates=10000,
+            n_ei_candidates=2048,
             warn_independent_sampling=False,
         )
         assert isinstance(self._sampler, BaseSampler), (

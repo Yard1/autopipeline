@@ -34,7 +34,7 @@ class DynamicMemorizedFunc(MemorizedFunc):
         compress=False,
         verbose=1,
         timestamp=None,
-        min_time_to_cache=1,
+        min_time_to_cache=2,
     ):
         super().__init__(
             func=func,
