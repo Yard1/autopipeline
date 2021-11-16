@@ -92,7 +92,7 @@ class PandasVotingClassifier(_VotingClassifier):
                 X,
                 y,
                 sample_weight,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"])) if pg else 1,
+                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
                 pg=pg,
             )
 
@@ -195,7 +195,7 @@ class PandasVotingRegressor(_VotingRegressor):
                 X,
                 y,
                 sample_weight,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"])) if pg else 1,
+                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
                 pg=pg,
             )
 
