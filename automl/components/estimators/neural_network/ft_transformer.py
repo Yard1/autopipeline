@@ -12,7 +12,6 @@ from ....search.distributions import (
     UniformDistribution,
     FunctionParameter,
 )
-from .utils import get_category_cardinalities
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -30,7 +29,6 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "batch_size": 256,
         "verbose": 0,
         "device": "cpu",
-        "category_cardinalities": FunctionParameter(get_category_cardinalities),
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }
@@ -59,7 +57,6 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "batch_size": 256,
         "verbose": 0,
         "device": "cpu",
-        "category_cardinalities": FunctionParameter(get_category_cardinalities),
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }

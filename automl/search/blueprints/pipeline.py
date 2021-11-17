@@ -70,6 +70,7 @@ def create_pipeline_blueprint(
             validity_condition=_scaler_passthrough_condition
         ),
     }
+    unknown_categories = {"UnknownCategoriesDropper": UnknownCategoriesDropper()}
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     imputers = {
         "CombinedSimpleImputer": CombinedSimpleImputer(),
@@ -137,6 +138,7 @@ def create_pipeline_blueprint(
     }
     components = {
         **passthrough,
+        **unknown_categories,
         **imbalance,
         **imputers,
         **scalers_normalizers,
@@ -154,6 +156,7 @@ def create_pipeline_blueprint(
             "target_pipeline__TransformTarget",
             [components["Passthrough"]] + list(target_transformers.values()),
         ),
+        ("UnknownCategories", list(unknown_categories.values())),
         ("Imputer", list(imputers.values())),
         (
             "FeatureSelector",

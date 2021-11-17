@@ -36,7 +36,7 @@ class PandasSimpleCategoricalImputer(PandasSimpleImputer):
 
     def transform(self, X):
         check_is_fitted(self)
-        X = self._validate_input(X, in_fit=True)
+        X = self._validate_input(X, in_fit=False)
 
         if self.strategy == "constant":
             for col in X.columns:

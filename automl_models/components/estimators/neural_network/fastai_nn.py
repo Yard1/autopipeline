@@ -131,10 +131,11 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
             self.fitted_dataset_hash_ = xxd_hash((X, y, fit_params))
         X_num = X.select_dtypes(exclude="category")
         X_cat = X.select_dtypes(include="category")
-        category_cardinalities = get_category_cardinalities(
+        self.category_cardinalities_ = get_category_cardinalities(
             self.category_cardinalities, X_cat
         )
-        emb_szs = get_emb_sz(category_cardinalities, list(X_cat.columns))
+        print(f"category_cardinalities {self.category_cardinalities_}")
+        emb_szs = get_emb_sz(self.category_cardinalities_, list(X_cat.columns))
         self.set_params(
             module__emb_szs=emb_szs,
             module__n_cont=X_num.shape[1],
@@ -154,6 +155,7 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
             X = X[sorted(X.columns)]
             X_num = X.select_dtypes(exclude="category")
             X_cat = X.select_dtypes(include="category")
+            print(f"self.category_cardinalities_ {self.category_cardinalities_} real {X_cat.nunique().to_list()}")
             return super().predict_proba(
                 {"x_cont": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
             )

@@ -7,15 +7,8 @@ def get_category_cardinalities(
 ) -> list:
     if X_cat is None:
         return []
-    derived_category_cardinalities = X_cat.nunique().to_dict()
     if category_cardinalities:
         category_cardinalities = category_cardinalities.copy()
-        for column, size in derived_category_cardinalities.items():
-            if (
-                column not in category_cardinalities
-                or size > category_cardinalities[column]
-            ):
-                category_cardinalities[column] = size
         columns_set = set(X_cat.columns)
         category_cardinalities = [
             category_cardinalities[k]
@@ -25,7 +18,7 @@ def get_category_cardinalities(
             )
         ]
     else:
-        category_cardinalities = derived_category_cardinalities
+        category_cardinalities = X_cat.nunique().to_list()
     return category_cardinalities
 
 

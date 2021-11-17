@@ -58,8 +58,8 @@ from ...utils.display import IPythonDisplay
 GlobalSearch = ConditionalOptunaSearch
 
 
-def print(*args, **kwargs):
-    pass
+#def print(*args, **kwargs):
+#    pass
 
 
 # TODO: Fix cost_attr in cache
@@ -691,7 +691,7 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_EVERY_N_ITER = 8
+    _FORCE_GS_EVERY_N_ITER = 16
     _MAX_GS_RETRIES = 2
 
     def __init__(
@@ -1275,6 +1275,14 @@ class ConditionalBlendSearch(BlendSearch):
         }
         print(f"best global score={self._metric_target_sign}")
         for estimator, state in self._estimator_states.items():
+            print(f"estimator {estimator} (skipped {estimator not in estimators_in_threads})")
+            print(
+                f"best_score={state.best_score} best_score_old={state.best_score_old}"
+            )
+            print(f"best_cost={state.best_cost} best_cost_old={state.best_cost_old}")
+            print(
+                f"total_time={state.total_time} best_eval_time={state.best_eval_time}"
+            )
             if estimator not in estimators_in_threads:
                 inv.append(0)
                 continue
@@ -1299,14 +1307,6 @@ class ConditionalBlendSearch(BlendSearch):
                     estimated_cost = max(2 * gap / speed, estimated_cost)
             if estimated_cost == 0:
                 estimated_cost = 1e-10
-            print(f"estimator {estimator}")
-            print(
-                f"best_score={state.best_score} best_score_old={state.best_score_old}"
-            )
-            print(f"best_cost={state.best_cost} best_cost_old={state.best_cost_old}")
-            print(
-                f"total_time={state.total_time} best_eval_time={state.best_eval_time}"
-            )
             inv.append(1 / estimated_cost)
         s = sum(inv)
         inv = [i / s for i in inv]
@@ -1322,7 +1322,6 @@ class ConditionalBlendSearch(BlendSearch):
                     return estimator_list[i], prios
         return None, None
 
-    # TODO consider estimator selection as in https://github.com/microsoft/FLAML/blob/3083229e402bf9cddfed009b08c662abcf229d86/flaml/automl.py#L1227
     def _select_thread(self) -> Tuple:
         """thread selector; use can_suggest to check LS availability"""
         # update priority
