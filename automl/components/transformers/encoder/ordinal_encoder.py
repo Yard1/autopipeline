@@ -13,7 +13,7 @@ class BinaryEncoder(Encoder):
     _component_class = PandasOrdinalEncoder
     _default_parameters = {
         "categories": "auto",
-        "handle_unknown": "use_encoded_value",
+        "handle_unknown": "error",
         "dtype": bool,
         "unknown_value": None,
     }
@@ -33,7 +33,7 @@ class OrdinalEncoder(Encoder):
     _component_class = PandasOrdinalEncoder
     _default_parameters = {
         "categories": "auto",
-        "handle_unknown": "use_encoded_value",
+        "handle_unknown": "error",
         "dtype": np.uint16,
         "unknown_value": None,
     }

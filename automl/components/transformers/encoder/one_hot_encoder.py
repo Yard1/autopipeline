@@ -17,7 +17,7 @@ class OneHotEncoder(Encoder):
         "drop": "if_binary",
         "sparse": False,
         "dtype": np.bool,
-        "handle_unknown": "ignore",
+        "handle_unknown": "error",
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY

@@ -1,14 +1,16 @@
+from typing import Dict, TYPE_CHECKING, List
 import pandas as pd
 from sklearn.base import is_classifier
+if TYPE_CHECKING:
+    from ...flow.pipeline import BasePipeline
 
 
 def get_category_cardinalities(
-    category_cardinalities: dict, X_cat: pd.DataFrame
-) -> list:
+    category_cardinalities: Dict[str, int], X_cat: pd.DataFrame
+) -> List[int]:
     if X_cat is None:
         return []
     if category_cardinalities:
-        category_cardinalities = category_cardinalities.copy()
         columns_set = set(X_cat.columns)
         category_cardinalities = [
             category_cardinalities[k]

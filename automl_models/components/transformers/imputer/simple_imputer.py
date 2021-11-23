@@ -28,18 +28,22 @@ class PandasSimpleCategoricalImputer(PandasSimpleImputer):
     def fit(self, X, y=None):
         X = self._validate_input(X, in_fit=True)
         fill_value = self.fill_value or "missing_value"
-        if self.strategy == "constant":
-            self.statistics_ = {col: fill_value for col in X.columns}
-        else:
-            self.statistics_ = X.mode().to_dict("index")[0]
+        self.statistics_ = {
+            col: (
+                fill_value
+                if self.strategy == "constant" and X[col].isnull().any()
+                else X[col].mode()[0]
+            )
+            for col in X.columns
+        }
         return self
 
     def transform(self, X):
         check_is_fitted(self)
         X = self._validate_input(X, in_fit=False)
 
-        if self.strategy == "constant":
-            for col in X.columns:
+        for col in X.columns:
+            if self.statistics_[col] not in X[col].cat.categories:
                 X[col] = X[col].cat.add_categories(self.statistics_[col])
         return X.fillna(self.statistics_)
 

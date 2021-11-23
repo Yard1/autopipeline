@@ -6,7 +6,9 @@ from sklearn.utils.validation import check_is_fitted
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 
 
-class PandasUnknownCategoriesDropper(PandasDataFrameTransformerMixin, TransformerMixin, BaseEstimator):
+class PandasUnknownCategoriesDropper(
+    PandasDataFrameTransformerMixin, TransformerMixin, BaseEstimator
+):
     def __init__(self) -> None:
         super().__init__()
 
@@ -17,23 +19,26 @@ class PandasUnknownCategoriesDropper(PandasDataFrameTransformerMixin, Transforme
         X = self._validate_input(X, in_fit=True)
         self.categories_ = {}
         for col in X.select_dtypes("category"):
-            self.categories_[col] = set(X[col].cat.categories)
+            self.categories_[col] = set(
+                cat for cat in X[col].cat.categories if cat in X[col].unique()
+            )
         return self
 
     def transform(self, X):
         check_is_fitted(self)
         X = self._validate_input(X, in_fit=False)
-        X_copied = False
+        X = X.copy()
         for col in X.select_dtypes("category"):
-            diff = set(X[col].cat.categories) - set(self.categories_[col])
+            X[col] = X[col].cat.remove_unused_categories()
+            diff = set(X[col].cat.categories) - self.categories_[col]
             if diff:
-                if not X_copied:
-                    X = X.copy()
-                    X_copied = True
                 X[col] = X[col].cat.remove_categories(list(diff))
         return X
 
     def fit_transform(self, X, y=None):
+        X = X.copy()
+        for col in X.select_dtypes("category"):
+            X[col] = X[col].cat.remove_unused_categories()
         self.fit(X)
         return X
 

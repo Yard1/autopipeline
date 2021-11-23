@@ -110,7 +110,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             return col.astype(self.int_dtype)
 
         if is_categorical_dtype(col.dtype):
-            return col
+            return self._remove_unused_categories(col)
 
         col_unqiue = col.unique()
         if is_bool_dtype(col.dtype) or (
@@ -145,6 +145,11 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
     def _ordinal_to_int(self, col):
         if is_categorical_dtype(col.dtype) and (col.name in self._ordinal_columns_not_none or col.dtype.ordered):
             return col.cat.codes.replace(-1, None)
+        return col
+
+    def _remove_unused_categories(self, col):
+        if is_categorical_dtype(col.dtype):
+            return col.cat.remove_unused_categories()
         return col
 
     def _convert_dtypes(self, col):

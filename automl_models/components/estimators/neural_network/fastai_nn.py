@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional
 from sklearn.base import clone
 from skorch import NeuralNetClassifier, NeuralNetRegressor, NeuralNetBinaryClassifier
 from skorch.dataset import ValidSplit
@@ -76,7 +76,7 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         batch_size_power=None,
         early_stopping: bool = True,
         random_state=None,
-        category_cardinalities: Optional[dict] = None,
+        category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
@@ -134,7 +134,6 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         self.category_cardinalities_ = get_category_cardinalities(
             self.category_cardinalities, X_cat
         )
-        print(f"category_cardinalities {self.category_cardinalities_}")
         emb_szs = get_emb_sz(self.category_cardinalities_, list(X_cat.columns))
         self.set_params(
             module__emb_szs=emb_szs,
@@ -155,7 +154,6 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
             X = X[sorted(X.columns)]
             X_num = X.select_dtypes(exclude="category")
             X_cat = X.select_dtypes(include="category")
-            print(f"self.category_cardinalities_ {self.category_cardinalities_} real {X_cat.nunique().to_list()}")
             return super().predict_proba(
                 {"x_cont": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
             )
@@ -173,7 +171,7 @@ class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         batch_size_power=None,
         early_stopping: bool = True,
         random_state=None,
-        category_cardinalities: Optional[dict] = None,
+        category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,

@@ -170,12 +170,131 @@ class PatchedFLOW2(FLOW2):
             self.signature_space.append(prune_attr)
         self._tol = tol
 
+    # copied from FLAML==0.8.0
     def _init_search(self):
-        super()._init_search()
+        self._tunable_keys = []
+        self._bounded_keys = []
+        self._ordered_choice_hp = {}
+        self._ordered_cat_hp = {}
+        self._unordered_cat_hp = {}
+        self._cat_hp_cost = {}
+        for key, domain in self.space.items():
+            assert not (
+                isinstance(domain, dict) and "grid_search" in domain
+            ), f"{key}'s domain is grid search, not supported in FLOW^2."
+            if callable(getattr(domain, "get_sampler", None)):
+                self._tunable_keys.append(key)
+                sampler = domain.get_sampler()
+                # the step size lower bound for uniform variables doesn't depend
+                # on the current config
+                if isinstance(sampler, sample.Quantized):
+                    q = sampler.q
+                    sampler = sampler.get_sampler()
+                    if str(sampler) == "Uniform":
+                        self._step_lb = min(
+                            self._step_lb, q / (domain.upper - domain.lower + 1)
+                        )
+                elif isinstance(domain, sample.Integer) and str(sampler) == "Uniform":
+                    self._step_lb = min(
+                        self._step_lb, 1.0 / (domain.upper - domain.lower)
+                    )
+                if isinstance(domain, sample.Categorical):
+                    cat_hp_cost = self.cat_hp_cost
+                    if cat_hp_cost and key in cat_hp_cost:
+                        cost = np.array(cat_hp_cost[key])
+                        ind = np.argsort(cost)
+                        ordered = np.array(domain.categories)[ind]
+                        cost = self._cat_hp_cost[key] = cost[ind]
+                        d = {}
+                        for i, choice in enumerate(ordered):
+                            d[choice] = i
+                        self._ordered_cat_hp[key] = (ordered, d)
+                    elif all(isinstance(x, int) or isinstance(x, float)
+                             for x in domain.categories):
+                        ordered = sorted(domain.categories)
+                        d = {}
+                        for i, choice in enumerate(ordered):
+                            d[choice] = i
+                        self._ordered_choice_hp[key] = (ordered, d)
+                    else:
+                        self._unordered_cat_hp[key] = len(domain.categories)
+                if str(sampler) != "Normal":
+                    self._bounded_keys.append(key)
+        self._space_keys = sorted(self._tunable_keys)
+        if self.prune_attr and self.prune_attr not in self.space and self.max_resource:
+            self.min_resource = self.min_resource or self._min_resource()
+            self._resource = self._round(self.min_resource)
+            self._space_keys.append(self.prune_attr)
+        else:
+            self._resource = None
+        self.incumbent = {}
+        self.incumbent = self.normalize(self.best_config)  # flattened
+        self.best_obj = self.cost_incumbent = None
+        self.dim = len(self._tunable_keys)  # total # tunable dimensions
+        self._direction_tried = None
+        self._num_complete4incumbent = self._cost_complete4incumbent = 0
+        self._num_allowed4incumbent = 2 * self.dim
+        self._proposed_by = {}  # trial_id: int -> incumbent: Dict
+        self.step_ub = np.sqrt(self.dim)
+        self.step = self.STEPSIZE * self.step_ub
+        lb = self.step_lower_bound
+        if lb > self.step:
+            self.step = lb * 2
+        # upper bound
+        if self.step > self.step_ub:
+            self.step = self.step_ub
+        # maximal # consecutive no improvements
+        self.dir = 2 ** (min(9, self.dim))
+        self._configs = {}  # dict from trial_id to (config, stepsize)
+        self._K = 0
+        self._iter_best_config = 1
+        self.trial_count_proposed = self.trial_count_complete = 1
+        self._num_proposedby_incumbent = 0
+        self._reset_times = 0
+        # record intermediate trial cost
+        self._trial_cost = {}
+        self._same = False  # whether the proposed config is the same as best_config
+        self._init_phase = True  # initial phase to increase initial stepsize
+        self._trunc = 0
+        # no truncation by default. when > 0, it means how many
+        # non-zero dimensions to keep in the random unit vector
+
         self.dir = 2 ** (min(5, self.dim))
         # self.dir = (
         # max(self.dim // 4, 2)  # max number of trials without improvement
         # )
+
+    # copied from FLAML==0.8.0
+    @property
+    def step_lower_bound(self) -> float:
+        step_lb = self._step_lb
+        for key in self._tunable_keys:
+            if key not in self.best_config:
+                continue
+            domain = self.space[key]
+            sampler = domain.get_sampler()
+            # the stepsize lower bound for log uniform variables depends on the
+            # current config
+            if isinstance(sampler, sample.Quantized):
+                q = sampler.q
+                sampler_inner = sampler.get_sampler()
+                if str(sampler_inner) == "LogUniform":
+                    step_lb = min(
+                        step_lb,
+                        np.log(1.0 + q / self.best_config[key])
+                        / np.log(domain.upper / domain.lower),
+                    )
+            elif isinstance(domain, sample.Integer) and str(sampler) == "LogUniform":
+                step_lb = min(
+                    step_lb,
+                    np.log(1.0 + 1.0 / self.best_config[key])
+                    / np.log((domain.upper - 1) / domain.lower),
+                )
+        if np.isinf(step_lb):
+            step_lb = self.STEP_LOWER_BOUND
+        else:
+            step_lb *= self.step_ub
+        return step_lb
 
     def config_signature(self, config) -> tuple:
         """return the signature tuple of a config"""
@@ -568,21 +687,6 @@ class SharingSearchThread(SearchThread):
                     print(
                         f"Optuna has {len(self._search_alg._ot_study.trials)} ({len(self._search_alg._ot_study.get_trials(deepcopy=False, states=(TrialState.COMPLETE, TrialState.PRUNED)))} usable) trials in memory"
                     )
-                elif add_to_gs:
-                    print("adding ls result to optuna")
-                    return_val = self._search_alg.add_evaluated_trial(
-                        trial_id,
-                        result,
-                        state=TrialState.COMPLETE
-                        if max_prune_attr_reached
-                        else TrialState.PRUNED,
-                        num_intermediate_values=self.resources.index(resource) + 1,
-                    )
-                    assert return_val
-                    print(
-                        f"Optuna has {len(self._search_alg._ot_study.trials)} ({len(self._search_alg._ot_study.get_trials(deepcopy=False, states=(TrialState.COMPLETE, TrialState.PRUNED)))} usable) trials in memory"
-                    )
-                    # return
             except Exception as e:
                 logger.debug(
                     f"couldn't add trial {result} to optuna.\n{traceback.format_exc()}"
@@ -702,7 +806,6 @@ class ConditionalBlendSearch(BlendSearch):
         points_to_evaluate: Optional[List[Dict]] = None,
         secondary_points_to_evaluate: Optional[List[Dict]] = None,
         low_cost_partial_config: Optional[dict] = None,
-        cat_hp_cost: Optional[dict] = None,
         prune_attr: Optional[str] = None,
         min_resource: Optional[float] = None,
         max_resource: Optional[float] = None,
@@ -789,7 +892,6 @@ class ConditionalBlendSearch(BlendSearch):
             init_config=init_config,
             metric=metric,
             mode=mode,
-            cat_hp_cost=cat_hp_cost,
             space=tune_space,
             prune_attr=prune_attr,
             min_resource=min_resource,
@@ -1638,6 +1740,12 @@ class ConditionalBlendSearch(BlendSearch):
         self._result[config_signature] = {}
         self._suggested_configs[trial_id] = config
         self._trial_proposed_by[trial_id] = proposing_thread
+
+        self._search_thread_pool[0]._search_alg.add_evaluated_trial(
+            trial_id,
+            config,
+            state=TrialState.RUNNING,
+        )
 
         # final_choice = self._trial_proposed_by.get(trial_id, 0)
         # if final_choice and self._reached_max_prune_attr:

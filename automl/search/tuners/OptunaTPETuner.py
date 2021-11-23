@@ -37,6 +37,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def add_dynamic_trial_to_study(study: ot.Study, trial: ot.trial.FixedTrial):
+    # Sync storage once every trial.
+    study._storage.read_trials_from_remote_storage(study._study_id)
+
+    trial_id = study._pop_waiting_trial_id()
+    if trial_id is None:
+        trial_id = study._storage.create_new_trial(
+            study._study_id, template_trial=trial
+        )
+    trial = ot.trial.Trial(study, trial_id)
+
+    return trial
+
+
 class ConditionalOptunaSearch(OptunaSearch):
     def __init__(
         self,
@@ -58,7 +72,9 @@ class ConditionalOptunaSearch(OptunaSearch):
         self._conditional_space = get_conditions(
             space, to_str=True, use_extended=use_extended
         )
-        space, _, _ = get_all_tunable_params(space, to_str=True, use_extended=use_extended)
+        space, _, _ = get_all_tunable_params(
+            space, to_str=True, use_extended=use_extended
+        )
         if remove_const_values:
             const_values = {
                 k
@@ -272,10 +288,11 @@ class ConditionalOptunaSearch(OptunaSearch):
         if not result:
             return False
 
+        is_result = any(k.startswith("config/") for k in result)
         config = {
             removeprefix(k, "config/"): v
             for k, v in result.items()
-            if k.startswith("config/") and v != "passthrough"
+            if (not is_result or k.startswith("config/")) and v != "passthrough"
         }
         distributions = {k: v for k, v in self._space.items() if k in config}
         distributions = ConditionalOptunaSearch.convert_optuna_params_to_distributions(
@@ -291,11 +308,11 @@ class ConditionalOptunaSearch(OptunaSearch):
             intermediate_values={
                 k: result.get(self.metric, None) for k in range(num_intermediate_values)
             },
+            system_attrs={"fixed_params": config}
         )
-        self._ot_trials[trial_id] = trial
 
         len_studies = len(self._ot_study.trials)
-        self._ot_study.add_trial(trial)
+        self._ot_trials[trial_id] = add_dynamic_trial_to_study(self._ot_study, trial)
         assert len_studies < len(self._ot_study.trials)
 
         return True

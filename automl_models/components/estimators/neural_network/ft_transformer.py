@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional
 from sklearn.base import clone
 from skorch import NeuralNetClassifier, NeuralNetRegressor, NeuralNetBinaryClassifier
 from skorch.dataset import ValidSplit
@@ -39,7 +39,7 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         classes=None,
         early_stopping: bool = True,
         random_state=None,
-        category_cardinalities: Optional[dict] = None,
+        category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
@@ -147,7 +147,7 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         train_split=ValidSplit,
         early_stopping: bool = True,
         random_state=None,
-        category_cardinalities: Optional[dict] = None,
+        category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
