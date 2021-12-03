@@ -24,6 +24,7 @@
     SOFTWARE
 """
 import collections
+from copy import deepcopy
 import pandas as pd
 from typing import Dict, Optional, List, Tuple, Callable
 import numpy as np
@@ -43,11 +44,18 @@ from flaml.searcher.flow2 import FLOW2
 
 import logging
 
+from automl.search.distributions.distributions import get_optuna_trial_suggestions
+
 logger = logging.getLogger(__name__)
 
 from ray.tune import sample
 
-from .OptunaTPETuner import ConditionalOptunaSearch, TrialState, RandomSampler
+from .OptunaTPETuner import (
+    ConditionalOptunaSearch,
+    ConditionalOptunaSearchCatBoost,
+    TrialState,
+    RandomSampler,
+)
 from ..distributions import get_tune_distributions, CategoricalDistribution
 from .utils import get_conditions, enforce_conditions_on_config, get_all_tunable_params
 from .tuner import RayTuneTuner
@@ -55,10 +63,10 @@ from ...utils.tune_callbacks import BestPlotCallback, META_KEY
 from ...problems import ProblemType
 from ...utils.display import IPythonDisplay
 
-GlobalSearch = ConditionalOptunaSearch
+GlobalSearch = ConditionalOptunaSearchCatBoost
 
 
-#def print(*args, **kwargs):
+# def print(*args, **kwargs):
 #    pass
 
 
@@ -209,8 +217,10 @@ class PatchedFLOW2(FLOW2):
                         for i, choice in enumerate(ordered):
                             d[choice] = i
                         self._ordered_cat_hp[key] = (ordered, d)
-                    elif all(isinstance(x, int) or isinstance(x, float)
-                             for x in domain.categories):
+                    elif all(
+                        isinstance(x, int) or isinstance(x, float)
+                        for x in domain.categories
+                    ):
                         ordered = sorted(domain.categories)
                         d = {}
                         for i, choice in enumerate(ordered):
@@ -741,6 +751,7 @@ class SharingSearchThread(SearchThread):
             try:
                 config = self._search_alg.suggest(trial_id, **kwargs)
             except:
+                raise
                 logger.warning(
                     "The global search method raises error. "
                     "Ignoring for this iteration.\n"
@@ -1377,7 +1388,9 @@ class ConditionalBlendSearch(BlendSearch):
         }
         print(f"best global score={self._metric_target_sign}")
         for estimator, state in self._estimator_states.items():
-            print(f"estimator {estimator} (skipped {estimator not in estimators_in_threads})")
+            print(
+                f"estimator {estimator} (skipped {estimator not in estimators_in_threads})"
+            )
             print(
                 f"best_score={state.best_score} best_score_old={state.best_score_old}"
             )
@@ -1527,6 +1540,21 @@ class ConditionalBlendSearch(BlendSearch):
 
         return config, prune_attr, 0
 
+    def _get_ei_space(self):
+        step_size = self._ls.STEPSIZE
+        denorm_gs_admissible_min = self._ls.denormalize(
+            {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
+        )
+        denorm_gs_admissible_max = self._ls.denormalize(
+            {k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()}
+        )
+        ei_space = deepcopy(self._search_thread_pool[0]._search_alg._space)
+        for k in denorm_gs_admissible_min:
+            ei_space[k].lower = denorm_gs_admissible_min[k]
+            ei_space[k].upper = denorm_gs_admissible_max[k]
+        print(f"ei_space {ei_space}")
+        return get_optuna_trial_suggestions(ei_space)
+
     def _suggest_from_global_search(
         self,
         trial_id: str,
@@ -1534,7 +1562,12 @@ class ConditionalBlendSearch(BlendSearch):
         retry: bool = True,
         iter: int = 0,
     ):
-        config = self._search_thread_pool[0].suggest(trial_id, reask=not retry)
+        if isinstance(self._search_thread_pool[0]._search_alg, ConditionalOptunaSearchCatBoost):
+            config = self._search_thread_pool[0].suggest(
+                trial_id, reask=not retry, ei_space=self._get_ei_space()
+            )
+        else:
+            config = self._search_thread_pool[0].suggest(trial_id, reask=not retry)
         prune_attr = config.get(self._ls.prune_attr, None)
         skip = self._should_skip(0, trial_id, config)
         estimator = config["Estimator"]
@@ -1931,7 +1964,7 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
-        if self.early_stopping and self.X_.shape[0]*self.X_.shape[1] > 100001:
+        if self.early_stopping and self.X_.shape[0] * self.X_.shape[1] > 100001:
             min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)

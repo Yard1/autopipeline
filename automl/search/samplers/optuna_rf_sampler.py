@@ -1,5 +1,6 @@
 import abc
 import copy
+from datetime import datetime
 from typing import Callable, Optional, Tuple, Type, Any, List, Dict, Sequence, Union
 import io
 import logging
@@ -22,13 +23,20 @@ from optuna.trial import FrozenTrial, Trial
 from optuna.trial import TrialState
 from optuna.samplers import BaseSampler, RandomSampler
 from optuna.samplers._search_space.group_decomposed import _GroupDecomposedSearchSpace
+from optuna._transform import _SearchSpaceTransform
 
-from sklearn.preprocessing import minmax_scale
+from sklearn.preprocessing import minmax_scale, power_transform
 from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
 from category_encoders import GLMMEncoder
 from category_encoders.wrapper import NestedCVWrapper
+from automl_models.components.estimators.tree.gradient_booster import (
+    CatBoostRegressorWithAutoCatFeatures,
+)
 
 from .random_forest import RandomForestRegressorWithStd
+
+EPS = 1e-10
 
 
 @contextmanager
@@ -55,19 +63,63 @@ def all_logging_disabled(highest_level=logging.CRITICAL):
         logging.disable(previous_level)
 
 
+class FastTrial(FrozenTrial):
+    def _validate(self) -> None:
+        return
+
+    def _suggest(self, name: str, distribution: distributions.BaseDistribution) -> Any:
+
+        if name not in self._params:
+            search_space = {name: distribution}
+            trans = _SearchSpaceTransform(search_space)
+            trans_params = self.rng.uniform(trans.bounds[:, 0], trans.bounds[:, 1])
+
+            self._params[name] = trans.untransform(trans_params)[name]
+
+        value = self._params[name]
+        param_value_in_internal_repr = distribution.to_internal_repr(value)
+        if not distribution._contains(param_value_in_internal_repr):
+            raise ValueError(
+                "The value {} of the parameter '{}' is out of "
+                "the range of the distribution {}.".format(value, name, distribution)
+            )
+
+        if name in self._distributions:
+            distributions.check_distribution_compatibility(
+                self._distributions[name], distribution
+            )
+
+        self._distributions[name] = distribution
+
+        return value
+
+
 def _run_trial(
     study: "optuna.Study",
     func: "optuna.study.study.ObjectiveFuncType",
+    rng,
 ) -> Tuple[Dict[str, Any], float]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ExperimentalWarning)
         optuna.storages.fail_stale_trials(study)
 
-    trial = study.ask()
+    trial = FastTrial(
+        number=-1,
+        trial_id=-1,
+        state=TrialState.RUNNING,
+        value=None,
+        values=None,
+        datetime_start=datetime.now(),
+        datetime_complete=None,
+        params={},
+        distributions={},
+        user_attrs={},
+        system_attrs={},
+        intermediate_values={},
+    )
+    trial.rng = rng
 
     value = func(trial)
-
-    study.tell(trial, value)
 
     return trial.params, value
 
@@ -117,11 +169,55 @@ class BaseSamplerModel(object, metaclass=abc.ABCMeta):
 
 
 def ei(par):
-    def _func(best_observation_value, predicted_value, predicted_std):
-        z = (best_observation_value - predicted_value - par) / predicted_std
-        return (best_observation_value - predicted_value - par) * norm.cdf(
-            z
-        ) + predicted_std * norm.pdf(z)
+    def _func(
+        best_observation_value,
+        predicted_value,
+        predicted_std,
+        noise=0,
+        random_state=None,
+    ):
+
+        py, ps2 = predicted_value, predicted_std
+        ps = np.sqrt(ps2)
+        normed = (
+            best_observation_value
+            - EPS
+            - py
+            - (
+                0
+                if not noise
+                else np.sqrt(2.0 * noise)
+                * norm.rvs(size=py.shape, random_state=random_state)
+            )
+        ) / ps
+        phi = norm.pdf(normed)
+        Phi = norm.cdf(normed)
+        EI = ps * (Phi * normed + phi)
+        return EI
+
+    return _func
+
+
+def logei(par):
+    ei_f = ei(par)
+
+    def _func(
+        best_observation_value,
+        predicted_value,
+        predicted_std,
+        noise=0,
+        random_state=None,
+    ):
+        with np.errstate(divide="ignore"):
+            return np.log(
+                ei_f(
+                    best_observation_value,
+                    predicted_value,
+                    predicted_std,
+                    noise=noise,
+                    random_state=random_state,
+                )
+            )
 
     return _func
 
@@ -136,15 +232,17 @@ class RandomForestSamplerModel(BaseSamplerModel):
         best_value: float,
         independent_sampler: Union[BaseSampler, Type[BaseSampler]],
         *,
-        acq_function: Callable[[float, np.ndarray, np.ndarray], np.ndarray] = ei(0),
-        n_estimators: int = 100,
+        acq_function: Callable[[float, np.ndarray, np.ndarray], np.ndarray] = logei(0),
+        n_estimators: int = 10,
         boostrap: bool = True,
-        max_features: float = 5.0 / 6.0,
-        min_samples_split: int = 3,
-        min_samples_leaf: int = 3,
+        max_features: Union[str, float] = "auto",
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
         max_depth: Optional[int] = None,
         random_state: Optional[int] = None,
-        independent_sampler_kwargs: Optional[Dict[str, Any]] = None
+        independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
+        early_stopping_patience: int = 50,
+        early_stopping_delay: int = 10,
     ) -> None:
         self.study = study
         self.search_space = search_space
@@ -160,9 +258,14 @@ class RandomForestSamplerModel(BaseSamplerModel):
 
         self.best_value = best_value
         self.n_ei_candidates = n_ei_candidates
-        self.independent_sampler = independent_sampler(seed=random_state, **independent_sampler_kwargs)
+        self.independent_sampler = independent_sampler(
+            seed=random_state, **independent_sampler_kwargs
+        )
         self.distributions_function = distributions_function
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_delay = early_stopping_delay
 
+        self._rng = np.random.RandomState(self.random_state)
         self._model = RandomForestRegressorWithStd(
             n_estimators=n_estimators,
             bootstrap=boostrap,
@@ -176,6 +279,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
             GLMMEncoder(random_state=random_state, binomial_target=False),
             cv=KFold(5, shuffle=True, random_state=random_state),
         )
+        self._noise = 0
 
         with redirect_stdout(io.StringIO()), redirect_stderr(
             io.StringIO()
@@ -204,6 +308,9 @@ class RandomForestSamplerModel(BaseSamplerModel):
             search_space_bounds[name] = (low, high)
         return search_space_bounds
 
+    def _get_model_preds(self, xs: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+        return self._model.predict(xs)
+
     def clone(self, **params) -> "RandomForestSamplerModel":
         return RandomForestSamplerModel(
             {**{k: v for k, v in self.__dict__ if not k.startswith("_")}, **params}
@@ -212,25 +319,48 @@ class RandomForestSamplerModel(BaseSamplerModel):
     # def ask(
     #     self,
     #     trial: FrozenTrial,
-    #     complete_trials: List[FrozenTrial],
     # ) -> Dict[str, Any]:
-    #     xs, ys = self._preprocess_trials(
-    #         [(trial.params, trial.value) for trial in complete_trials], fit=False
-    #     )
-    #     x_pred, x_var = self._model.predict(xs)
-    #     acq = self.acq_function(self.best_value, x_pred, x_var)
-    #     trials = [optuna.create_trial(value=acq[i], params=complete_trials[i].params, distributions=complete_trials[i].distributions) for i in range(len(acq))]
-    #     self._independent_study.add_trials(trials)
+    #     # xs, _ = self._preprocess_trials(
+    #     #     [(trial.params, trial.value) for trial in self._complete_trials], fit=False
+    #     # )
+    #     # x_pred, x_var = self._get_model_preds(xs)
+    #     # acq = self.acq_function(self.best_value, x_pred, x_var)
+    #     # trials = [
+    #     #     optuna.create_trial(
+    #     #         value=acq[i],
+    #     #         params=self._complete_trials[i].params,
+    #     #         distributions=self._complete_trials[i].distributions,
+    #     #     )
+    #     #     for i in range(len(acq))
+    #     # ]
+    #     # self._independent_study.add_trials(trials)
 
     #     def opt_func(trial: Trial):
     #         self.distributions_function(trial)
     #         xs, _ = self._preprocess_trials([(trial.params, 0)], fit=False)
-    #         x_pred, x_var = self._model.predict(xs)
-    #         return self.acq_function(self.best_value, x_pred, x_var)[0]
+    #         x_pred, x_var = self._get_model_preds(xs)
+    #         return self.acq_function(
+    #             self.best_value,
+    #             x_pred,
+    #             x_var,
+    #             noise=self._noise,
+    #             random_state=self._rng.randint(0, 2 ** 16),
+    #         )[0]
 
+    #     last_best = None
+    #     counter = 0
+    #     early_stopping_delay = self.early_stopping_delay
     #     for i in range(self.n_ei_candidates):
-    #         print(i, self._independent_study.best_value)
     #         _run_trial(self._independent_study, opt_func)
+    #         if not last_best or last_best < self._independent_study.best_value:
+    #             last_best = self._independent_study.best_value
+    #             counter = 0
+    #         elif early_stopping_delay <= 0:
+    #             counter += 1
+    #         else:
+    #             early_stopping_delay -= 1
+    #         if counter >= self.early_stopping_patience:
+    #             break
 
     #     print(self._independent_study.best_value)
     #     return self._independent_study.best_params
@@ -244,18 +374,22 @@ class RandomForestSamplerModel(BaseSamplerModel):
             return 1
 
         trials = [
-            _run_trial(self._independent_study, opt_func)
+            _run_trial(self._independent_study, opt_func, self._rng)
             for _ in range(self.n_ei_candidates)
         ]
         xs, _ = self._preprocess_trials(trials, fit=False)
-        x_pred, x_var = self._model.predict(xs)
-        acq_values = self.acq_function(self.best_value, x_pred, x_var)
+        x_pred, x_var = self._get_model_preds(xs)
+        acq_values = self.acq_function(
+            self.best_value,
+            x_pred,
+            x_var,
+            noise=self._noise,
+            random_state=self.random_state,
+        )
         best_acq = np.argmax(acq_values)
         if not acq_values[best_acq]:
-            best_acq = np.argmax(x_pred)
-        print(np.max(x_pred))
-        print(np.max(acq_values))
-        return trials[best_acq]
+            best_acq = np.argmin(x_pred)
+        return trials[best_acq][0]
 
     # def ask(
     #     self,
@@ -282,10 +416,12 @@ class RandomForestSamplerModel(BaseSamplerModel):
         self,
         complete_trials: List[FrozenTrial],
     ):
+        self._complete_trials = complete_trials
         xs, ys = self._preprocess_trials(
             [(trial.params, trial.value) for trial in complete_trials], fit=True
         )
         self._model.fit(xs, ys)
+        self._noise = mean_squared_error(ys, self._model.predict(xs)[0])
 
     def _preprocess_trials(self, trials: List[Tuple[Dict[str, Any], float]], fit: bool):
         x_nums = []
@@ -301,15 +437,31 @@ class RandomForestSamplerModel(BaseSamplerModel):
         x_nums = pd.DataFrame(x_nums).astype(float)
         x_cats = pd.DataFrame(x_cats).astype("category")
         ys = pd.Series(ys).astype(float)
+        if fit:
+            ys = self._transform_y(ys)
 
         x_nums, x_cats = self._impute(x_nums, x_cats, fit)
         x_cats = self._encode(x_cats, ys, fit)
         return pd.concat((x_nums, x_cats), axis=1), ys
 
-    def _scale_col(self, col: pd.Series):
+    def _scale_col(self, col: pd.Series) -> pd.Series:
         low, high = self.search_space_bounds[col.name]
         scale = 1 / (high - low)
         return scale * col - low * scale
+
+    def _transform_y(self, ys: pd.Series) -> pd.Series:
+        numpy_ys = ys.values.reshape(-1, 1)
+        ys_std = ys.std()
+        if ys.min() <= 0:
+            ys_n = pd.Series(
+                power_transform(numpy_ys / ys_std, method="yeo-johnson").flatten()
+            )
+        else:
+            ys_n = pd.Series(
+                power_transform(numpy_ys / ys_std, method="box-cox").flatten()
+            )
+        self.best_value = ys_n.min()
+        return ys_n
 
     def _impute(
         self, x_nums: pd.DataFrame, x_cats: pd.DataFrame, fit: bool
@@ -318,7 +470,8 @@ class RandomForestSamplerModel(BaseSamplerModel):
 
             def handle_cat_column(col: pd.Series):
                 return (
-                    col.cat.add_categories("_missing_value")
+                    col.cat.rename_categories(lambda x: str(x))
+                    .cat.add_categories("_missing_value")
                     .fillna("_missing_value")
                     .cat.remove_unused_categories()
                 )
@@ -337,11 +490,103 @@ class RandomForestSamplerModel(BaseSamplerModel):
         )
 
 
-class RandomForestSampler(BaseSampler):
+class CatBoostSamplerModel(RandomForestSamplerModel):
     def __init__(
         self,
+        study: Study,
         distributions_function: Callable[[Trial], None],
+        search_space: Dict[str, distributions.BaseDistribution],
+        n_ei_candidates: int,
+        best_value: float,
+        independent_sampler: Union[BaseSampler, Type[BaseSampler]],
         *,
+        acq_function: Callable[[float, np.ndarray, np.ndarray], np.ndarray] = logei(0),
+        n_estimators: int = 100,
+        boostrap: bool = True,
+        max_features: Union[str, float] = "auto",
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
+        max_depth: Optional[int] = None,
+        random_state: Optional[int] = None,
+        independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
+        early_stopping_patience: int = 50,
+        early_stopping_delay: int = 128,
+    ) -> None:
+        self.study = study
+        self.search_space = search_space
+        self.search_space_bounds = self._get_search_space_bounds()
+        self.acq_function = acq_function
+        self.random_state = random_state
+        self.n_estimators = n_estimators
+        self.bootstrap = boostrap
+        self.max_features = max_features
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.max_depth = max_depth
+
+        self.best_value = best_value
+        self.n_ei_candidates = n_ei_candidates
+        self.independent_sampler = independent_sampler(
+            seed=random_state, **independent_sampler_kwargs
+        )
+        self.distributions_function = distributions_function
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_delay = early_stopping_delay
+        self.num_ensembles = 10
+
+        self._rng = np.random.RandomState(self.random_state)
+        self._model = CatBoostRegressorWithAutoCatFeatures(
+            iterations=self.n_estimators,
+            learning_rate=0.2,
+            depth=10,
+            loss_function="RMSEWithUncertainty",
+            posterior_sampling=True,
+            verbose=False,
+            random_seed=random_state,
+        )
+        self._noise = 0
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(
+            io.StringIO()
+        ), all_logging_disabled():
+            self._independent_study = optuna.create_study(
+                storage=optuna.storages.InMemoryStorage(),
+                sampler=self.independent_sampler,
+                direction="maximize",
+            )
+
+    def tell(
+        self,
+        complete_trials: List[FrozenTrial],
+    ):
+        self._complete_trials = complete_trials
+        xs, ys = self._preprocess_trials(
+            [(trial.params, trial.value) for trial in complete_trials], fit=True
+        )
+        self._model.fit(xs, ys)
+        self._noise = mean_squared_error(ys, self._model.predict(xs)[:, 0])
+
+    def _get_model_preds(self, xs: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+        preds = self._model.virtual_ensembles_predict(
+            data=xs,
+            prediction_type="TotalUncertainty",
+            virtual_ensembles_count=self.num_ensembles,
+        )
+        x_pred = preds[:, 0]
+        x_var = preds[:, 1] + preds[:, 2]
+        return x_pred, x_var
+
+    def _encode(self, x_cats: pd.DataFrame, ys: pd.Series, fit: bool) -> pd.DataFrame:
+        return x_cats
+
+
+class RandomForestSampler(BaseSampler):
+    _model = RandomForestSamplerModel
+
+    def __init__(
+        self,
+        *,
+        distributions_function: Optional[Callable[[Trial], None]] = None,
         n_startup_trials: int = 10,
         n_ei_candidates: int = 10,
         seed: Optional[int] = None,
@@ -349,19 +594,20 @@ class RandomForestSampler(BaseSampler):
         random_fraction: float = 0.3,
         constant_liar: bool = False,
         warn_independent_sampling: bool = True,
-        independent_sampler_kwargs: Optional[Dict[str, Any]] = None
+        independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         assert random_fraction < 1 and random_fraction >= 0
-        assert n_startup_trials >= 5
+        # assert n_startup_trials >= 5
         self._distributions_function = distributions_function
-        self._model = RandomForestSamplerModel
         self._n_startup_trials = n_startup_trials
         self._n_ei_candidates = n_ei_candidates
         self._seed = seed
         self._rng = np.random.RandomState(seed)
         self._independent_sampler_kwargs = independent_sampler_kwargs or {}
         self._independent_sampler_kwargs.pop("seed", None)
-        self._independent_sampler = independent_sampler(seed=seed, **self._independent_sampler_kwargs)
+        self._independent_sampler = independent_sampler(
+            seed=seed, **self._independent_sampler_kwargs
+        )
         self._random_fraction = random_fraction
         self._constant_liar = constant_liar
         self._warn_independent_sampling = warn_independent_sampling
@@ -380,10 +626,11 @@ class RandomForestSampler(BaseSampler):
         n_actually_completed_trials = 0
         for t in study.get_trials(deepcopy=False):
             if t.state == TrialState.COMPLETE:
+                copied_t = t
                 if study.direction == StudyDirection.MAXIMIZE:
                     copied_t = copy.deepcopy(t)
                     copied_t.value = -copied_t.value
-                complete_trials.append(t)
+                complete_trials.append(copied_t)
                 n_actually_completed_trials += 1
             elif (
                 t.state == TrialState.PRUNED
@@ -438,6 +685,7 @@ class RandomForestSampler(BaseSampler):
         if self._random_fraction and self._rng.uniform() < self._random_fraction:
             return {}
 
+        assert self._distributions_function
         model = self._model(
             study=study,
             distributions_function=self._distributions_function,
@@ -446,7 +694,7 @@ class RandomForestSampler(BaseSampler):
             best_value=self._best_trial_value,
             independent_sampler=type(self._independent_sampler),
             random_state=self._rng.randint(0, 2 ** 16),
-            independent_sampler_kwargs=self._independent_sampler_kwargs
+            independent_sampler_kwargs=self._independent_sampler_kwargs,
         )
         model.tell(complete_trials)
         self._last_model = model._model
@@ -505,3 +753,7 @@ class RandomForestSampler(BaseSampler):
             self._best_trial_value = trial_value
         if trial_value > self._worst_trial_value:
             self._worst_trial_value = trial_value
+
+
+class CatBoostSampler(RandomForestSampler):
+    _model = CatBoostSamplerModel
