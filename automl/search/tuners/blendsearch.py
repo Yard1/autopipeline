@@ -63,6 +63,7 @@ from ...utils.tune_callbacks import BestPlotCallback, META_KEY
 from ...problems import ProblemType
 from ...utils.display import IPythonDisplay
 
+EPS = 1e-10
 GlobalSearch = ConditionalOptunaSearchCatBoost
 
 
@@ -751,7 +752,7 @@ class SharingSearchThread(SearchThread):
             try:
                 config = self._search_alg.suggest(trial_id, **kwargs)
             except:
-                raise
+                traceback.print_exc()
                 logger.warning(
                     "The global search method raises error. "
                     "Ignoring for this iteration.\n"
@@ -1495,6 +1496,12 @@ class ConditionalBlendSearch(BlendSearch):
             if not local_threads_by_priority_estimator_only:
                 local_threads_by_priority_estimator_only = local_threads_by_priority
 
+        local_threads_by_priority_estimator_only = sorted(
+            local_threads_by_priority_estimator_only,
+            reverse=True,
+            key=lambda x: x[2],
+        )
+
         local_threads_by_priority_with_estimator = sorted(
             [
                 (
@@ -1506,9 +1513,9 @@ class ConditionalBlendSearch(BlendSearch):
                 for thread_id, thread, thread_priority in local_threads_by_priority
             ],
             reverse=True,
-            key=lambda x: x[3],
+            key=lambda x: x[2],
         )
-        print(f"global search priority: {priority1}")
+        print(f"global search priority: {priority1}, ls {local_threads_by_priority_with_estimator[0][2]}")
         # print(local_threads_by_priority)
         print(local_threads_by_priority_with_estimator)
         print(local_threads_by_priority_estimator_only)
@@ -1543,16 +1550,15 @@ class ConditionalBlendSearch(BlendSearch):
     def _get_ei_space(self):
         step_size = self._ls.STEPSIZE
         denorm_gs_admissible_min = self._ls.denormalize(
-            {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
+            {k: max(0, v - step_size + EPS) for k, v in self._gs_admissible_min.items()}
         )
         denorm_gs_admissible_max = self._ls.denormalize(
-            {k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()}
+            {k: min(1, v + step_size - EPS) for k, v in self._gs_admissible_max.items()}
         )
         ei_space = deepcopy(self._search_thread_pool[0]._search_alg._space)
         for k in denorm_gs_admissible_min:
             ei_space[k].lower = denorm_gs_admissible_min[k]
             ei_space[k].upper = denorm_gs_admissible_max[k]
-        print(f"ei_space {ei_space}")
         return get_optuna_trial_suggestions(ei_space)
 
     def _suggest_from_global_search(

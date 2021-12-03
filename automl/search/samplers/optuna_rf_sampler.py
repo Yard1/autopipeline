@@ -95,14 +95,9 @@ class FastTrial(FrozenTrial):
 
 
 def _run_trial(
-    study: "optuna.Study",
     func: "optuna.study.study.ObjectiveFuncType",
     rng,
 ) -> Tuple[Dict[str, Any], float]:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ExperimentalWarning)
-        optuna.storages.fail_stale_trials(study)
-
     trial = FastTrial(
         number=-1,
         trial_id=-1,
@@ -226,7 +221,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
     def __init__(
         self,
         study: Study,
-        distributions_function: Callable[[Trial], None],
+        ei_objective: Callable[[Trial], None],
         search_space: Dict[str, distributions.BaseDistribution],
         n_ei_candidates: int,
         best_value: float,
@@ -261,7 +256,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
         self.independent_sampler = independent_sampler(
             seed=random_state, **independent_sampler_kwargs
         )
-        self.distributions_function = distributions_function
+        self.ei_objective = ei_objective
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_delay = early_stopping_delay
 
@@ -280,15 +275,6 @@ class RandomForestSamplerModel(BaseSamplerModel):
             cv=KFold(5, shuffle=True, random_state=random_state),
         )
         self._noise = 0
-
-        with redirect_stdout(io.StringIO()), redirect_stderr(
-            io.StringIO()
-        ), all_logging_disabled():
-            self._independent_study = optuna.create_study(
-                storage=optuna.storages.InMemoryStorage(),
-                sampler=self.independent_sampler,
-                direction="maximize",
-            )
 
     def _get_search_space_bounds(self) -> Dict[str, Tuple[float, float]]:
         search_space_bounds = {}
@@ -336,7 +322,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
     #     # self._independent_study.add_trials(trials)
 
     #     def opt_func(trial: Trial):
-    #         self.distributions_function(trial)
+    #         self.ei_objective(trial)
     #         xs, _ = self._preprocess_trials([(trial.params, 0)], fit=False)
     #         x_pred, x_var = self._get_model_preds(xs)
     #         return self.acq_function(
@@ -370,11 +356,11 @@ class RandomForestSamplerModel(BaseSamplerModel):
         trial: FrozenTrial,
     ) -> Dict[str, Any]:
         def opt_func(trial: Trial):
-            self.distributions_function(trial)
+            self.ei_objective(trial)
             return 1
 
         trials = [
-            _run_trial(self._independent_study, opt_func, self._rng)
+            _run_trial(opt_func, self._rng)
             for _ in range(self.n_ei_candidates)
         ]
         xs, _ = self._preprocess_trials(trials, fit=False)
@@ -396,7 +382,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
     #     trial: FrozenTrial,
     # ) -> Dict[str, Any]:
     #     def opt_func(trial: Trial):
-    #         self.distributions_function(trial)
+    #         self.ei_objective(trial)
     #         return 1
 
     #     with redirect_stdout(io.StringIO()), redirect_stderr(
@@ -494,7 +480,7 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
     def __init__(
         self,
         study: Study,
-        distributions_function: Callable[[Trial], None],
+        ei_objective: Callable[[Trial], None],
         search_space: Dict[str, distributions.BaseDistribution],
         n_ei_candidates: int,
         best_value: float,
@@ -529,7 +515,7 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
         self.independent_sampler = independent_sampler(
             seed=random_state, **independent_sampler_kwargs
         )
-        self.distributions_function = distributions_function
+        self.ei_objective = ei_objective
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_delay = early_stopping_delay
         self.num_ensembles = 10
@@ -545,15 +531,6 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
             random_seed=random_state,
         )
         self._noise = 0
-
-        with redirect_stdout(io.StringIO()), redirect_stderr(
-            io.StringIO()
-        ), all_logging_disabled():
-            self._independent_study = optuna.create_study(
-                storage=optuna.storages.InMemoryStorage(),
-                sampler=self.independent_sampler,
-                direction="maximize",
-            )
 
     def tell(
         self,
@@ -586,7 +563,7 @@ class RandomForestSampler(BaseSampler):
     def __init__(
         self,
         *,
-        distributions_function: Optional[Callable[[Trial], None]] = None,
+        ei_objective: Optional[Callable[[Trial], None]] = None,
         n_startup_trials: int = 10,
         n_ei_candidates: int = 10,
         seed: Optional[int] = None,
@@ -598,7 +575,7 @@ class RandomForestSampler(BaseSampler):
     ) -> None:
         assert random_fraction < 1 and random_fraction >= 0
         # assert n_startup_trials >= 5
-        self._distributions_function = distributions_function
+        self._ei_objective = ei_objective
         self._n_startup_trials = n_startup_trials
         self._n_ei_candidates = n_ei_candidates
         self._seed = seed
@@ -685,10 +662,10 @@ class RandomForestSampler(BaseSampler):
         if self._random_fraction and self._rng.uniform() < self._random_fraction:
             return {}
 
-        assert self._distributions_function
+        assert self._ei_objective
         model = self._model(
             study=study,
-            distributions_function=self._distributions_function,
+            ei_objective=self._ei_objective,
             search_space=search_space,
             n_ei_candidates=self._n_ei_candidates,
             best_value=self._best_trial_value,

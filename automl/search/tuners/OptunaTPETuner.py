@@ -40,7 +40,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-warnings.simplefilter("ignore", (ExperimentalWarning, FutureWarning))
+warnings.simplefilter("ignore", (UserWarning, ExperimentalWarning, FutureWarning))
+
 
 class NoRelativeParamsTrial(ot.trial.Trial):
     def _init_relative_params(self) -> None:
@@ -406,7 +407,7 @@ class ConditionalOptunaSearchCatBoost(ConditionalOptunaSearch):
         def ei_objective(trial):
             self._get_params(trial, ei_space if ei_space else self._ot_space)
 
-        self._ot_study.sampler._distributions_function = ei_objective
+        self._ot_study.sampler._ei_objective = ei_objective
 
         if trial_id not in self._ot_trials:
             self._ot_trials[trial_id] = self._ot_study.ask()
@@ -415,8 +416,8 @@ class ConditionalOptunaSearchCatBoost(ConditionalOptunaSearch):
             self._ot_trials[trial_id] = self._ot_study.ask()
         ot_trial = self._ot_trials[trial_id]
         params = self._get_params(ot_trial, self._ot_space, params=params)
-        print(params)
         logger.debug(params)
+        self._ot_study.sampler._ei_objective = None
         return unflatten_dict(params)
 
 
