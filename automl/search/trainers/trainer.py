@@ -273,6 +273,7 @@ class Trainer:
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
         categorical_columns = list(X.select_dtypes(include="category").columns)
         numeric_columns = list(X.select_dtypes(exclude="category").columns)
+        # TODO pass stacked X
         pipeline_blueprint = create_pipeline_blueprint(
             problem_type=self.problem_type,
             categorical_columns=categorical_columns,

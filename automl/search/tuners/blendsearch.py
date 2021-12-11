@@ -45,6 +45,7 @@ from flaml.searcher.flow2 import FLOW2
 import logging
 
 from automl.search.distributions.distributions import get_optuna_trial_suggestions
+from automl.search.utils import numpy_to_python
 
 logger = logging.getLogger(__name__)
 
@@ -870,7 +871,7 @@ class ConditionalBlendSearch(BlendSearch):
                 metric=metric,
                 mode=mode,
                 seed=seed,
-                n_startup_trials=1,
+                n_startup_trials=10,
                 use_extended=use_extended,
                 remove_const_values=True,
             )
@@ -1093,16 +1094,6 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
-        self._init_finished = (
-            not self._points_to_evaluate_trials
-            or sum(
-                1
-                for i in self._points_to_evaluate_trials.values()
-                if i[1][f"config/{META_KEY}/init"]
-            )
-            >= self._points_to_evaluate_len
-        )
-
         if not self._init_finished:
             self._points_to_evaluate_trials[trial_id] = (
                 trial_id,
@@ -1110,7 +1101,16 @@ class ConditionalBlendSearch(BlendSearch):
                 error,
                 condition_kwargs,
             )
-        else:
+            self._init_finished = (
+                sum(
+                    1
+                    for i in self._points_to_evaluate_trials.values()
+                    if i[1][f"config/{META_KEY}/init"]
+                )
+                >= self._points_to_evaluate_len
+            )
+
+        if self._init_finished:
             # TODO if we are caching and without early stopping, consider only estimator fit time for priority
             # TODO when multiple pipelines have the same estimator, leave only the best (delete the threads)
             if self._points_to_evaluate_trials:
@@ -1165,7 +1165,6 @@ class ConditionalBlendSearch(BlendSearch):
                     ]
                 ]
                 self._points_to_evaluate = self._secondary_points_to_evaluate
-                self._init_finished = True
                 self._iters_without_new_best = 0
                 # self._last_global_search = np.inf
                 # _, _, local_threads_by_priority = self._select_thread()
@@ -1204,11 +1203,7 @@ class ConditionalBlendSearch(BlendSearch):
             was_updated = thread.on_trial_complete(
                 trial_id, result, error, thread_created=create_condition
             )
-            treat_as_thread_created = (
-                False
-                if self._points_to_evaluate and not self._init_finished
-                else create_condition
-            )
+            treat_as_thread_created = self._init_finished and create_condition
             if was_updated:
                 estimator_state = self._estimator_states[
                     self._suggested_configs[trial_id]["Estimator"]
@@ -1515,7 +1510,9 @@ class ConditionalBlendSearch(BlendSearch):
             reverse=True,
             key=lambda x: x[2],
         )
-        print(f"global search priority: {priority1}, ls {local_threads_by_priority_with_estimator[0][2]}")
+        print(
+            f"global search priority: {priority1}, ls {local_threads_by_priority_with_estimator[0][2]}"
+        )
         # print(local_threads_by_priority)
         print(local_threads_by_priority_with_estimator)
         print(local_threads_by_priority_estimator_only)
@@ -1568,7 +1565,9 @@ class ConditionalBlendSearch(BlendSearch):
         retry: bool = True,
         iter: int = 0,
     ):
-        if isinstance(self._search_thread_pool[0]._search_alg, ConditionalOptunaSearchCatBoost):
+        if isinstance(
+            self._search_thread_pool[0]._search_alg, ConditionalOptunaSearchCatBoost
+        ):
             config = self._search_thread_pool[0].suggest(
                 trial_id, reask=not retry, ei_space=self._get_ei_space()
             )
@@ -1657,9 +1656,21 @@ class ConditionalBlendSearch(BlendSearch):
         prune_attr = None
         self._use_rs = False
         init = False
-        if not self._points_to_evaluate:
-            if not self._init_used:
-                choice, backup = 0
+        if self._points_to_evaluate:
+            init = True
+            (
+                config,
+                prune_attr,
+                proposing_thread,
+            ) = self._suggest_from_points_to_evaluate(trial_id)
+
+            config = self._clean_and_enforce_config(config, prune_attr)
+            if not config:
+                return None
+        else:
+            if not self._init_finished:
+                choice = 0
+                backup = 0
             else:
                 choice, backup, local_threads_by_priority = self._select_thread()
                 self._iters_without_new_best += 1
@@ -1756,17 +1767,6 @@ class ConditionalBlendSearch(BlendSearch):
                 print("")
                 self._gs_admissible_min.update(self._ls_bound_min)
                 self._gs_admissible_max.update(self._ls_bound_max)
-        else:  # use init config
-            init = True
-            (
-                config,
-                prune_attr,
-                proposing_thread,
-            ) = self._suggest_from_points_to_evaluate(trial_id)
-
-            config = self._clean_and_enforce_config(config, prune_attr)
-            if not config:
-                return None
 
         (
             result,
@@ -1833,6 +1833,7 @@ class ConditionalBlendSearch(BlendSearch):
             return None
         if prune_attr:
             clean_config[self._ls.prune_attr] = prune_attr
+        clean_config = {k: numpy_to_python(v) for k, v in clean_config.items()}
         return clean_config
 
     def _has_config_been_already_tried(self, config) -> bool:
@@ -1971,11 +1972,11 @@ class BlendSearchTuner(RayTuneTuner):
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
         if self.early_stopping and self.X_.shape[0] * self.X_.shape[1] > 100001:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 20
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 200
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 500 / self.X_.shape[0])
+            min_dist = max(min_dist, 5000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)

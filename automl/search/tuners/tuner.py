@@ -6,6 +6,7 @@ import pandas as pd
 import math
 import gc
 from abc import ABC
+from collections import defaultdict
 
 import ray
 import ray.exceptions
@@ -39,8 +40,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def _create_dirname(trial: Trial) -> str:
     return f"{str(trial)}_{date_str()}"
+
 
 class Tuner(ABC):
     def __init__(
@@ -267,7 +270,7 @@ class RayTuneTuner(Tuner):
             "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
             "max_failures": 0,
-            #"checkpoint_at_end": True,
+            # "checkpoint_at_end": True,
             "trial_dirname_creator": _create_dirname,
         }
         super().__init__(
@@ -303,9 +306,28 @@ class RayTuneTuner(Tuner):
             logger.info(f"Cache dir set as '{self._cache}'")
 
     def _shuffle_default_grid(self):
-        # default python hash is different on every run
-        self.default_grid_.sort(key=lambda x: xxd_hash(tuple(k for k in x)))
-        np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
+        grid_by_rarity = defaultdict(list)
+        rng = np.random.default_rng
+        for item in self.default_grid_:
+            grid_by_rarity[
+                (
+                    max(
+                        v._component_level
+                        for v in item.values()
+                        if isinstance(v, Component)
+                    ),
+                    item["Estimator"]._component_level,
+                )
+            ].append(item)
+        rarities = list(grid_by_rarity.keys())
+        rarities.sort()
+        new_default_grid = []
+        for rarity in rarities:
+            # default python hash is different on every run
+            grid_by_rarity[rarity].sort(key=lambda x: xxd_hash(tuple(k for k in x)))
+            rng(seed=self.random_state).shuffle(grid_by_rarity[rarity])
+            new_default_grid.extend(grid_by_rarity[rarity])
+        self.default_grid_ = new_default_grid
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
@@ -369,7 +391,7 @@ class RayTuneTuner(Tuner):
         n_jobs_per_fold = int(pow(2, int(math.log(n_jobs_per_fold, 2))))
         bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
         tune_kwargs["resources_per_trial"] = PlacementGroupFactory(
-            [{"CPU": 0.001}] + [{"CPU": n_jobs_per_fold}] * bundles
+            [{}] + [{"CPU": n_jobs_per_fold}] * bundles
         )
 
         params = {

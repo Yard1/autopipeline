@@ -12,35 +12,32 @@ class PandasUnknownCategoriesDropper(
     def __init__(self) -> None:
         super().__init__()
 
-    def _validate_input(self, X, in_fit):
+    def _validate_input(self, X: pd.DataFrame, in_fit):
         return X
 
-    def fit(self, X, y=None):
-        X = self._validate_input(X, in_fit=True)
-        self.categories_ = {}
-        for col in X.select_dtypes("category"):
-            self.categories_[col] = set(
-                cat for cat in X[col].cat.categories if cat in X[col].unique()
-            )
+    def fit(self, X: pd.DataFrame, y=None):
+        self.fit_transform(X)
         return self
 
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame):
         check_is_fitted(self)
         X = self._validate_input(X, in_fit=False)
         X = X.copy()
         for col in X.select_dtypes("category"):
-            X[col] = X[col].cat.remove_unused_categories()
-            diff = set(X[col].cat.categories) - self.categories_[col]
+            diff = set(X[col].cat.categories) - set(self.categories_[col])
             if diff:
                 X[col] = X[col].cat.remove_categories(list(diff))
+            X[col] = X[col].cat.reorder_categories(self.categories_[col])
         return X
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X: pd.DataFrame, y=None):
+        X = self._validate_input(X, in_fit=True)
         X = X.copy()
+        self.categories_ = {}
         for col in X.select_dtypes("category"):
             X[col] = X[col].cat.remove_unused_categories()
-        self.fit(X)
+            self.categories_[col] = X[col].cat.categories
         return X
 
-    def get_dtypes(self, Xt, X, y=None):
+    def get_dtypes(self, Xt: pd.DataFrame, X, y=None):
         return Xt.dtypes.to_dict()

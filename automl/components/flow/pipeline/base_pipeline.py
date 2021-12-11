@@ -222,7 +222,7 @@ class TopPipeline(Pipeline):
                 converted_configurations.append(configuration)
         self.preset_configurations = converted_configurations
 
-    def _convert_duplicates_in_steps_to_extra_configs(self):
+    def convert_duplicates_in_steps_to_extra_configs(self):
         self.extra_configs = defaultdict(dict)
         for i, name_step_pair in enumerate(self.parameters[self.components_name]):
             name, step = name_step_pair
@@ -251,4 +251,3 @@ class TopPipeline(Pipeline):
         self.preset_configurations = preset_configurations or []
         assert "steps" in self.parameters
         assert "Estimator" == self.parameters["steps"][-1][0]
-        self._convert_duplicates_in_steps_to_extra_configs()

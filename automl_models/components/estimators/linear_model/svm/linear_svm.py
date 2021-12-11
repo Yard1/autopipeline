@@ -35,7 +35,7 @@ class LinearSVCCombinedPenaltyLossDynamicDual(_LinearSVC):
             self.dual = True
         else:
             self.dual = False
-        super().fit(X, y, sample_weight=sample_weight)
+        return super().fit(X, y, sample_weight=sample_weight)
 
     @property
     def penalty_loss(self):
@@ -111,4 +111,4 @@ class LinearSVRDynamicDual(_LinearSVR):
             self.dual = True
         else:
             self.dual = False
-        super().fit(X, y, sample_weight=sample_weight)
+        return super().fit(X, y, sample_weight=sample_weight)

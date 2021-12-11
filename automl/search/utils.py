@@ -237,3 +237,12 @@ def stack_estimator(estimator, stack):
         stack.set_deep_final_estimator(estimator)
         estimator = stack
     return estimator
+
+
+def numpy_to_python(val):
+    if isinstance(val, np.generic):
+        try:
+            return val.item()
+        except AttributeError:
+            return val
+    return val

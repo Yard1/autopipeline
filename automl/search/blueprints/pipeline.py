@@ -74,7 +74,7 @@ def create_pipeline_blueprint(
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     imputers = {
         "CombinedSimpleImputer": CombinedSimpleImputer(),
-        #"IterativeImputer": IterativeImputer(),
+        "IterativeImputer": IterativeImputer(),
     }
     scalers_normalizers = {
         "CombinedScalerTransformer": CombinedScalerTransformer(),
@@ -127,8 +127,8 @@ def create_pipeline_blueprint(
         "RandomForestRegressor": RandomForestRegressor(),
         "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
         "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
-        # # "LinearSVC": LinearSVC(),  # TODO FIX
-        # # "LinearSVR": LinearSVR(),  # TODO FIX
+        "LinearSVC": LinearSVC(),
+        "LinearSVR": LinearSVR(),
         "KNeighborsClassifier": KNeighborsClassifier(),
         "KNeighborsRegressor": KNeighborsRegressor(),
         "FTTransformerClassifier": FTTransformerClassifier(),
@@ -206,7 +206,7 @@ def create_pipeline_blueprint(
         ),
         (
             "SVMKernelApproximation",
-            [components["Passthrough"]] + list(svm_kernels.values()),
+            list(svm_kernels.values()),
         ),
         (
             "KNNTransformer",
@@ -230,10 +230,11 @@ def create_pipeline_blueprint(
         X=X,
         y=y,
     )
+    # TODO: move to trainer
+    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
+    pipeline.convert_duplicates_in_steps_to_extra_configs()
     pipeline.remove_invalid_components(
         pipeline_config=config,
         current_stage=AutoMLStage.PREPROCESSING,
     )
-    # TODO: move to trainer
-    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
     return pipeline
