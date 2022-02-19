@@ -7,4 +7,5 @@
 - PCA for linear models
 - SULOV https://github.com/AutoViML/featurewiz
 - remove SHAP in model feature selection, use LGBM built-in SHAP instead
+- ShapRFECV https://github.com/ing-bank/probatus
 - https://medium.com/geekculture/optimizing-a-portfolio-of-models-f1ed432d728b
