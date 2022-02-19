@@ -10,6 +10,7 @@ License: BSD 3 clause
 
 import numpy as np
 from boruta import BorutaPy
+import warnings
 
 from lightgbm import LGBMClassifier, LGBMRegressor
 
@@ -20,8 +21,6 @@ from sklearn.utils.validation import check_random_state
 from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ..transformer import DataType
-
-import warnings
 
 
 class BorutaSHAP(BorutaPy):
