@@ -9,8 +9,6 @@ License: BSD 3 clause
 """
 
 import numpy as np
-import shap
-import contextlib
 from boruta import BorutaPy
 
 from lightgbm import LGBMClassifier, LGBMRegressor
@@ -19,7 +17,7 @@ from sklearn.utils import check_X_y
 from sklearn.base import clone, is_classifier
 from sklearn.utils.validation import check_random_state
 
-from .utils import lightgbm_fs_config as _lightgbm_rf_config
+from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ..transformer import DataType
 
@@ -41,9 +39,9 @@ class BorutaSHAP(BorutaPy):
         n_iter_no_change=20,
     ):
         if estimator == "LGBMRegressor":
-            estimator = LGBMRegressor(**_lightgbm_rf_config)
+            estimator = LGBMRegressor(**lightgbm_fs_config)
         elif estimator == "LGBMClassifier":
-            estimator = LGBMClassifier(**_lightgbm_rf_config)
+            estimator = LGBMClassifier(**lightgbm_fs_config)
         super().__init__(
             estimator=estimator,
             n_estimators=n_estimators,
@@ -300,52 +298,11 @@ class BorutaSHAP(BorutaPy):
         if self.alpha <= 0 or self.alpha > 1:
             raise ValueError("Alpha should be between 0 and 1.")
 
-    # from https://github.com/Ekeany/Boruta-Shap
     def _get_shap_imp(self, X, estimator):
-        with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
-            explainer = shap.TreeExplainer(
-                estimator, feature_perturbation="tree_path_dependent"
-            )
-            if self._is_classification_:
-                # for some reason shap returns values wraped in a list of length 1
-                shap_values = np.array(explainer.shap_values(X))
-                if isinstance(shap_values, list):
-
-                    class_inds = range(len(shap_values))
-                    shap_imp = np.zeros(shap_values[0].shape[1])
-                    for i, ind in enumerate(class_inds):
-                        shap_imp += np.abs(shap_values[ind]).mean(0)
-                    shap_values /= len(shap_values)
-
-                elif len(shap_values.shape) == 3:
-                    shap_values = np.abs(shap_values).sum(axis=0)
-                    shap_values = shap_values.mean(0)
-
-                else:
-                    shap_values = np.abs(shap_values).mean(0)
-
-            else:
-                shap_values = explainer.shap_values(X)
-                shap_values = np.abs(shap_values).mean(0)
-            return shap_values
+        return get_shap(estimator, X)
 
     def _get_tree_num(self, n_feat):
-        depth = None
-        try:
-            depth = self.estimator_.get_params()["max_depth"]
-        except KeyError:
-            warnings.warn(
-                "The estimator does not have a max_depth property, as a result "
-                " the number of trees to use cannot be estimated automatically."
-            )
-        if depth is None:
-            depth = 10
-        # how many times a feature should be considered on average
-        f_repr = 100
-        # n_feat * 2 because the training matrix is extended with n shadow features
-        multi = (n_feat * 2) / (np.sqrt(n_feat * 2) * depth)
-        n_estimators = int(multi * f_repr)
-        return n_estimators
+        return get_tree_num(self.estimator_, n_feat)
 
     def _get_imp(self, X, y):
         try:

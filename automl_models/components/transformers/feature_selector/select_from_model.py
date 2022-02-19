@@ -9,8 +9,6 @@ License: BSD 3 clause
 """
 
 import numpy as np
-import shap
-import contextlib
 
 from lightgbm import LGBMClassifier, LGBMRegressor
 
@@ -19,7 +17,7 @@ from sklearn.base import is_classifier
 from sklearn.feature_selection import SelectFromModel as _SelectFromModel
 from sklearn.feature_selection._from_model import _calculate_threshold
 
-from .utils import lightgbm_fs_config as _lightgbm_rf_config
+from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ..transformer import DataType
@@ -42,9 +40,9 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         n_jobs=None
     ):
         if estimator == "LGBMRegressor":
-            estimator = LGBMRegressor(**_lightgbm_rf_config)
+            estimator = LGBMRegressor(**lightgbm_fs_config)
         elif estimator == "LGBMClassifier":
-            estimator = LGBMClassifier(**_lightgbm_rf_config)
+            estimator = LGBMClassifier(**lightgbm_fs_config)
         super().__init__(
             estimator=estimator,
             threshold=threshold,
@@ -58,21 +56,7 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         self.n_jobs = n_jobs
 
     def _get_tree_num(self, n_feat):
-        depth = None
-        try:
-            depth = self.estimator.get_params()["max_depth"]
-        except KeyError:
-            warnings.warn(
-                "The estimator does not have a max_depth property, as a result "
-                " the number of trees to use cannot be estimated automatically."
-            )
-        if depth is None:
-            depth = 10
-        # how many times a feature should be considered on average
-        f_repr = 100
-        multi = (n_feat) / (np.sqrt(n_feat) * depth)
-        n_estimators = int(multi * f_repr)
-        return n_estimators
+        return get_tree_num(self.estimator, n_feat)
 
     def fit(self, X, y=None, **fit_params):
         self._is_classification_ = is_classifier(self.estimator)
@@ -119,32 +103,7 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
         return X.iloc[:, safe_mask(X, mask)]
 
     def _get_shap_imp(self, X, estimator):
-        with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
-            explainer = shap.TreeExplainer(
-                estimator, feature_perturbation="tree_path_dependent"
-            )
-            if self._is_classification_:
-                # for some reason shap returns values wraped in a list of length 1
-                shap_values = np.array(explainer.shap_values(X))
-                if isinstance(shap_values, list):
-
-                    class_inds = range(len(shap_values))
-                    shap_imp = np.zeros(shap_values[0].shape[1])
-                    for i, ind in enumerate(class_inds):
-                        shap_imp += np.abs(shap_values[ind]).mean(0)
-                    shap_values /= len(shap_values)
-
-                elif len(shap_values.shape) == 3:
-                    shap_values = np.abs(shap_values).sum(axis=0)
-                    shap_values = shap_values.mean(0)
-
-                else:
-                    shap_values = np.abs(shap_values).mean(0)
-
-            else:
-                shap_values = explainer.shap_values(X)
-                shap_values = np.abs(shap_values).mean(0)
-            return shap_values
+        return get_shap(estimator, X)
 
     @property
     def threshold_(self):
