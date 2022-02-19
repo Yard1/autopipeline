@@ -135,6 +135,7 @@ def create_pipeline_blueprint(
         "FTTransformerRegressor": FTTransformerRegressor(),
         "FastAINNClassifier": FastAINNClassifier(),
         "FastAINNRegressor": FastAINNRegressor(),
+        "GaussianNB": GaussianNB(),
     }
     components = {
         **passthrough,
