@@ -603,6 +603,7 @@ class RandomForestSampler(BaseSampler):
         n_actually_completed_trials = 0
         for t in study.get_trials(deepcopy=False):
             if t.state == TrialState.COMPLETE:
+                value = t.value
                 copied_t = copy.deepcopy(t)
                 copied_t.value = (
                     -value if study.direction == StudyDirection.MAXIMIZE else value
