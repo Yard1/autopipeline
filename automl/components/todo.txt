@@ -5,5 +5,6 @@
 - OptBinning
 - Coalesce low frequency categories
 - PCA for linear models
-- mRMR feature selection (https://towardsdatascience.com/feature-selection-how-to-throw-away-95-of-your-data-and-get-95-accuracy-ad41ca016877)
+- SULOV https://github.com/AutoViML/featurewiz
+- remove SHAP in model feature selection, use LGBM built-in SHAP instead
 - https://medium.com/geekculture/optimizing-a-portfolio-of-models-f1ed432d728b
