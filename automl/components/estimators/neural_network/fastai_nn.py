@@ -26,11 +26,11 @@ class FastAINNClassifier(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-3,
         "max_epochs": 100,
-        "batch_size_power": 8,
+        "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        #"category_cardinalities": FunctionParameter(get_category_cardinalities),
-        "n_iter_no_change": 5,
+        "lr_schedule": True,
+        "n_iter_no_change": 10,
         "module__layers": (200, 100),
         "module__embed_p": 0.1,
         "module__ps": 0.1,
@@ -58,6 +58,7 @@ class FastAINNClassifier(NeuralNetworkEstimator):
         "module__ps": UniformDistribution(0.0, 0.5, cost_related=False),
         "batch_size_power": IntUniformDistribution(6, 12, cost_related=True),
         "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        "lr_schedule": CategoricalDistribution([False, True]),
     }
 
     _problem_types = {
@@ -77,11 +78,11 @@ class FastAINNRegressor(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-3,
         "max_epochs": 100,
-        "batch_size_power": 8,
+        "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        #"category_cardinalities": FunctionParameter(get_category_cardinalities),
-        "n_iter_no_change": 5,
+        "lr_schedule": True,
+        "n_iter_no_change": 10,
         "module__layers": (200, 100),
         "module__embed_p": 0.1,
         "module__ps": 0.1,
@@ -109,6 +110,7 @@ class FastAINNRegressor(NeuralNetworkEstimator):
         "module__ps": UniformDistribution(0.0, 0.5, cost_related=False),
         "batch_size_power": IntUniformDistribution(6, 12, cost_related=True),
         "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        "lr_schedule": CategoricalDistribution([False, True]),
     }
 
     _problem_types = {

@@ -1,9 +1,9 @@
 from typing import Dict, Optional
 from sklearn.base import clone
-from skorch import NeuralNetClassifier, NeuralNetRegressor, NeuralNetBinaryClassifier
+from skorch import NeuralNetClassifier, NeuralNetRegressor
 from skorch.dataset import ValidSplit
 from skorch.callbacks import EarlyStopping
-from rtdl import FTTransformer as _FTTransformer, FeatureTokenizer, Transformer
+from rtdl import FTTransformer as _FTTransformer
 import torch
 import pandas as pd
 import os
@@ -37,12 +37,14 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         criterion=torch.nn.CrossEntropyLoss,
         train_split=ValidSplit,
         classes=None,
+        batch_size_power=None,
         early_stopping: bool = True,
         random_state=None,
         category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
+        lr_schedule=True,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-3)
@@ -61,8 +63,10 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         self.random_state = random_state
         self.n_iter_no_change = n_iter_no_change
         self.n_jobs = n_jobs
+        self.batch_size_power = batch_size_power
         self.category_cardinalities = category_cardinalities
         self.cv = cv
+        self.lr_schedule = lr_schedule
 
     @property
     def _default_callbacks(self):
@@ -103,6 +107,8 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         self.train_split.random_state = self.random_state
         if self.random_state is not None:
             torch.random.manual_seed(self.random_state)
+        if self.batch_size_power:
+            self.set_params(batch_size=2 ** self.batch_size_power)
         X = X[sorted(X.columns)]
         if xxd_hash:
             self.fitted_dataset_hash_ = xxd_hash((X, y, fit_params))
@@ -145,12 +151,14 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         optimizer=torch.optim.AdamW,
         criterion=torch.nn.MSELoss,
         train_split=ValidSplit,
+        batch_size_power=None,
         early_stopping: bool = True,
         random_state=None,
         category_cardinalities: Optional[Dict[str, set]] = None,
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
+        lr_schedule=True,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-3)
@@ -169,8 +177,10 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         self.random_state = random_state
         self.n_iter_no_change = n_iter_no_change
         self.n_jobs = n_jobs
+        self.batch_size_power = batch_size_power
         self.category_cardinalities = category_cardinalities
         self.cv = cv
+        self.lr_schedule = lr_schedule
 
     @property
     def _default_callbacks(self):
@@ -211,6 +221,8 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         self.train_split.random_state = self.random_state
         if self.random_state is not None:
             torch.random.manual_seed(self.random_state)
+        if self.batch_size_power:
+            self.set_params(batch_size=2 ** self.batch_size_power)
         X = X[sorted(X.columns)]
         if xxd_hash:
             self.fitted_dataset_hash_ = xxd_hash((X, y, fit_params))

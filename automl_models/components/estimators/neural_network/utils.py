@@ -1,8 +1,9 @@
 from typing import Dict, TYPE_CHECKING, List
 import pandas as pd
 from sklearn.base import is_classifier
-if TYPE_CHECKING:
-    from ...flow.pipeline import BasePipeline
+from skorch.callbacks import EarlyStopping, GradientNormClipping, LRScheduler
+import torch
+import math
 
 
 def get_category_cardinalities(
@@ -25,12 +26,54 @@ def get_category_cardinalities(
 
 
 class AutoMLSkorchMixin:
-    @property
-    def _default_callbacks(self):
-        ret = super()._default_callbacks
+    def get_default_callbacks(self):
+        ret = super().get_default_callbacks()
         if self.verbose < 1:
             ret = [(name, callback) for name, callback in ret if name != "print_log"]
-        return ret
+        return (
+            ret
+            + (
+                [
+                    (
+                        "early_stopping",
+                        EarlyStopping(
+                            monitor="valid_loss", patience=self.n_iter_no_change
+                        ),
+                    )
+                ]
+                if self.early_stopping
+                else []
+            )
+            + (
+                [
+                    (
+                        "lr_scheduler",
+                        LRScheduler(
+                            torch.optim.lr_scheduler.OneCycleLR,
+                            max_lr=self.scheduler_lr_,
+                            step_every="batch",
+                            pct_start=0.25,
+                            final_div_factor=100000.0,
+                            epochs=self.max_epochs,
+                            steps_per_epoch=self.batches_per_epoch_,
+                        ),
+                    )
+                ]
+                if self.lr_schedule
+                else []
+            )
+            + [
+                (
+                    "gradient_clipper",
+                    GradientNormClipping(1.0),
+                )
+            ]
+        )
+
+    def fit(self, X, y=None, **kwargs):
+        self.scheduler_lr_ = self.lr * 10
+        self.batches_per_epoch_ = math.ceil(y.shape[0] / self.batch_size)
+        return super().fit(X, y=y, **kwargs)
 
     def get_split_datasets(self, X, y=None, **fit_params):
         """Get internal train and validation datasets.

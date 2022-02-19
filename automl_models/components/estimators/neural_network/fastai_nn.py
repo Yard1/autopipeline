@@ -1,8 +1,7 @@
 from typing import Dict, Optional
 from sklearn.base import clone
-from skorch import NeuralNetClassifier, NeuralNetRegressor, NeuralNetBinaryClassifier
+from skorch import NeuralNetClassifier, NeuralNetRegressor
 from skorch.dataset import ValidSplit
-from skorch.callbacks import EarlyStopping
 from fastai.tabular.model import TabularModel as _TabularModel, emb_sz_rule
 import torch
 import pandas as pd
@@ -80,6 +79,7 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
+        lr_schedule=True,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-3)
@@ -101,19 +101,7 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         self.batch_size_power = batch_size_power
         self.category_cardinalities = category_cardinalities
         self.cv = cv
-
-    @property
-    def _default_callbacks(self):
-        return super()._default_callbacks + (
-            [
-                (
-                    "early_stopping",
-                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
-                )
-            ]
-            if self.early_stopping
-            else []
-        )
+        self.lr_schedule = lr_schedule
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
         validate_type(X, "X", pd.DataFrame)
@@ -175,6 +163,7 @@ class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         n_iter_no_change=5,
         n_jobs=None,
         cv=0.2,
+        lr_schedule=True,
         **kwargs
     ):
         lr = kwargs.pop("lr", 1e-3)
@@ -197,19 +186,7 @@ class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         self.batch_size_power = batch_size_power
         self.category_cardinalities = category_cardinalities
         self.cv = cv
-
-    @property
-    def _default_callbacks(self):
-        return super()._default_callbacks + (
-            [
-                (
-                    "early_stopping",
-                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
-                )
-            ]
-            if self.early_stopping
-            else []
-        )
+        self.lr_schedule = lr_schedule
 
     def fit(self, X: pd.DataFrame, y: pd.Series, **fit_params):
         validate_type(X, "X", pd.DataFrame)

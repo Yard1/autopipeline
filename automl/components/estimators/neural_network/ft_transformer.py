@@ -8,11 +8,8 @@ from .neural_network_estimator import NeuralNetworkEstimator
 from ....search.distributions import (
     CategoricalDistribution,
     UniformDistribution,
-    IntUniformDistribution,
     UniformDistribution,
-    FunctionParameter,
 )
-from .utils import get_category_cardinalities
 from ...component import ComponentLevel
 from ....problems import ProblemType
 
@@ -26,17 +23,20 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-4,
         "optimizer__weight_decay": 1e-5,
-        "max_epochs": 30,
-        "batch_size": 256,
+        "max_epochs": 50,
+        "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        #"category_cardinalities": FunctionParameter(get_category_cardinalities),
+        "lr_schedule": True,
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
-    _default_tuning_grid_extended = {}
+    _default_tuning_grid_extended = {
+        "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        "lr_schedule": CategoricalDistribution([False, True]),
+    }
 
     _problem_types = {
         ProblemType.BINARY,
@@ -55,17 +55,20 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "random_state": 0,
         "lr": 1e-4,
         "optimizer__weight_decay": 1e-5,
-        "max_epochs": 30,
-        "batch_size": 256,
+        "max_epochs": 50,
+        "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        #"category_cardinalities": FunctionParameter(get_category_cardinalities),
+        "lr_schedule": True,
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
-    _default_tuning_grid_extended = {}
+    _default_tuning_grid_extended = {
+        "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        "lr_schedule": CategoricalDistribution([False, True]),
+    }
 
     _problem_types = {
         ProblemType.REGRESSION,
