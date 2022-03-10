@@ -9,6 +9,7 @@ from copy import copy
 import numpy as np
 import pandas as pd
 
+from ray import cloudpickle
 from ray.tune.result import DEFAULT_METRIC, TRAINING_ITERATION
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest import ConcurrencyLimiter
@@ -152,11 +153,11 @@ class ConditionalOptunaSearch(OptunaSearch):
             self._ot_space,
         )
         with open(checkpoint_path, "wb") as outputFile:
-            pickle.dump(save_object, outputFile)
+            cloudpickle.dump(save_object, outputFile)
 
     def restore(self, checkpoint_path: str):
         with open(checkpoint_path, "rb") as inputFile:
-            save_object = pickle.load(inputFile)
+            save_object = cloudpickle.load(inputFile)
         (
             self._storage,
             self._pruner,

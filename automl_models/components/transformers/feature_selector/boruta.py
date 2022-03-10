@@ -18,12 +18,13 @@ from sklearn.utils import check_X_y
 from sklearn.base import clone, is_classifier
 from sklearn.utils.validation import check_random_state
 
+from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ..transformer import DataType
 
 
-class BorutaSHAP(BorutaPy):
+class _BorutaSHAP(BorutaPy):
     def __init__(
         self,
         estimator,
@@ -321,3 +322,8 @@ class BorutaSHAP(BorutaPy):
                 "are currently supported in BorutaPy."
             )
         return imp
+
+
+class BorutaSHAP(PandasDataFrameTransformerMixin, _BorutaSHAP):
+    def get_dtypes(self, Xt, X, y=None):
+        return Xt.dtypes.to_dict()

@@ -265,7 +265,7 @@ class RayTuneTuner(Tuner):
             "scheduler": None,
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
-            "verbose": 2,
+            "verbose": 1,
             "reuse_actors": True,
             "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
@@ -375,7 +375,7 @@ class RayTuneTuner(Tuner):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
-        print(f"columns to tune: {self.X_.columns}")
+        print(f"columns to tune: {self.X_.columns} {self.X_.dtypes}")
         n_splits = self.cv.get_n_splits(self.X_, self.y_)
         n_jobs_per_fold = max(
             1,

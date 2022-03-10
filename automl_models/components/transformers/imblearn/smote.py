@@ -7,6 +7,7 @@ from imblearn.over_sampling import (
 )
 from sklearn.base import BaseEstimator, clone
 
+from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ..transformer import DataType
 from ...utils import validate_type
@@ -35,7 +36,7 @@ class SMOTENC(SMOTENJobsMixin, _SMOTENC):
     pass
 
 
-class PandasAutoSMOTE(BaseEstimator):
+class _PandasAutoSMOTE(BaseEstimator):
     """Automatically choose which SMOTE to use based on features"""
 
     def __init__(
@@ -66,12 +67,6 @@ class PandasAutoSMOTE(BaseEstimator):
         )
         super().__init__()
 
-    def get_columns(self, Xt, X, y=None):
-        return X.columns
-
-    def get_dtypes(self, Xt, X, y=None):
-        return X.dtypes.to_dict()
-
     def set_params(self, **params):
         self._all_categorical_sampler.set_params(**params)
         self._all_numeric_sampler.set_params(**params)
@@ -90,9 +85,6 @@ class PandasAutoSMOTE(BaseEstimator):
         mixed_sampler = clone(self._mixed_sampler)
         mixed_sampler.set_params(categorical_features=categorical_columns_mask)
         return mixed_sampler
-
-    def get_index(self, Xt, X, y=None):
-        return None
 
     def fit_resample(self, X, y, **fit_params):
         if isinstance(X, pd.Series):
@@ -125,3 +117,8 @@ class PandasAutoSMOTE(BaseEstimator):
             yt = yt.astype(y.dtype)
 
         return Xt, yt
+
+
+class PandasAutoSMOTE(PandasDataFrameTransformerMixin, _PandasAutoSMOTE):
+    def get_index(self, Xt, X, y=None):
+        return Xt.index

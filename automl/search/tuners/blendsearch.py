@@ -36,6 +36,7 @@ from ray.tune.sample import Categorical
 from sklearn.utils import Bunch
 
 from ray import tune
+from ray import cloudpickle
 from ray.tune.suggest import Searcher, ConcurrencyLimiter
 from ray.tune.utils.util import flatten_dict
 from flaml.searcher.search_thread import SearchThread
@@ -1037,11 +1038,11 @@ class ConditionalBlendSearch(BlendSearch):
             # self._diversification_multipliers,
         )
         with open(checkpoint_path, "wb") as outputFile:
-            pickle.dump(save_object, outputFile)
+            cloudpickle.dump(save_object, outputFile)
 
     def restore(self, checkpoint_path: str):
         with open(checkpoint_path, "rb") as inputFile:
-            save_object = pickle.load(inputFile)
+            save_object = cloudpickle.load(inputFile)
         (
             self._metric_target,
             self._search_thread_pool,
@@ -1536,7 +1537,7 @@ class ConditionalBlendSearch(BlendSearch):
         config = self._ls.complete_config(
             init_config, self._ls_bound_min, self._ls_bound_max
         )
-        prune_attr = config.get(self._ls.prune_attr, None)
+        prune_attr = config.get(self._ls.prune_attr, None) if config else None
         assert len(config) == len(self._ls.space) + int(bool(self._ls.prune_attr))
         # logger.info(f"reset config to {config}")
         self._init_used = True
@@ -1573,9 +1574,9 @@ class ConditionalBlendSearch(BlendSearch):
             )
         else:
             config = self._search_thread_pool[0].suggest(trial_id, reask=not retry)
-        prune_attr = config.get(self._ls.prune_attr, None)
+        prune_attr = config.get(self._ls.prune_attr, None) if config else None
         skip = self._should_skip(0, trial_id, config)
-        estimator = config["Estimator"]
+        estimator = config["Estimator"] if config else None
         last_estimator_config = config
 
         if not skip and self._valid(
@@ -1597,8 +1598,9 @@ class ConditionalBlendSearch(BlendSearch):
                     return config, prune_attr, 0, estimator
 
             if (
+                config and (
                 not backup
-                or not self._search_thread_pool[backup].estimator == estimator
+                or not self._search_thread_pool[backup].estimator == estimator)
             ):
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
@@ -1635,7 +1637,7 @@ class ConditionalBlendSearch(BlendSearch):
         config = self._make_config_valid(config, step_multiplier=step_multiplier)
         if self._ls.prune_attr:
             config[self._ls.prune_attr] = self._ls.min_resource
-        prune_attr = config.get(self._ls.prune_attr, None)
+        prune_attr = config.get(self._ls.prune_attr, None) if config else None
 
         return config, prune_attr, thread_id
 
@@ -1643,7 +1645,7 @@ class ConditionalBlendSearch(BlendSearch):
         assert thread_id
         config = self._search_thread_pool[thread_id].suggest(trial_id)
         print(f"{trial_id} ls thread {thread_id} choice suggestion: {config}")
-        prune_attr = config.get(self._ls.prune_attr, None)
+        prune_attr = config.get(self._ls.prune_attr, None) if config else None
         skip = self._should_skip(thread_id, trial_id, config)
         if skip:
             return None, None, thread_id
@@ -1752,7 +1754,7 @@ class ConditionalBlendSearch(BlendSearch):
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
                     config[self._ls.prune_attr] = self._ls.min_resource
-                    prune_attr = config.get(self._ls.prune_attr, None)
+                    prune_attr = config.get(self._ls.prune_attr, None) if config else None
                 # temporarily relax admissible region for parallel proposals
                 self._update_admissible_region(
                     config, self._gs_admissible_min, self._gs_admissible_max
@@ -1972,11 +1974,11 @@ class BlendSearchTuner(RayTuneTuner):
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
         if self.early_stopping and self.X_.shape[0] * self.X_.shape[1] > 100001:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 200
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 1000
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 5000 / self.X_.shape[0])
+            min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
             self._searcher_kwargs["prune_attr"] = "dataset_fraction"
             self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)

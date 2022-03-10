@@ -6,7 +6,7 @@ from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
     remove_placement_group,
-    get_current_placement_group
+    get_current_placement_group,
 )
 from copy import deepcopy
 from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
@@ -283,13 +283,21 @@ def put_args_if_ray(parallel: Parallel, *args):
     return args
 
 
-def get_ray_pg(parallel, n_jobs, n_estimators):
+def get_ray_pg(parallel, n_jobs, n_estimators, min_n_jobs=1, max_n_jobs=-1):
     pg = None
     if should_use_ray(parallel):
-        n_jobs = min(1, n_jobs) if n_jobs and n_jobs >= 0 else int(ray.cluster_resources()["CPU"])
+        n_jobs = (
+            min(1, n_jobs)
+            if n_jobs and n_jobs >= 0
+            else int(ray.cluster_resources()["CPU"])
+        )
         max_cpus_per_node = min(node["Resources"].get("CPU", 1) for node in ray.nodes())
+        assert min_n_jobs <= max_cpus_per_node
         n_jobs_per_estimator = max(1, min(n_jobs // n_estimators, max_cpus_per_node))
         n_jobs_per_estimator = int(pow(2, int(math.log(n_jobs_per_estimator, 2))))
+        n_jobs_per_estimator = max(min_n_jobs, n_jobs_per_estimator)
+        if max_n_jobs and max_n_jobs > 0:
+            n_jobs_per_estimator = min(max_n_jobs, n_jobs_per_estimator)
         n_bundles = max(1, n_jobs // n_jobs_per_estimator)
         pg = placement_group([{"CPU": n_jobs_per_estimator}] * n_bundles)
         print(f"ray_get_pg: pg: {pg.bundle_specs} n_jobs: {n_jobs}")

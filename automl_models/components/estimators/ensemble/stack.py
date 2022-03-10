@@ -29,7 +29,7 @@ from .utils import (
     ray_fit_single_estimator,
     fit_estimators,
     get_ray_pg,
-    ray_pg_context
+    ray_pg_context,
 )
 from ...utils import clone_with_n_jobs, ray_put_if_needed
 from ...preprocessing import PrepareDataFrame
@@ -59,7 +59,9 @@ def _get_cv_predictions(
         cloned_estimators = [
             (
                 ray_put_if_needed(
-                    clone_with_n_jobs(est, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1)
+                    clone_with_n_jobs(
+                        est, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1
+                    )
                 ),
                 meth,
             )
@@ -218,6 +220,8 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         passthrough=False,
         verbose=0,
         memory=None,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
     ):
         super().__init__(
             estimators=estimators,
@@ -229,6 +233,8 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             verbose=verbose,
         )
         self.memory = memory
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
 
     def fit(
         self,
@@ -276,7 +282,13 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         stack_method = [self.stack_method] * len(all_estimators)
 
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(all_estimators))
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(all_estimators),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
         X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
         with ray_pg_context(pg) as pg:
 
@@ -290,7 +302,10 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
                 X_ray,
                 y_ray,
                 sample_weight_ray,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
                 pg=pg,
             )
 
@@ -446,7 +461,13 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
         """Concatenate and return the predictions of the estimators."""
         check_is_fitted(self)
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(self.estimators_),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
         with ray_pg_context(pg) as pg:
             predictions = _get_predictions(
                 parallel, self.estimators_, X, self.stack_method_, pg=pg
@@ -467,6 +488,8 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         passthrough=False,
         verbose=0,
         memory=None,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
     ):
         super().__init__(
             estimators=estimators,
@@ -477,6 +500,8 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             verbose=verbose,
         )
         self.memory = memory
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
 
     def fit(
         self,
@@ -522,7 +547,13 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         stack_method = [self.stack_method] * len(all_estimators)
 
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(all_estimators))
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(all_estimators),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
         X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
         with ray_pg_context(pg) as pg:
             # Fit the base estimators on the whole training data. Those
@@ -535,7 +566,10 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
                 X_ray,
                 y_ray,
                 sample_weight_ray,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
                 pg=pg,
             )
 
@@ -691,7 +725,13 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
         """Concatenate and return the predictions of the estimators."""
         check_is_fitted(self)
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(self.estimators_),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
         with ray_pg_context(pg) as pg:
             predictions = _get_predictions(
                 parallel, self.estimators_, X, self.stack_method_, pg=pg

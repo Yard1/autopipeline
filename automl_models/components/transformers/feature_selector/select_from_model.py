@@ -24,7 +24,7 @@ from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from ..transformer import DataType
 
 
-class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromModel):
+class _PandasSHAPSelectFromModel(_SelectFromModel):
     def __init__(
         self,
         estimator,
@@ -133,3 +133,10 @@ class PandasSHAPSelectFromModel(PandasDataFrameTransformerMixin, _SelectFromMode
             mask = np.ones_like(scores, dtype=bool)
         mask[scores < threshold] = False
         return mask
+
+
+class PandasSHAPSelectFromModel(
+    PandasDataFrameTransformerMixin, _PandasSHAPSelectFromModel
+):
+    def get_dtypes(self, Xt, X, y=None):
+        return Xt.dtypes.to_dict()
