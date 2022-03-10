@@ -22,7 +22,6 @@ from .utils import (
     call_method,
     ray_call_method,
     cross_val_predict_repeated,
-    ray_cross_val_predict_repeated,
     should_use_ray,
     put_args_if_ray,
     fit_single_estimator,
@@ -30,6 +29,7 @@ from .utils import (
     fit_estimators,
     get_ray_pg,
     ray_pg_context,
+    ray_cross_val_predict_repeated,
 )
 from ...utils import clone_with_n_jobs, ray_put_if_needed
 from ...preprocessing import PrepareDataFrame
@@ -71,22 +71,19 @@ def _get_cv_predictions(
         X_ref = ray_put_if_needed(X_ray)
         y_ref = ray_put_if_needed(y_ray)
         fit_params_ref = ray_put_if_needed(fit_params)
-        predictions = ray.get(
-            [
-                ray_cross_val_predict_repeated.options(
-                    placement_group=pg, num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1
-                ).remote(
-                    est,
-                    X_ref,
-                    y_ref,
-                    cv=deepcopy(cv),
-                    method=meth,
-                    n_jobs=1,
-                    fit_params=fit_params_ref,
-                    verbose=verbose,
-                )
-                for est, meth in cloned_estimators
-            ]
+        estimators, methods = zip(*cloned_estimators)
+        predictions = ray_cross_val_predict_repeated(
+            estimators,
+            X,
+            y,
+            cv=deepcopy(cv),
+            methods=methods,
+            fit_params=fit_params_ref,
+            verbose=verbose,
+            placement_group=pg,
+            num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1,
+            X_ref=X_ref,
+            y_ref=y_ref,
         )
     else:
         predictions = parallel(
