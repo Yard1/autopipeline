@@ -389,18 +389,21 @@ class Trainer:
 
         gc.collect()
 
-        with joblib.parallel_backend("ray"):
-            self._create_ensembles(
-                X_original,
-                y_original,
-                self.all_results_,
-                pipeline_blueprint,
-                X_test=X_test,
-                y_test=y_test,
-                X_test_original=X_test_original,
-                y_test_original=y_test_original,
-                groups=groups,
-            )
+        if self.all_results_:
+            with joblib.parallel_backend("ray"):
+                self._create_ensembles(
+                    X_original,
+                    y_original,
+                    self.all_results_,
+                    pipeline_blueprint,
+                    X_test=X_test,
+                    y_test=y_test,
+                    X_test_original=X_test_original,
+                    y_test_original=y_test_original,
+                    groups=groups,
+                )
+        else:
+            return
 
         gc.collect()
         if self.current_stacking_level >= self.stacking_level:
