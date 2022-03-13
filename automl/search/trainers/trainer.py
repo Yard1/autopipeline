@@ -29,13 +29,7 @@ import joblib
 import ray
 from ray.util.joblib import register_ray
 
-from ...utils.joblib_backend.ray_backend import (
-    multiprocessing_cache,
-    register_ray_caching,
-)
-
 register_ray()
-register_ray_caching()
 
 from ..ensemble import (
     EnsembleStrategy,
@@ -411,7 +405,6 @@ class Trainer:
             # self.final_ensemble_ = self._create_final_stack()
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
-        multiprocessing_cache.clear()
         return self._fit_one_layer(
             X,
             y,
