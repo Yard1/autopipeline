@@ -253,6 +253,7 @@ class GreedyEnsembleCreator(VotingSoftEnsembleCreator):
             scoring=metric,
             n_jobs=-1,  # TODO make dynamic
             ensemble_size=min(200, len(estimators)),
+            n_iter_no_change=50,
             **{**(self.init_kwargs or {}), **self.ensemble_args_},
         )()
         if previous_stack:

@@ -15,7 +15,6 @@ from sklearn.model_selection._validation import (
 from sklearn.utils.validation import (
     check_is_fitted,
     check_random_state,
-    check_consistent_length,
 )
 from joblib import Parallel
 
@@ -84,6 +83,7 @@ def _fit_greedy_ensemble(
     n_initial_estimators,
     ensemble_size,
     n_splits,
+    n_iter_no_change=None,
 ):
     rand: np.random.RandomState = check_random_state(random_state)
     fake_estimator = FakeClassifier if is_classifier_ensemble else FakeRegressor
@@ -92,11 +92,16 @@ def _fit_greedy_ensemble(
 
     ensemble: List[List[np.ndarray]] = []
     order = []
+    test_score = -np.inf
+    best_test_score = test_score
 
     if n_initial_estimators:
         order = _get_initial_estimators(
             predictions, labels, scorer, fake_estimator, n_initial_estimators
         )
+
+    best_order = order
+    iters_without_change = 0
 
     weighted_ensemble_predictions = [
         np.zeros(
@@ -161,6 +166,13 @@ def _fit_greedy_ensemble(
 
         ensemble.append(predictions[best])
         order.append(best)
+        test_score = losses[best]
+        if test_score > best_test_score:
+            best_test_score = test_score
+            best_order = order
+            iters_without_change = 0
+        else:
+            iters_without_change += 1
         # print(
         #     f"GREEDY train_score {train_score} best_train_score {best_train_score} iters_without_change {iters_without_change}\n"
         #     f"order {order}\n"
@@ -171,7 +183,13 @@ def _fit_greedy_ensemble(
         if len(predictions) == 1:
             break
 
-    return order
+        if n_iter_no_change:
+            if iters_without_change >= n_iter_no_change:
+                break
+        else:
+            best_order = order
+
+    return best_order
 
 
 _ray_fit_greedy_ensemble = ray.remote(_fit_greedy_ensemble)
@@ -263,6 +281,7 @@ class GreedyEnsembleSelection:
                     self.n_initial_estimators,
                     self._ensemble_size_not_none,
                     self.cv.get_n_splits(),
+                    self.n_iter_no_change,
                 )
             )
         else:
@@ -291,6 +310,7 @@ class GreedyEnsembleSelection:
                     self.n_initial_estimators,
                     self._ensemble_size_not_none,
                     self.cv.get_n_splits(),
+                    self.n_iter_no_change,
                 )
                 order_of_each_bag.append(order)
             if order_of_each_bag:
@@ -309,6 +329,7 @@ class GreedyEnsembleSelection:
                         self.n_initial_estimators,
                         self._ensemble_size_not_none,
                         self.cv.get_n_splits(),
+                        self.n_iter_no_change,
                     )
                 )
 
@@ -361,6 +382,7 @@ class PandasGreedyVotingClassifier(GreedyEnsembleSelection, PandasVotingClassifi
         n_bags=20,
         bag_fraction=0.5,
         ensemble_size=None,
+        n_iter_no_change=None,
         scoring=None,
         cv=None,
         random_state=None,
@@ -375,6 +397,7 @@ class PandasGreedyVotingClassifier(GreedyEnsembleSelection, PandasVotingClassifi
         self.n_initial_estimators = n_initial_estimators
         self.n_bags = n_bags
         self.bag_fraction = bag_fraction
+        self.n_iter_no_change = n_iter_no_change
         self.scoring = scoring
         self.cv = cv
         self.random_state = random_state
@@ -394,6 +417,7 @@ class PandasGreedyVotingRegressor(GreedyEnsembleSelection, PandasVotingRegressor
         n_bags=20,
         bag_fraction=0.5,
         ensemble_size=None,
+        n_iter_no_change=None,
         scoring=None,
         cv=None,
         random_state=None,
@@ -407,6 +431,7 @@ class PandasGreedyVotingRegressor(GreedyEnsembleSelection, PandasVotingRegressor
         self.n_bags = n_bags
         self.bag_fraction = bag_fraction
         self.scoring = scoring
+        self.n_iter_no_change = n_iter_no_change
         self.cv = cv
         self.random_state = random_state
         self.ensemble_size = ensemble_size
