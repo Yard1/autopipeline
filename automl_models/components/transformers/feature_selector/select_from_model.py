@@ -18,6 +18,8 @@ from sklearn.base import is_classifier
 from sklearn.feature_selection import SelectFromModel as _SelectFromModel
 from sklearn.feature_selection._from_model import _calculate_threshold
 
+from automl_models.components.utils import clone_with_n_jobs
+
 from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
@@ -59,12 +61,10 @@ class _PandasSHAPSelectFromModel(_SelectFromModel):
 
     def fit(self, X, y=None, **fit_params):
         self._is_classification_ = is_classifier(self.estimator)
+        org_estimator = self.estimator
+        self.estimator = clone_with_n_jobs(self.estimator, n_jobs=self.n_jobs)
         try:
             self.estimator.set_params(random_state=self.random_state)
-        except Exception:
-            pass
-        try:
-            self.estimator.set_params(n_jobs=self.n_jobs)
         except Exception:
             pass
         # if (
@@ -86,6 +86,7 @@ class _PandasSHAPSelectFromModel(_SelectFromModel):
             y = categorical_column_to_int_categories(y).astype(np.uint16)
         super().fit(X=X, y=y, **fit_params)
         self.shap_imp_ = self._get_shap_imp(X, self.estimator_)
+        self.estimator = org_estimator
         return self
 
     def transform(self, X):
@@ -102,7 +103,7 @@ class _PandasSHAPSelectFromModel(_SelectFromModel):
         return X.iloc[:, safe_mask(X, mask)]
 
     def _get_shap_imp(self, X, estimator):
-        return get_shap(estimator, X)
+        return get_shap(estimator, X, n_jobs=self.n_jobs or 1)
 
     @property
     def threshold_(self):

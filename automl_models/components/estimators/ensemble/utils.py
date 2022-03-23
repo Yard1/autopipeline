@@ -6,10 +6,9 @@ from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
     remove_placement_group,
-    get_current_placement_group,
 )
 from copy import deepcopy
-from sklearn.base import clone, ClassifierMixin, BaseEstimator, is_classifier
+from sklearn.base import clone, is_classifier
 from sklearn.model_selection import cross_val_predict
 from sklearn.model_selection._validation import (
     indexable,
@@ -27,8 +26,12 @@ from sklearn.utils import _print_elapsed_time
 from sklearn.utils.fixes import delayed
 from pandas.api.types import is_integer_dtype, is_bool_dtype
 
-from ...utils import ray_get_if_needed, ray_put_if_needed, split_list_into_chunks
-
+from ...utils import (
+    ray_get_if_needed,
+    ray_put_if_needed,
+    split_list_into_chunks,
+    clone_with_n_jobs,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -254,40 +257,48 @@ def ray_cross_val_predict_repeated(
     num_cpus=None,
     X_ref=None,
     y_ref=None,
+    return_type="concat",
 ):
     """sklearn cross_val_predict with support for repeated CV splitters"""
+    assert return_type in ("concat", "lists", "refs")
     X_ref = X_ref or ray_put_if_needed(X)
     y_ref = y_ref or ray_put_if_needed(y)
+    repeat_predictions = []
     if isinstance(cv, _RepeatedSplits):
-        repeat_predictions = []
         n_repeats = cv.n_repeats
-        rng = check_random_state(cv.random_state)
+    else:
+        n_repeats = 1
+    rng = check_random_state(cv.random_state)
 
-        for estimator, method in zip(estimators, methods):
-            for idx in range(n_repeats):
+    for estimator, method in zip(estimators, methods):
+        for idx in range(n_repeats):
+            if isinstance(cv, _RepeatedSplits):
                 repeat_cv = cv.cv(random_state=rng, shuffle=True, **cv.cvargs)
-                repeat_predictions.append(
-                    _cross_val_predict_ray_remotes(
-                        estimator,
-                        X,
-                        y,
-                        groups=groups,
-                        cv=repeat_cv,
-                        verbose=verbose,
-                        fit_params=fit_params,
-                        method=method,
-                        num_cpus=num_cpus,
-                        placement_group=placement_group,
-                        X_ref=X_ref,
-                        y_ref=y_ref,
-                    )
+            else:
+                repeat_cv = cv
+            repeat_predictions.append(
+                _cross_val_predict_ray_remotes(
+                    estimator,
+                    X,
+                    y,
+                    groups=groups,
+                    cv=repeat_cv,
+                    verbose=verbose,
+                    fit_params=fit_params,
+                    method=method,
+                    num_cpus=num_cpus,
+                    placement_group=placement_group,
+                    X_ref=X_ref,
+                    y_ref=y_ref,
                 )
+            )
 
-        predictions, test_indices, encodes = list(zip(*repeat_predictions))
-        num_preds_per_estimator = len(predictions[0])
-        predictions = [item for sublist in predictions for item in sublist]
-        predictions, _ = ray.wait(predictions, num_returns=len(predictions))
-        predictions = split_list_into_chunks(predictions, num_preds_per_estimator)
+    predictions, test_indices, encodes = list(zip(*repeat_predictions))
+    num_preds_per_estimator = len(predictions[0])
+    predictions = [item for sublist in predictions for item in sublist]
+    predictions, _ = ray.wait(predictions, num_returns=len(predictions))
+    predictions = split_list_into_chunks(predictions, num_preds_per_estimator)
+    if return_type == "concat":
         repeat_predictions = [
             _cross_val_predict_handle_predictions(
                 y, ray.get(prediction), test_index, encode
@@ -296,7 +307,12 @@ def ray_cross_val_predict_repeated(
                 predictions, test_indices, encodes
             )
         ]
+    elif return_type == "lists":
+        repeat_predictions = [ray.get(prediction) for prediction in predictions]
+    else:
+        repeat_predictions = predictions
 
+    if return_type == "concat" and n_repeats > 1:
         averaged_preds_list = []
         for chunk, estimator in zip(
             split_list_into_chunks(repeat_predictions, len(estimators)), estimators
@@ -309,35 +325,7 @@ def ray_cross_val_predict_repeated(
                 averaged_preds = np.round(averaged_preds)
             averaged_preds.astype(chunk[0].dtype)
             averaged_preds_list.append(averaged_preds)
-        return averaged_preds_list
-
-    repeat_predictions = []
-    for estimator, method in zip(estimators, methods):
-        repeat_predictions.append(
-            _cross_val_predict_ray_remotes(
-                estimator,
-                X,
-                y,
-                groups=groups,
-                cv=cv,
-                verbose=verbose,
-                fit_params=fit_params,
-                method=method,
-                num_cpus=num_cpus,
-                placement_group=placement_group,
-                X_ref=X_ref,
-                y_ref=y_ref,
-            )
-        )
-    predictions, test_indices, encodes = list(zip(*repeat_predictions))
-    num_preds_per_estimator = len(predictions[0])
-    predictions = [item for sublist in predictions for item in sublist]
-    predictions = ray.get(predictions)
-    predictions = split_list_into_chunks(predictions, num_preds_per_estimator)
-    repeat_predictions = [
-        _cross_val_predict_handle_predictions(y, prediction, test_index, encode)
-        for prediction, test_index, encode in zip(predictions, test_indices, encodes)
-    ]
+            repeat_predictions = averaged_preds_list
     return repeat_predictions
 
 
@@ -373,7 +361,15 @@ ray_fit_single_estimator = ray.remote(fit_single_estimator)
 
 
 def fit_estimators(
-    parallel, all_estimators, X, y, sample_weight, clone_function, pg=None
+    parallel,
+    all_estimators,
+    X,
+    y,
+    sample_weight,
+    clone_function,
+    pg=None,
+    X_ray=None,
+    y_ray=None,
 ):
     if should_use_ray(parallel):
         cloned_estimators = [
@@ -381,8 +377,8 @@ def fit_estimators(
             for est in all_estimators
             if est != "drop"
         ]
-        X_ref = ray_put_if_needed(X)
-        y_ref = ray_put_if_needed(y)
+        X_ref = ray_put_if_needed(X_ray or X)
+        y_ref = ray_put_if_needed(y_ray or y)
         sample_weight_ref = ray_put_if_needed(sample_weight)
         estimators = ray.get(
             [
@@ -438,7 +434,7 @@ def get_ray_pg(parallel, n_jobs, n_estimators, min_n_jobs=1, max_n_jobs=-1):
             n_jobs_per_estimator = min(max_n_jobs, n_jobs_per_estimator)
         n_bundles = max(1, n_jobs // n_jobs_per_estimator)
         pg = placement_group([{"CPU": n_jobs_per_estimator}] * n_bundles)
-        print(f"ray_get_pg: pg: {pg.bundle_specs} n_jobs: {n_jobs}")
+        print(f"get_ray_pg: pg: {pg.bundle_specs} n_jobs: {n_jobs}")
     return pg
 
 
@@ -454,3 +450,70 @@ class ray_pg_context:
     def __exit__(self, type, value, traceback):
         if self.pg:
             remove_placement_group(self.pg)
+
+
+def get_cv_predictions(
+    parallel,
+    all_estimators,
+    X,
+    y,
+    cv,
+    fit_params,
+    verbose,
+    stack_method,
+    n_jobs,
+    X_ray=None,
+    y_ray=None,
+    pg=None,
+    groups=None,
+    return_type="concat",
+):
+    if should_use_ray(parallel):
+        cloned_estimators = [
+            (
+                ray_put_if_needed(
+                    clone_with_n_jobs(
+                        est, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1
+                    )
+                ),
+                meth,
+            )
+            for est, meth in zip(all_estimators, stack_method)
+            if est != "drop"
+        ]
+        X_ref = ray_put_if_needed(X_ray or X)
+        y_ref = ray_put_if_needed(y_ray or y)
+        fit_params_ref = ray_put_if_needed(fit_params)
+        estimators, methods = zip(*cloned_estimators)
+        predictions = ray_cross_val_predict_repeated(
+            estimators,
+            X,
+            y,
+            cv=deepcopy(cv),
+            methods=methods,
+            fit_params=fit_params_ref,
+            verbose=verbose,
+            placement_group=pg,
+            num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1,
+            X_ref=X_ref,
+            y_ref=y_ref,
+            groups=groups,
+            return_type=return_type,
+        )
+    else:
+        predictions = parallel(
+            delayed(cross_val_predict_repeated)(
+                clone_with_n_jobs(est),
+                X,
+                y,
+                cv=deepcopy(cv),
+                method=meth,
+                n_jobs=n_jobs,
+                fit_params=fit_params,
+                verbose=verbose,
+                groups=groups,
+            )
+            for est, meth in zip(all_estimators, stack_method)
+            if est != "drop"
+        )
+    return predictions

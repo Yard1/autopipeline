@@ -91,7 +91,7 @@ class RoundRobinEstimator(EnsembleStrategy):
         pipeline_blueprint,
     ) -> list:
         results = self.select_results(results)
-        if self.configurations_to_select < 0:
+        if self.configurations_to_select is not None and self.configurations_to_select < 0:
             return set(results)
         percentile = self.get_percentile(results)
         results_per_estimator = defaultdict(list)
@@ -119,7 +119,7 @@ class RoundRobinEstimator(EnsembleStrategy):
         )
         selected_trials_ids = [
             result["trial_id"] for result in _roundrobin(*results_per_estimator)
-        ][: self.configurations_to_select]
+        ][: self.configurations_to_select or len(results_per_estimator)]
         return selected_trials_ids
 
 
@@ -158,4 +158,21 @@ class OneRoundRobinThenEnsembleBest(EnsembleStrategy):
         results: List[Dict[str, Any]],
         pipeline_blueprint,
     ) -> list:
-        return None
+        rr = RoundRobinEstimator(
+            None, self.percentile_threshold, self.use_only_last_results
+        )
+        ids = rr.select_trial_ids(X, y, results, pipeline_blueprint)
+        if len(ids) >= self.configurations_to_select:
+            return ids[: self.configurations_to_select]
+        eb = EnsembleBest(
+            self.configurations_to_select - len(ids),
+            self.percentile_threshold,
+            self.use_only_last_results,
+        )
+        ids += eb.select_trial_ids(
+            X,
+            y,
+            [{k: v for k, v in results_sub.items() if k not in set(ids)} for results_sub in results],
+            pipeline_blueprint,
+        )
+        return ids

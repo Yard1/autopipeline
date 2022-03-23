@@ -16,16 +16,16 @@ from sklearn.ensemble import (
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 
-from .utils import (
+from ..utils import (
     call_method,
     ray_put_if_needed,
     should_use_ray,
     ray_call_method,
     fit_estimators,
     get_ray_pg,
-    ray_pg_context
+    ray_pg_context,
 )
-from ...utils import clone_with_n_jobs
+from ....utils import clone_with_n_jobs
 
 
 def _get_predictions(parallel, estimators, X, method, pg=None):
@@ -56,6 +56,60 @@ def _get_predictions(parallel, estimators, X, method, pg=None):
 class PandasVotingClassifier(_VotingClassifier):
     _is_ensemble = True
 
+    def __init__(
+        self,
+        estimators,
+        *,
+        voting="hard",
+        weights=None,
+        n_jobs=None,
+        flatten_transform=True,
+        verbose=False,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
+    ):
+        super().__init__(
+            estimators,
+            voting=voting,
+            weights=weights,
+            n_jobs=n_jobs,
+            flatten_transform=flatten_transform,
+            verbose=verbose,
+        )
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
+
+    def _validate_weights(self):
+        if self.weights is not None and len(self.weights) != len(self.estimators):
+            raise ValueError(
+                "Number of `estimators` and weights must be equal"
+                "; got %d weights, %d estimators"
+                % (len(self.weights), len(self.estimators))
+            )
+
+    def _fit_estimators(self, X, y, ests, sample_weight=None):
+        parallel = Parallel(n_jobs=self.n_jobs)
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(ests),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
+        with ray_pg_context(pg) as pg:
+            self.estimators_ = fit_estimators(
+                parallel,
+                ests,
+                X,
+                y,
+                sample_weight,
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
+                pg=pg,
+            )
+
     def fit(self, X, y, sample_weight=None):
         check_classification_targets(y)
         if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:
@@ -74,27 +128,11 @@ class PandasVotingClassifier(_VotingClassifier):
 
         """Get common fit operations."""
         names, clfs = self._validate_estimators()
-        clfs = [clone(est) for est in clfs]
+        clfs = [clone(est) for est in clfs if est != "drop"]
 
-        if self.weights is not None and len(self.weights) != len(self.estimators):
-            raise ValueError(
-                "Number of `estimators` and weights must be equal"
-                "; got %d weights, %d estimators"
-                % (len(self.weights), len(self.estimators))
-            )
+        self._validate_weights()
 
-        parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(clfs))
-        with ray_pg_context(pg) as pg:
-            self.estimators_ = fit_estimators(
-                parallel,
-                clfs,
-                X,
-                y,
-                sample_weight,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
-                pg=pg,
-            )
+        self._fit_estimators(X, y, clfs, sample_weight)
 
         self.named_estimators_ = Bunch()
 
@@ -102,6 +140,8 @@ class PandasVotingClassifier(_VotingClassifier):
         est_iter = iter(self.estimators_)
         for name, est in self.estimators:
             current_est = est if est == "drop" else next(est_iter)
+            if current_est == "drop":
+                continue
             self.named_estimators_[name] = current_est
 
         return self
@@ -111,7 +151,9 @@ class PandasVotingClassifier(_VotingClassifier):
         """Get the weights of not `None` estimators."""
         if self.weights is None:
             return None
-        return [w for est, w in zip(self.estimators, self.weights) if est[1] != "drop"]
+        return [
+            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop" and w
+        ]
 
     def predict(self, X):
         """Predict class labels for X.
@@ -145,19 +187,25 @@ class PandasVotingClassifier(_VotingClassifier):
     def _predict(self, X):
         """Collect results from clf.predict calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.named_estimators_))
         with ray_pg_context(pg) as pg:
-            predictions = _get_predictions(parallel, self.estimators_, X, "predict", pg=pg)
+            predictions = _get_predictions(
+                parallel, list(self.named_estimators_.values()), X, "predict", pg=pg
+            )
 
         return np.asarray(predictions).T
 
     def _collect_probas(self, X):
         """Collect results from clf.predict_proba calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.named_estimators_))
         with ray_pg_context(pg) as pg:
             predictions = _get_predictions(
-                parallel, self.estimators_, X, "predict_proba", pg=pg
+                parallel,
+                list(self.named_estimators_.values()),
+                X,
+                "predict_proba",
+                pg=pg,
             )
 
         return np.asarray(predictions)
@@ -174,11 +222,21 @@ class PandasVotingClassifier(_VotingClassifier):
 class PandasVotingRegressor(_VotingRegressor):
     _is_ensemble = True
 
-    def fit(self, X, y, sample_weight=None):
-        """Get common fit operations."""
-        names, regs = self._validate_estimators()
-        regs = [clone(est) for est in regs]
+    def __init__(
+        self,
+        estimators,
+        *,
+        weights=None,
+        n_jobs=None,
+        verbose=False,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
+    ):
+        super().__init__(estimators, weights=weights, n_jobs=n_jobs, verbose=verbose)
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
 
+    def _validate_weights(self):
         if self.weights is not None and len(self.weights) != len(self.estimators):
             raise ValueError(
                 "Number of `estimators` and weights must be equal"
@@ -186,18 +244,36 @@ class PandasVotingRegressor(_VotingRegressor):
                 % (len(self.weights), len(self.estimators))
             )
 
+    def _fit_estimators(self, X, y, ests, sample_weight=None):
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(regs))
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(ests),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
         with ray_pg_context(pg) as pg:
             self.estimators_ = fit_estimators(
                 parallel,
-                regs,
+                ests,
                 X,
                 y,
                 sample_weight,
-                partial(clone_with_n_jobs, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1),
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
                 pg=pg,
             )
+
+    def fit(self, X, y, sample_weight=None):
+        """Get common fit operations."""
+        names, regs = self._validate_estimators()
+        regs = [clone(est) for est in regs if est != "drop"]
+
+        self._validate_weights()
+        self._fit_estimators(X, y, regs, sample_weight)
 
         self.named_estimators_ = Bunch()
 
@@ -205,6 +281,8 @@ class PandasVotingRegressor(_VotingRegressor):
         est_iter = iter(self.estimators_)
         for name, est in self.estimators:
             current_est = est if est == "drop" else next(est_iter)
+            if current_est == "drop":
+                continue
             self.named_estimators_[name] = current_est
 
         return self
@@ -214,7 +292,9 @@ class PandasVotingRegressor(_VotingRegressor):
         """Get the weights of not `None` estimators."""
         if self.weights is None:
             return None
-        return [w for est, w in zip(self.estimators, self.weights) if est[1] != "drop"]
+        return [
+            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop" and w
+        ]
 
     def predict(self, X):
         """Predict class labels for X.
@@ -235,8 +315,10 @@ class PandasVotingRegressor(_VotingRegressor):
     def _predict(self, X):
         """Collect results from clf.predict calls."""
         parallel = Parallel(n_jobs=self.n_jobs)
-        pg = get_ray_pg(parallel, self.n_jobs, len(self.estimators_))
+        pg = get_ray_pg(parallel, self.n_jobs, len(self.named_estimators_))
         with ray_pg_context(pg) as pg:
-            predictions = _get_predictions(parallel, self.estimators_, X, "predict", pg=pg)
+            predictions = _get_predictions(
+                parallel, list(self.named_estimators_.values()), X, "predict", pg=pg
+            )
 
         return np.asarray(predictions).T

@@ -39,6 +39,8 @@ pymoo = "<0.5.0"
 tensorboardx = "*"
 skorch = "*"
 rtdl = "*"
+ranger21 = {git = "https://github.com/lessw2020/Ranger21.git"}
+fasttreeshap = "*"
 
 [requires]
 python_version = "3.8"

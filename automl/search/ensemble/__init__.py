@@ -10,6 +10,7 @@ from .voting_ensemble_creator import (
     VotingByMetricEnsembleCreator,
     VotingSoftEnsembleCreator,
     VotingSoftByMetricEnsembleCreator,
+    GreedyEnsembleCreator
 )
 from .stacking_ensemble_creator import (
     StackingEnsembleCreator,

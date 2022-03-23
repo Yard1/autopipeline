@@ -36,7 +36,7 @@ from automl_models.components.estimators.tree.gradient_booster import (
 
 from .random_forest import RandomForestRegressorWithStd
 
-EPS = 1e-10
+EPS = 1e-6
 
 
 @contextmanager

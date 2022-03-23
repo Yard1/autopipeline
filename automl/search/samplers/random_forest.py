@@ -6,7 +6,7 @@ from sklearn.utils.fixes import delayed
 from sklearn.utils.validation import check_is_fitted
 from joblib import Parallel
 
-EPS = 1e-10
+EPS = 1e-6
 
 
 def _accumulate_prediction(e, X):

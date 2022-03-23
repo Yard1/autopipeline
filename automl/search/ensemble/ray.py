@@ -1,9 +1,6 @@
 from automl.search.ensemble.ensemble_creator import EnsembleCreator
 from automl.search.ensemble.stacking_ensemble_creator import StackingEnsembleCreator
-import ray
-import gc
 import numpy as np
-import joblib
 import traceback
 from ray.util.joblib import register_ray
 from ..utils import score_test
@@ -37,8 +34,6 @@ def _score_ensemble(
             refit=False,
             error_score=np.nan,
         )
-    if hasattr(ensemble, "_saved_test_predictions"):
-        del ensemble._saved_test_predictions
     try:
         ensemble.set_params(n_jobs=None)
     except Exception:

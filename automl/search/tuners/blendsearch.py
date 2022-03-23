@@ -65,7 +65,7 @@ from ...utils.tune_callbacks import BestPlotCallback, META_KEY
 from ...problems import ProblemType
 from ...utils.display import IPythonDisplay
 
-EPS = 1e-10
+EPS = 1e-6
 GlobalSearch = ConditionalOptunaSearchCatBoost
 
 
@@ -1546,12 +1546,12 @@ class ConditionalBlendSearch(BlendSearch):
         return config, prune_attr, 0
 
     def _get_ei_space(self):
-        step_size = self._ls.STEPSIZE
+        step_size = self._ls.STEPSIZE - EPS
         denorm_gs_admissible_min = self._ls.denormalize(
-            {k: max(0, v - step_size + EPS) for k, v in self._gs_admissible_min.items()}
+            {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
         )
         denorm_gs_admissible_max = self._ls.denormalize(
-            {k: min(1, v + step_size - EPS) for k, v in self._gs_admissible_max.items()}
+            {k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()}
         )
         ei_space = deepcopy(self._search_thread_pool[0]._search_alg._space)
         for k in denorm_gs_admissible_min:

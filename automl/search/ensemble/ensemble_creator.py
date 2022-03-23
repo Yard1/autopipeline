@@ -28,9 +28,11 @@ class EnsembleCreator(ABC):
         self,
         ensemble_strategy: EnsembleStrategy,
         problem_type: ProblemType,
+        **init_kwargs
     ) -> None:
         self.ensemble_strategy = ensemble_strategy
         self.problem_type = problem_type
+        self.init_kwargs = init_kwargs
 
     @property
     def ensemble_class(self) -> type:

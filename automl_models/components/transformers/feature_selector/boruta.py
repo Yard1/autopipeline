@@ -18,6 +18,8 @@ from sklearn.utils import check_X_y
 from sklearn.base import clone, is_classifier
 from sklearn.utils.validation import check_random_state
 
+from automl_models.components.utils import clone_with_n_jobs
+
 from ...compatibility.pandas import PandasDataFrameTransformerMixin
 from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
@@ -37,6 +39,7 @@ class _BorutaSHAP(BorutaPy):
         verbose=0,
         early_stopping=False,
         n_iter_no_change=20,
+        n_jobs=None,
     ):
         if estimator == "LGBMRegressor":
             estimator = LGBMRegressor(**lightgbm_fs_config)
@@ -57,6 +60,7 @@ class _BorutaSHAP(BorutaPy):
         self._is_lightgbm = "LGBM" in str(self.estimator) or "lightgbm" in str(
             type(self.estimator)
         )
+        self.n_jobs = n_jobs
 
     def _get_shuffle(self, seq):
         self.random_state_.shuffle(seq)
@@ -65,7 +69,7 @@ class _BorutaSHAP(BorutaPy):
     def _fit(self, X, y):
         self.random_state_ = check_random_state(self.random_state)
 
-        self.estimator_ = clone(self.estimator)
+        self.estimator_ = clone_with_n_jobs(self.estimator, n_jobs=self.n_jobs)
         self._is_classification_ = is_classifier(self.estimator_)
 
         # if self._is_classification_ and self._is_lightgbm:
@@ -299,7 +303,7 @@ class _BorutaSHAP(BorutaPy):
             raise ValueError("Alpha should be between 0 and 1.")
 
     def _get_shap_imp(self, X, estimator):
-        return get_shap(estimator, X)
+        return get_shap(estimator, X, n_jobs=self.n_jobs or 1)
 
     def _get_tree_num(self, n_feat):
         return get_tree_num(self.estimator_, n_feat)

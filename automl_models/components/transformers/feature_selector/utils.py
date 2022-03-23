@@ -1,4 +1,5 @@
 import numpy as np
+import fasttreeshap
 import shap
 import contextlib
 import warnings
@@ -24,12 +25,18 @@ lightgbm_fs_config = {
 }
 
 
-def get_shap(estimator, X) -> np.ndarray:
+def get_shap(estimator, X, n_jobs=1) -> np.ndarray:
     with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
-        explainer = shap.TreeExplainer(
-            estimator, feature_perturbation="tree_path_dependent"
-        )
-        shap_values = np.array(explainer.shap_values(X))
+        try:
+            explainer = fasttreeshap.TreeExplainer(
+                estimator, feature_perturbation="tree_path_dependent", n_jobs=n_jobs
+            )
+            shap_values = np.array(explainer.shap_values(X))
+        except Exception:
+            explainer = shap.TreeExplainer(
+                estimator, feature_perturbation="tree_path_dependent"
+            )
+            shap_values = np.array(explainer.shap_values(X))
         if len(shap_values.shape) == 3:
             shap_values = np.abs(shap_values).sum(axis=0)
             shap_values = shap_values.mean(0)

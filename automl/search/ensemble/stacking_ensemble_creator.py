@@ -90,7 +90,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
-        assert "cv" in kwargs
+        assert "stacking_cv" in kwargs
         kwargs = self._treat_kwargs(kwargs)
         super().fit_ensemble(
             X,
@@ -122,9 +122,10 @@ class StackingEnsembleCreator(EnsembleCreator):
         ensemble = self.ensemble_class(
             estimators=estimators,
             final_estimator=self.final_estimator_(),
-            cv=kwargs["cv"],
+            cv=kwargs["stacking_cv"],
             n_jobs=None,
             memory=dynamic_memory_factory(kwargs.get("cache", None)),
+            **(self.init_kwargs or {})
         )()
         if previous_stack:
             stacked_ensemble = clone(previous_stack)
@@ -315,7 +316,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         y_test_original: Optional[pd.Series],
         **kwargs,
     ) -> Tuple[BaseEstimator, pd.DataFrame, pd.DataFrame]:
-        assert "cv" in kwargs
+        assert "stacking_cv" in kwargs
         kwargs = self._treat_kwargs(kwargs)
         super(StackingEnsembleCreator, self).fit_ensemble(
             X,
@@ -347,9 +348,10 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         ensemble = self.ensemble_class(
             estimators=estimators,
             final_estimator=self.final_estimator_(),
-            cv=kwargs["cv"],
+            cv=kwargs["stacking_cv"],
             n_jobs=None,
             memory=dynamic_memory_factory(kwargs.get("cache", None)),
+            **(self.init_kwargs or {})
         )()
         if previous_stack:
             stacked_ensemble = clone(previous_stack)

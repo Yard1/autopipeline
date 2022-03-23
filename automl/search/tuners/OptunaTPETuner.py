@@ -406,7 +406,7 @@ class ConditionalOptunaSearchCatBoost(ConditionalOptunaSearch):
             )
 
         def ei_objective(trial):
-            self._get_params(trial, ei_space if ei_space else self._ot_space)
+            self._get_params(trial, ei_space or self._ot_space)
 
         self._ot_study.sampler._ei_objective = ei_objective
 

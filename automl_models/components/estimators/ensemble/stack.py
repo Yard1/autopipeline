@@ -1,7 +1,6 @@
 from typing import Optional
 import numpy as np
 import pandas as pd
-from copy import deepcopy
 from functools import partial
 
 from joblib import Parallel
@@ -21,7 +20,6 @@ from sklearn.utils.validation import check_is_fitted, check_memory
 from .utils import (
     call_method,
     ray_call_method,
-    cross_val_predict_repeated,
     should_use_ray,
     put_args_if_ray,
     fit_single_estimator,
@@ -29,7 +27,7 @@ from .utils import (
     fit_estimators,
     get_ray_pg,
     ray_pg_context,
-    ray_cross_val_predict_repeated,
+    get_cv_predictions,
 )
 from ...utils import clone_with_n_jobs, ray_put_if_needed
 from ...preprocessing import PrepareDataFrame
@@ -39,68 +37,6 @@ import logging
 import ray
 
 logger = logging.getLogger(__name__)
-
-
-def _get_cv_predictions(
-    parallel,
-    all_estimators,
-    X,
-    y,
-    cv,
-    fit_params,
-    verbose,
-    stack_method,
-    n_jobs,
-    X_ray=None,
-    y_ray=None,
-    pg=None,
-):
-    if should_use_ray(parallel):
-        cloned_estimators = [
-            (
-                ray_put_if_needed(
-                    clone_with_n_jobs(
-                        est, n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1
-                    )
-                ),
-                meth,
-            )
-            for est, meth in zip(all_estimators, stack_method)
-            if est != "drop"
-        ]
-        X_ref = ray_put_if_needed(X_ray)
-        y_ref = ray_put_if_needed(y_ray)
-        fit_params_ref = ray_put_if_needed(fit_params)
-        estimators, methods = zip(*cloned_estimators)
-        predictions = ray_cross_val_predict_repeated(
-            estimators,
-            X,
-            y,
-            cv=deepcopy(cv),
-            methods=methods,
-            fit_params=fit_params_ref,
-            verbose=verbose,
-            placement_group=pg,
-            num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1,
-            X_ref=X_ref,
-            y_ref=y_ref,
-        )
-    else:
-        predictions = parallel(
-            delayed(cross_val_predict_repeated)(
-                clone_with_n_jobs(est),
-                X,
-                y,
-                cv=deepcopy(cv),
-                method=meth,
-                n_jobs=n_jobs,
-                fit_params=fit_params,
-                verbose=verbose,
-            )
-            for est, meth in zip(all_estimators, stack_method)
-            if est != "drop"
-        )
-    return predictions
 
 
 def _fit_final_estimator(
@@ -334,7 +270,7 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             )
             memory = check_memory(self.memory)
             get_cv_predictions_cached = memory.cache(
-                _get_cv_predictions,
+                get_cv_predictions,
                 ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
             )
             predictions = get_cv_predictions_cached(
@@ -598,7 +534,7 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             )
             memory = check_memory(self.memory)
             get_cv_predictions_cached = memory.cache(
-                _get_cv_predictions,
+                get_cv_predictions,
                 ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
             )
             predictions = get_cv_predictions_cached(

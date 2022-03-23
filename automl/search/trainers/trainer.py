@@ -40,8 +40,10 @@ from ..ensemble import (
     VotingEnsembleCreator,
     StackingEnsembleCreator,
     SelectFromModelStackingEnsembleCreator,
+    OneRoundRobinThenEnsembleBest,
     VotingSoftEnsembleCreator,
     VotingSoftByMetricEnsembleCreator,
+    GreedyEnsembleCreator,
 )
 from ..ensemble.ray import (
     ray_fit_ensemble,
@@ -75,7 +77,7 @@ from automl_models.components.estimators.ensemble import (
     PandasStackingRegressor,
     PandasVotingClassifier,
     PandasVotingRegressor,
-    #DESSplitter,
+    # DESSplitter,
 )
 from automl_models.components.estimators.ensemble.stack import DeepStackMixin
 
@@ -124,63 +126,71 @@ class Trainer:
         self.cache = cache
         self.secondary_tuning_strategy = (
             secondary_tuning_strategy
-            or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=15)
+            or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=85)
         )
         self.stacking_level = stacking_level
         self.main_stacking_ensemble = main_stacking_ensemble or StackingEnsembleCreator(
             ensemble_strategy=RoundRobinEstimator(
-                configurations_to_select=10, percentile_threshold=5
+                configurations_to_select=10, percentile_threshold=51
             ),
             problem_type=self.problem_type,
         )
         self.secondary_ensembles = (
             secondary_ensembles
             or [
-                VotingEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
+                GreedyEnsembleCreator(
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
                         configurations_to_select=100,
-                        percentile_threshold=15,
+                        percentile_threshold=85,
                         use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
-                ),
-                VotingByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100,
-                        percentile_threshold=15,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
-                ),
-                # SelectFromModelStackingEnsembleCreator(
-                #     ensemble_strategy=EnsembleBest(
-                #         configurations_to_select=100,
-                #         percentile_threshold=1,
-                #         use_only_last_results=False,
-                #     ),
-                #     problem_type=self.problem_type,
-                # ),
-            ]
-            + [
-                VotingSoftEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100,
-                        percentile_threshold=15,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
-                ),
-                VotingSoftByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=100,
-                        percentile_threshold=15,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
-                ),
-            ]
-            if self.problem_type.is_classification()
-            else []
+                ),]
+            #     VotingEnsembleCreator(
+            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
+            #             configurations_to_select=20,
+            #             percentile_threshold=85,
+            #             use_only_last_results=False,
+            #         ),
+            #         problem_type=self.problem_type,
+            #     ),
+            #     VotingByMetricEnsembleCreator(
+            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
+            #             configurations_to_select=20,
+            #             percentile_threshold=85,
+            #             use_only_last_results=False,
+            #         ),
+            #         problem_type=self.problem_type,
+            #     ),
+            #     # SelectFromModelStackingEnsembleCreator(
+            #     #     ensemble_strategy=EnsembleBest(
+            #     #         configurations_to_select=100,
+            #     #         percentile_threshold=1,
+            #     #         use_only_last_results=False,
+            #     #     ),
+            #     #     problem_type=self.problem_type,
+            #     # ),
+            # ]
+            # + [
+            #     VotingSoftEnsembleCreator(
+            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
+            #             configurations_to_select=20,
+            #             percentile_threshold=85,
+            #             use_only_last_results=False,
+            #         ),
+            #         problem_type=self.problem_type,
+            #     ),
+            #     VotingSoftByMetricEnsembleCreator(
+            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
+            #             configurations_to_select=20,
+            #             percentile_threshold=85,
+            #             use_only_last_results=False,
+            #         ),
+            #         problem_type=self.problem_type,
+            #     ),
+            # ]
+            # if self.problem_type.is_classification()
+            # else []
         )
         self.secondary_level = secondary_level
         self.tune_kwargs = tune_kwargs or {}
@@ -449,7 +459,8 @@ class Trainer:
             "y_test": y_test,
             "X_test_original": X_test_original,
             "y_test_original": y_test_original,
-            "cv": deepcopy(self.stacking_cv_),
+            "stacking_cv": deepcopy(self.stacking_cv_),
+            "cv": deepcopy(self.cv_),
             "cache": self.last_tuner_._cache,  # TODO make dynamic
         }
 
