@@ -1,8 +1,12 @@
 import numpy as np
-import fasttreeshap
 import shap
 import contextlib
 import warnings
+
+try:
+    import fasttreeshap
+except ImportError:
+    fasttreeshap = None
 
 # lightgbm_rf_config = {
 #     "n_jobs": 1,
@@ -28,6 +32,7 @@ lightgbm_fs_config = {
 def get_shap(estimator, X, n_jobs=1) -> np.ndarray:
     with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
         try:
+            assert fasttreeshap
             explainer = fasttreeshap.TreeExplainer(
                 estimator, feature_perturbation="tree_path_dependent", n_jobs=n_jobs
             )
