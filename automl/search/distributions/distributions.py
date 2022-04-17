@@ -282,8 +282,8 @@ class DiscreteUniformDistribution(Distribution):
 
     def __init__(
         self,
-        lower: int,
-        upper: int,
+        lower: float,
+        upper: float,
         q: Optional[float] = None,
         cost_related: bool = True,
         cost_bounds: str = "both",

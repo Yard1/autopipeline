@@ -1,11 +1,9 @@
 import pandas as pd
-import numpy as np
 from catboost import CatBoostClassifier, CatBoostRegressor
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 
-from pandas.api.types import (
-    is_categorical_dtype,
-)
+from pandas.api.types import is_categorical_dtype
+
 
 def categorical_column_to_int(col):
     if is_categorical_dtype(col.dtype):
@@ -14,7 +12,9 @@ def categorical_column_to_int(col):
     return col
 
 
-class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin, BaseEstimator):
+class CatBoostClassifierWithAutoCatFeatures(
+    CatBoostClassifier, ClassifierMixin, BaseEstimator
+):
     def get_params(self, deep=True):
         r = super().get_params(deep=deep)
         r["auto_class_weights"] = r.get("auto_class_weights", None)
@@ -71,7 +71,9 @@ class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin,
         )
 
 
-class CatBoostRegressorWithAutoCatFeatures(CatBoostRegressor, RegressorMixin, BaseEstimator):
+class CatBoostRegressorWithAutoCatFeatures(
+    CatBoostRegressor, RegressorMixin, BaseEstimator
+):
     def __repr__(self, N_CHAR_MAX=700) -> str:
         return BaseEstimator.__repr__(self, N_CHAR_MAX=N_CHAR_MAX)
 

@@ -27,15 +27,15 @@ class FTTransformerClassifier(NeuralNetworkEstimator):
         "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        "lr_schedule": True,
+        "lr_schedule": False,
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
     _default_tuning_grid_extended = {
-        "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
-        "lr_schedule": CategoricalDistribution([False, True]),
+        #"lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        #"lr_schedule": CategoricalDistribution([False, True]),
     }
 
     _problem_types = {
@@ -59,15 +59,15 @@ class FTTransformerRegressor(NeuralNetworkEstimator):
         "batch_size_power": 9,
         "verbose": 0,
         "device": "cpu",
-        "lr_schedule": True,
+        "lr_schedule": False,
         "n_iter_no_change": 5,
         "iterator_train__shuffle": True,
     }
 
     _default_tuning_grid = {}
     _default_tuning_grid_extended = {
-        "lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
-        "lr_schedule": CategoricalDistribution([False, True]),
+        #"lr": UniformDistribution(5e-5, 1e-1, log=True, cost_bounds="lower"),
+        #"lr_schedule": CategoricalDistribution([False, True]),
     }
 
     _problem_types = {

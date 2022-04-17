@@ -1,9 +1,9 @@
 - https://github.com/dreamquark-ai/tabnet https://www.kaggle.com/neilgibbons/tuning-tabnet-with-optuna
 - XGBoost
-- Naive Bayes
+- Naive Bayes DONE
 - ARD for regression
 - OptBinning
-- Coalesce low frequency categories
+- Coalesce low frequency categories DONE
 - PCA for linear models
 - SULOV https://github.com/AutoViML/featurewiz
 - remove SHAP in model feature selection, use LGBM built-in SHAP instead

@@ -5,9 +5,6 @@ from ....search.distributions import (
     CategoricalDistribution,
     IntUniformDistribution,
 )
-from ...component import ComponentConfig
-from ....search.stage import AutoMLStage
-
 from automl_models.components.transformers.svm_kernel.pcs import (
     PolynomialCountSketchDynamicNComponents,
 )

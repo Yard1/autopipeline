@@ -2,6 +2,8 @@ import numpy as np
 
 from typing import Optional
 
+from automl.components.transformers.category_coalescer import CategoryCoalescer
+
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
 from ...components.flow import (
@@ -71,6 +73,7 @@ def create_pipeline_blueprint(
         ),
     }
     unknown_categories = {"UnknownCategoriesDropper": UnknownCategoriesDropper()}
+    category_coalescers = {"CategoryCoalescer": CategoryCoalescer()}
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     imputers = {
         "CombinedSimpleImputer": CombinedSimpleImputer(),
@@ -89,14 +92,14 @@ def create_pipeline_blueprint(
         "CatBoostEncoderBinary": CatBoostEncoderBinary(),
         "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),
-        #"BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
-        #"BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
-        #"BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
+        # "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
+        # "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
+        # "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
-        "BorutaSHAPClassification": BorutaSHAPClassification(),
-        "BorutaSHAPRegression": BorutaSHAPRegression(),
+        #"BorutaSHAPClassification": BorutaSHAPClassification(),
+        #"BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
         "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
     }
@@ -113,8 +116,8 @@ def create_pipeline_blueprint(
         # "DecisionTreeClassifier": DecisionTreeClassifier(),
         # "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
-        #"LogisticRegression_L1": LogisticRegression(l1_ratio=1),
-        #"LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.0001),
+        # "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
+        # "LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.0001),
         "LinearRegression": LinearRegression(),
         "ElasticNet": ElasticNet(),
         "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.0001),
@@ -140,6 +143,7 @@ def create_pipeline_blueprint(
     components = {
         **passthrough,
         **unknown_categories,
+        **category_coalescers,
         **imbalance,
         **imputers,
         **scalers_normalizers,
@@ -159,6 +163,10 @@ def create_pipeline_blueprint(
         ),
         ("UnknownCategories", list(unknown_categories.values())),
         ("Imputer", list(imputers.values())),
+        (
+            "CategoryCoalescer",
+            list(category_coalescers.values()),
+        ),
         (
             "FeatureSelector",
             [components["Passthrough"]] + list(feature_selectors.values()),

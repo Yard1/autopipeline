@@ -68,19 +68,6 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
         self.cv = cv
         self.lr_schedule = lr_schedule
 
-    @property
-    def _default_callbacks(self):
-        return super()._default_callbacks + (
-            [
-                (
-                    "early_stopping",
-                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
-                )
-            ]
-            if self.early_stopping
-            else []
-        )
-
     def initialize_module(self):
         """Initializes the module.
 
@@ -181,19 +168,6 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         self.category_cardinalities = category_cardinalities
         self.cv = cv
         self.lr_schedule = lr_schedule
-
-    @property
-    def _default_callbacks(self):
-        return super()._default_callbacks + (
-            [
-                (
-                    "early_stopping",
-                    EarlyStopping(monitor="valid_loss", patience=self.n_iter_no_change),
-                )
-            ]
-            if self.early_stopping
-            else []
-        )
 
     def initialize_module(self):
         """Initializes the module.

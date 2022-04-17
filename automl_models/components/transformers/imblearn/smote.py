@@ -7,7 +7,7 @@ from imblearn.over_sampling import (
 )
 from sklearn.base import BaseEstimator, clone
 
-from ...compatibility.pandas import PandasDataFrameTransformerMixin
+from ...compatibility.pandas import PandasDataFrameTransformerMixin, categorical_columns_to_int_categories
 from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ..transformer import DataType
 from ...utils import validate_type
@@ -119,6 +119,25 @@ class _PandasAutoSMOTE(BaseEstimator):
         return Xt, yt
 
 
-class PandasAutoSMOTE(PandasDataFrameTransformerMixin, _PandasAutoSMOTE):
+class PandasAutoSMOTE(_PandasAutoSMOTE):
+    def fit(self, X, y=None, **fit_params):
+        if isinstance(X, pd.Series):
+            X = pd.DataFrame(X)
+        try:
+            self.columns_ = X.columns
+        except Exception:
+            self.columns_ = None
+        validate_type(X, "X", pd.DataFrame)
+        try:
+            return super().fit(categorical_columns_to_int_categories(X), y=y, **fit_params)
+        except TypeError:
+            return super().fit(categorical_columns_to_int_categories(X))
+
     def get_index(self, Xt, X, y=None):
         return Xt.index
+
+    def get_columns(self, Xt, X, y=None):
+        return X.columns
+
+    def get_dtypes(self, Xt, X, y=None):
+        return X.dtypes.to_dict()

@@ -18,8 +18,6 @@ from sklearn.utils.validation import (
 )
 from joblib import Parallel
 
-from automl_models.components.utils import split_list_into_chunks
-
 from .voting import PandasVotingClassifier, PandasVotingRegressor
 from ..utils import (
     get_ray_pg,
@@ -193,6 +191,7 @@ def _fit_greedy_ensemble(
 
 
 _ray_fit_greedy_ensemble = ray.remote(_fit_greedy_ensemble)
+
 
 # TODO handle non-ray case
 class GreedyEnsembleSelection:
