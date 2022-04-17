@@ -30,11 +30,12 @@ class PandasCategoryCoalescer(
             categories_to_replace,
             combined_category_name,
         )
-        try:
-            col = col.cat.add_categories([combined_category_name])
-        except ValueError:
-            pass
-        col = col.replace({k: combined_category_name for k in categories_to_replace})
+        if len(categories_to_replace) > 1:
+            try:
+                col = col.cat.add_categories([combined_category_name])
+            except ValueError:
+                pass
+            col = col.replace({k: combined_category_name for k in categories_to_replace})
         col = col.cat.remove_unused_categories()
         return col
 
@@ -45,11 +46,12 @@ class PandasCategoryCoalescer(
         categories_to_replace, combined_category_name = self.coalesced_categories_[
             col.name
         ]
-        try:
-            col = col.cat.add_categories([combined_category_name])
-        except ValueError:
-            pass
-        col = col.replace({k: combined_category_name for k in categories_to_replace})
+        if len(categories_to_replace) > 1:
+            try:
+                col = col.cat.add_categories([combined_category_name])
+            except ValueError:
+                pass
+            col = col.replace({k: combined_category_name for k in categories_to_replace})
         col = col.cat.remove_unused_categories()
         return col
 
