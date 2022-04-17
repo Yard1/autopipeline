@@ -13,10 +13,10 @@ UPPER_BOUNDS = 0.2
 class CategoryCoalescer(Transformer):
     _component_class = PandasCategoryCoalescer
     _default_parameters = {
-        "minimum_fraction": 0.01
+        "minimum_fraction": 0.0001
     }
     _default_tuning_grid = {
-        "minimum_fraction": UniformDistribution(0.001, UPPER_BOUNDS, log=True, cost_related=False),
+        "minimum_fraction": UniformDistribution(0.0001, UPPER_BOUNDS, log=True, cost_related=False),
     }
     _component_level = ComponentLevel.RARE
 
