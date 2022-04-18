@@ -1,7 +1,9 @@
+import joblib
 from joblib.parallel import Parallel
 import numpy as np
 import ray
 import math
+from ray.util.joblib import register_ray
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -92,7 +94,11 @@ def _get_average_preds_from_repeated_cv(predictions: list, estimator):
     return predictions[0]
 
 
-ray_fit_and_predict = ray.remote(_fit_and_predict)
+@ray.remote
+def ray_fit_and_predict(*args, n_jobs=1, **kwargs):
+    register_ray()
+    with joblib.parallel_backend("ray", n_jobs=n_jobs):
+        return _fit_and_predict(*args, **kwargs)
 
 
 def _cross_val_predict_ray_remotes(
@@ -141,7 +147,9 @@ def _cross_val_predict_ray_remotes(
     # We clone the estimator to make sure that all the folds are
     # independent, and that it is pickle-able.
     ray_fit_and_predict_cpus = ray_fit_and_predict.options(
-        placement_group=placement_group, num_cpus=num_cpus
+        placement_group=placement_group,
+        num_cpus=num_cpus,
+        placement_group_capture_child_tasks=True,
     )
     predictions = [
         ray_fit_and_predict_cpus.remote(
@@ -153,6 +161,7 @@ def _cross_val_predict_ray_remotes(
             verbose,
             fit_params,
             method,
+            n_jobs=num_cpus,
         )
         for train, test in splits
     ]

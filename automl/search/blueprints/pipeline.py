@@ -8,7 +8,6 @@ from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
 from ...components.flow import (
     ColumnTransformer,
-    Pipeline,
     TopPipeline,
 )
 from ...components.transformers import *
@@ -98,8 +97,8 @@ def create_pipeline_blueprint(
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
-        #"BorutaSHAPClassification": BorutaSHAPClassification(),
-        #"BorutaSHAPRegression": BorutaSHAPRegression(),
+        # "BorutaSHAPClassification": BorutaSHAPClassification(),
+        # "BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
         "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
     }

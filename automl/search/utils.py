@@ -7,6 +7,7 @@ import contextlib
 import time
 import traceback
 import joblib
+from ray.util.joblib import register_ray
 from ray.util.placement_group import get_current_placement_group
 
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone
@@ -29,7 +30,12 @@ from sklearn.metrics._scorer import (
 from .metrics.scorers import MultimetricScorerWithErrorScore
 from ..components.component import Component
 
-ray_fit_and_score = ray.remote(_fit_and_score)
+
+@ray.remote
+def ray_fit_and_score(*args, n_jobs=1, **kwargs):
+    register_ray()
+    with joblib.parallel_backend("ray", n_jobs=n_jobs):
+        return _fit_and_score(*args, **kwargs)
 
 
 def ray_cross_validate(
@@ -69,7 +75,11 @@ def ray_cross_validate(
     X_ref = X_ref if X_ref is not None else ray.put(X)
     y_ref = y_ref if y_ref is not None else ray.put(y)
 
-    ray_fit_and_score_cpus = ray_fit_and_score.options(num_cpus=n_jobs, placement_group=get_current_placement_group())
+    ray_fit_and_score_cpus = ray_fit_and_score.options(
+        num_cpus=n_jobs,
+        placement_group=get_current_placement_group(),
+        placement_group_capture_child_tasks=True,
+    )
     results_futures = [
         ray_fit_and_score_cpus.remote(
             clone(estimator),
@@ -85,6 +95,7 @@ def ray_cross_validate(
             return_times=True,
             return_estimator=return_estimator,
             error_score=error_score,
+            n_jobs=n_jobs,
         )
         for train, test in train_test
     ]

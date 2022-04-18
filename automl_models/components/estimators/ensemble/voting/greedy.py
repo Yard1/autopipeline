@@ -1,7 +1,8 @@
+import math
 import ray
 from copy import deepcopy
 from functools import partial
-from typing import List
+from typing import List, Optional
 import numpy as np
 from collections import Counter
 
@@ -69,7 +70,10 @@ def _get_initial_estimators(
         losses[j] = np.mean(test_scores)
     losses = list(enumerate(losses))
     losses.sort(key=lambda x: x[1], reverse=True)
-    return [i for i, loss in losses][:n_initial_estimators]
+    if isinstance(n_initial_estimators, float):
+        n_initial_estimators = math.round(len(losses) * n_initial_estimators)
+    n_initial_estimators = int(n_initial_estimators)
+    return [i for i, _ in losses][:n_initial_estimators]
 
 
 def _fit_greedy_ensemble(
@@ -82,6 +86,7 @@ def _fit_greedy_ensemble(
     ensemble_size,
     n_splits,
     n_iter_no_change=None,
+    actual_indices: Optional[List[int]] = None,
 ):
     rand: np.random.RandomState = check_random_state(random_state)
     fake_estimator = FakeClassifier if is_classifier_ensemble else FakeRegressor
@@ -171,11 +176,9 @@ def _fit_greedy_ensemble(
             iters_without_change = 0
         else:
             iters_without_change += 1
-        # print(
-        #     f"GREEDY train_score {train_score} best_train_score {best_train_score} iters_without_change {iters_without_change}\n"
-        #     f"order {order}\n"
-        #     f"best_order {best_order}"
-        # )
+        print(
+            f"GREEDY iter {i} max_iters {ensemble_size} train_score {test_score} best_train_score {best_test_score} iters_without_change {iters_without_change}"
+        )
 
         # Handle special case
         if len(predictions) == 1:
@@ -187,6 +190,9 @@ def _fit_greedy_ensemble(
         else:
             best_order = order
 
+    if actual_indices:
+        best_order = [actual_indices[i] for i in best_order]
+    print(f"BAG ACTUAL INDICES {actual_indices} GREEDY INDICES {best_order}")
     return best_order
 
 
@@ -295,21 +301,25 @@ class GreedyEnsembleSelection:
                 )
                 if not indices:
                     continue
-                bag = [
-                    prediction
+                bag_indices = [
+                    (prediction, i)
                     for i, prediction in enumerate(predictions)
                     if i in indices
                 ]
+                bag, actual_indices = zip(*bag_indices)
+                bag = list(bag)
+                actual_indices = list(actual_indices)
                 order = _ray_fit_greedy_ensemble_pg.remote(
                     bag,
                     labels_ref,
-                    self.random_state,
+                    self.random_state + j,
                     scorer,
                     is_classifier(self),
                     self.n_initial_estimators,
                     self._ensemble_size_not_none,
                     self.cv.get_n_splits(),
                     self.n_iter_no_change,
+                    actual_indices=actual_indices,
                 )
                 order_of_each_bag.append(order)
             if order_of_each_bag:
@@ -321,7 +331,7 @@ class GreedyEnsembleSelection:
                 self.indices_ = ray.get(
                     _ray_fit_greedy_ensemble_pg.remote(
                         predictions,
-                        labels,
+                        labels_ref,
                         self.random_state,
                         scorer,
                         is_classifier(self),

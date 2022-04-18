@@ -145,52 +145,53 @@ class Trainer:
                         use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
-                ),]
-            #     VotingEnsembleCreator(
-            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
-            #             configurations_to_select=20,
-            #             percentile_threshold=85,
-            #             use_only_last_results=False,
-            #         ),
-            #         problem_type=self.problem_type,
-            #     ),
-            #     VotingByMetricEnsembleCreator(
-            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
-            #             configurations_to_select=20,
-            #             percentile_threshold=85,
-            #             use_only_last_results=False,
-            #         ),
-            #         problem_type=self.problem_type,
-            #     ),
-            #     # SelectFromModelStackingEnsembleCreator(
-            #     #     ensemble_strategy=EnsembleBest(
-            #     #         configurations_to_select=100,
-            #     #         percentile_threshold=1,
-            #     #         use_only_last_results=False,
-            #     #     ),
-            #     #     problem_type=self.problem_type,
-            #     # ),
-            # ]
-            # + [
-            #     VotingSoftEnsembleCreator(
-            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
-            #             configurations_to_select=20,
-            #             percentile_threshold=85,
-            #             use_only_last_results=False,
-            #         ),
-            #         problem_type=self.problem_type,
-            #     ),
-            #     VotingSoftByMetricEnsembleCreator(
-            #         ensemble_strategy=OneRoundRobinThenEnsembleBest(
-            #             configurations_to_select=20,
-            #             percentile_threshold=85,
-            #             use_only_last_results=False,
-            #         ),
-            #         problem_type=self.problem_type,
-            #     ),
-            # ]
-            # if self.problem_type.is_classification()
-            # else []
+                    n_initial_estimators=5,
+                ),
+                VotingEnsembleCreator(
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
+                    ),
+                    problem_type=self.problem_type,
+                ),
+                VotingByMetricEnsembleCreator(
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
+                    ),
+                    problem_type=self.problem_type,
+                ),
+                # SelectFromModelStackingEnsembleCreator(
+                #     ensemble_strategy=EnsembleBest(
+                #         configurations_to_select=100,
+                #         percentile_threshold=1,
+                #         use_only_last_results=False,
+                #     ),
+                #     problem_type=self.problem_type,
+                # ),
+            ]
+            + [
+                VotingSoftEnsembleCreator(
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
+                    ),
+                    problem_type=self.problem_type,
+                ),
+                VotingSoftByMetricEnsembleCreator(
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
+                    ),
+                    problem_type=self.problem_type,
+                ),
+            ]
+            if self.problem_type.is_classification()
+            else []
         )
         self.secondary_level = secondary_level
         self.tune_kwargs = tune_kwargs or {}

@@ -68,9 +68,6 @@ class _SubsampleMetaSplitterWithStratify(_SubsampleMetaSplitter):
             yield train_idx, test_idx
 
 
-
-
-
 # TODO break this up into a class for classification and for regression
 # TODO save all split scores
 class SklearnTrainable(Trainable):
@@ -80,8 +77,6 @@ class SklearnTrainable(Trainable):
     and restore routines.
 
     """
-
-    N_JOBS = 1
 
     def setup(self, config, refs, **params):
         # forward-compatbility
@@ -119,7 +114,6 @@ class SklearnTrainable(Trainable):
             self.y_test_ = params.get("y_test_", None)
             self.cache_results = params.get("cache_results", True)
             self.previous_stack = params.get("previous_stack", None)
-            self.N_JOBS = params.get("n_jobs", 1)
             self.n_jobs_per_fold = params.get("n_jobs_per_fold", 1)
         assert self.X_ is not None
         self.estimator_config = config
@@ -129,8 +123,9 @@ class SklearnTrainable(Trainable):
 
         # forward-compatbility
         logger.debug("training")
+        num_cpus = self.trial_resources.required_resources["CPU"]
         register_ray()
-        with joblib.parallel_backend("threading"):
+        with joblib.parallel_backend("ray", n_jobs=num_cpus):
             r = self._train()
 
         return r
@@ -156,9 +151,9 @@ class SklearnTrainable(Trainable):
             scoring["dummy_decision_function_scorer"] = dummy_decision_function_scorer
         return scoring
 
-    #@classmethod
-    #def default_resource_request(cls, config):
-        #return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
+    # @classmethod
+    # def default_resource_request(cls, config):
+    # return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
     def _train(self):
         self.estimator = None
@@ -174,13 +169,13 @@ class SklearnTrainable(Trainable):
             prune_attr = config_called.pop(self.prune_attr, None)
         else:
             prune_attr = None
-        #print(f"trial prune_attr: {prune_attr}")
+        # print(f"trial prune_attr: {prune_attr}")
 
         estimator.set_params(**config_called)
         memory = dynamic_memory_factory(self.cache)
 
         estimator.set_params(memory=memory)
-        #print(f"doing cv on {estimator.steps[-1][1]}")
+        # print(f"doing cv on {estimator.steps[-1][1]}")
 
         n_jobs_per_fold = self.n_jobs_per_fold
 
@@ -232,7 +227,9 @@ class SklearnTrainable(Trainable):
             #     for k, v in estimator.get_params().items()
             #     if k.endswith("n_jobs") or k.endswith("thread_count")
             # })
-            test_ret = ray_score_test.options(num_cpus=n_jobs_per_fold, placement_group=get_current_placement_group()).remote(
+            test_ret = ray_score_test.options(
+                num_cpus=n_jobs_per_fold, placement_group=get_current_placement_group()
+            ).remote(
                 estimator,
                 self.X_,
                 self.y_,
@@ -276,9 +273,7 @@ class SklearnTrainable(Trainable):
         if test_ret:
             test_metrics, fitted_estimator = ray.get(test_ret)
             self.estimator = fitted_estimator
-            test_metrics = {
-                k: v for k, v in test_metrics.items() if k in self.scoring
-            }
+            test_metrics = {k: v for k, v in test_metrics.items() if k in self.scoring}
             if self.problem_type == ProblemType.BINARY:
                 test_metrics["optimized_precision"] = optimized_precision(
                     test_metrics["accuracy"],
@@ -301,7 +296,7 @@ class SklearnTrainable(Trainable):
 
         ret["done"] = True
         print("done")
-        #ret["size"] = sys.getsizeof(fitted_estimator)
+        # ret["size"] = sys.getsizeof(fitted_estimator)
         return ret
 
     def reset_config(self, new_config):
