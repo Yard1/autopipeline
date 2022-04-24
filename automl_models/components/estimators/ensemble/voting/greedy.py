@@ -1,5 +1,6 @@
 import math
 import ray
+from scipy.special import softmax
 from copy import deepcopy
 from functools import partial
 from typing import List, Optional
@@ -349,13 +350,9 @@ class GreedyEnsembleSelection:
             dtype=np.float64,
         )
         for ensemble_member in ensemble_members:
-            weight = float(ensemble_member[1]) / self._ensemble_size_not_none
-            weights[ensemble_member[0]] = weight
+            weights[ensemble_member[0]] = float(ensemble_member[1])
 
-        if np.sum(weights) < 1:
-            weights = weights / np.sum(weights)
-
-        self.weights_ = weights
+        self.weights_ = softmax(weights)
 
         print(f"FINAL GREEDY INDICES {self.indices_} WEIGHTS {self.weights_}")
 
