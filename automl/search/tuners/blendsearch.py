@@ -382,6 +382,77 @@ class PatchedFLOW2(FLOW2):
         flow2.cost_incumbent = cost
         return flow2
 
+    # same as in flaml==0.5.6 with one difference
+    def denormalize(self, config):
+        """denormalize each dimension in config from [0,1]"""
+        config_denorm = {}
+        for key, value in config.items():
+            if key in self.space:
+                # domain: sample.Categorical/Integer/Float/Function
+                domain = self.space[key]
+                if not callable(getattr(domain, "get_sampler", None)):
+                    config_denorm[key] = value
+                else:
+                    if isinstance(domain, sample.Categorical):
+                        # denormalize categorical
+                        if key in self._ordered_cat_hp:
+                            l, _ = self._ordered_cat_hp[key]
+                            n = len(l)
+                            config_denorm[key] = l[min(n - 1, int(np.floor(value * n)))]
+                        elif key in self._ordered_choice_hp:
+                            l, _ = self._ordered_choice_hp[key]
+                            n = len(l)
+                            config_denorm[key] = l[min(n - 1, int(np.floor(value * n)))]
+                        else:
+                            assert key in self.incumbent
+                            n = self._unordered_cat_hp[key]
+                            # copied from flaml==1.0.1
+                            if min(n - 1, np.floor(value * n)) == min(
+                                n - 1, np.floor(self.incumbent[key] * n)
+                            ):
+                                config_denorm[key] = self.best_config[key]
+                            else:  # ****random value each time!****
+                                config_denorm[key] = self._random.choice(
+                                    [
+                                        x
+                                        for x in domain.categories
+                                        if x != self.best_config[key]
+                                    ]
+                                )
+                        continue
+                    # Uniform/LogUniform/Normal/Base
+                    sampler = domain.get_sampler()
+                    if isinstance(sampler, sample.Quantized):
+                        # sampler is sample.Quantized
+                        sampler = sampler.get_sampler()
+                    # Handle Log/Uniform
+                    if str(sampler) == "LogUniform":
+                        config_denorm[key] = (
+                            domain.upper / domain.lower
+                        ) ** value * domain.lower
+                    elif str(sampler) == "Uniform":
+                        config_denorm[key] = (
+                            value * (domain.upper - domain.lower) + domain.lower
+                        )
+                    elif str(sampler) == "Normal":
+                        # denormalization for 'Normal'
+                        config_denorm[key] = value * sampler.sd + sampler.mean
+                    else:
+                        config_denorm[key] = value
+                    # Handle quantized
+                    sampler = domain.get_sampler()
+                    if isinstance(sampler, sample.Quantized):
+                        config_denorm[key] = (
+                            np.round(np.divide(config_denorm[key], sampler.q))
+                            * sampler.q
+                        )
+                    # Handle int (4.6 -> 5)
+                    if isinstance(domain, sample.Integer):
+                        config_denorm[key] = int(round(config_denorm[key]))
+            else:  # prune_attr
+                config_denorm[key] = value
+        return config_denorm
+
     def _round(self, resource) -> float:
         """round the resource to self.max_resource if close to it"""
         return np.around(super()._round(resource), 2)
@@ -1597,10 +1668,9 @@ class ConditionalBlendSearch(BlendSearch):
                 if config:
                     return config, prune_attr, 0, estimator
 
-            if (
-                config and (
+            if config and (
                 not backup
-                or not self._search_thread_pool[backup].estimator == estimator)
+                or not self._search_thread_pool[backup].estimator == estimator
             ):
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
@@ -1754,7 +1824,9 @@ class ConditionalBlendSearch(BlendSearch):
                 if self._ls._resource:
                     # TODO: add resource to config proposed by GS, min or median?
                     config[self._ls.prune_attr] = self._ls.min_resource
-                    prune_attr = config.get(self._ls.prune_attr, None) if config else None
+                    prune_attr = (
+                        config.get(self._ls.prune_attr, None) if config else None
+                    )
                 # temporarily relax admissible region for parallel proposals
                 self._update_admissible_region(
                     config, self._gs_admissible_min, self._gs_admissible_max
