@@ -448,9 +448,7 @@ class Trainer:
             "pipeline_blueprint": pipeline_blueprint,
             "metric_name": self.default_metric_name,
             # TODO fix this
-            "metric": self.scoring_dict[self.target_metric]
-            if self.problem_type == ProblemType.REGRESSION
-            else self.scoring_dict["balanced_accuracy"],
+            "metric": self.scoring_dict[self.target_metric],
             "random_state": self.random_state,
             "current_stacking_level": self.current_stacking_level,
             "previous_stack": self.get_main_stacking_ensemble_at_level(
