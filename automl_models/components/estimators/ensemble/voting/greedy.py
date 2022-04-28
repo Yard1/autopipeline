@@ -109,17 +109,17 @@ def _fit_greedy_ensemble(
 
     weighted_ensemble_predictions = [
         np.zeros(
-            predictions[0][0].shape,
+            predictions[0][i].shape,
             dtype=np.float64,
         )
-        for _ in range(n_splits)
+        for i in range(len(predictions[0]))
     ]
     fant_ensemble_predictions = [
         np.zeros(
-            weighted_ensemble_predictions[0].shape,
+            weighted_ensemble_predictions[i].shape,
             dtype=np.float64,
         )
-        for _ in range(n_splits)
+        for i in range(len(weighted_ensemble_predictions))
     ]
     for i in range(ensemble_size):
         losses = [0] * len(predictions)
@@ -140,6 +140,7 @@ def _fit_greedy_ensemble(
             # directly with weighted_ensemble_prediction + new_prediction and then scale for avg
             test_scores = [0] * len(weighted_ensemble_predictions)
             for i in range(len(weighted_ensemble_predictions)):
+                # print(f"j {j} i {i} actual {actual_indices[j]} weighted_ensemble_predictions {weighted_ensemble_predictions[i].shape} pred {pred[i].shape} fant_ensemble_predictions {fant_ensemble_predictions[i].shape}")
                 np.add(
                     weighted_ensemble_predictions[i],
                     pred[i],
@@ -177,9 +178,9 @@ def _fit_greedy_ensemble(
             iters_without_change = 0
         else:
             iters_without_change += 1
-        print(
-            f"GREEDY iter {i} max_iters {ensemble_size} train_score {test_score} best_train_score {best_test_score} iters_without_change {iters_without_change}"
-        )
+        # print(
+        #     f"GREEDY iter {i} max_iters {ensemble_size} train_score {test_score} best_train_score {best_test_score} iters_without_change {iters_without_change}"
+        # )
 
         # Handle special case
         if len(predictions) == 1:
@@ -193,7 +194,7 @@ def _fit_greedy_ensemble(
 
     if actual_indices:
         best_order = [actual_indices[i] for i in best_order]
-    print(f"BAG ACTUAL INDICES {actual_indices} GREEDY INDICES {best_order}")
+    # print(f"BAG ACTUAL INDICES {actual_indices} GREEDY INDICES {best_order} best_test_score {best_test_score}")
     return best_order
 
 
@@ -206,6 +207,7 @@ class GreedyEnsembleSelection:
         return
 
     def _fit_estimators(self, X, y, ests, sample_weight=None, groups=None):
+        # print(f"estimators {ests}")
         method = "predict"
         fit_params = (
             {"sample_weight": sample_weight} if sample_weight is not None else None
@@ -229,7 +231,7 @@ class GreedyEnsembleSelection:
                 y=y,
                 X_ray=X_ray,
                 y_ray=y_ray,
-                cv=self.cv,
+                cv=deepcopy(self.cv),
                 fit_params=fit_params,
                 verbose=self.verbose,
                 stack_method=[method] * len(ests),
@@ -352,9 +354,9 @@ class GreedyEnsembleSelection:
         for ensemble_member in ensemble_members:
             weights[ensemble_member[0]] = float(ensemble_member[1])
 
-        self.weights_ = softmax(weights)
+        self.weights_ = weights
 
-        print(f"FINAL GREEDY INDICES {self.indices_} WEIGHTS {self.weights_}")
+        # print(f"FINAL GREEDY INDICES {self.indices_} WEIGHTS {self.weights_}")
 
     @property
     def _ensemble_size_not_none(self) -> int:

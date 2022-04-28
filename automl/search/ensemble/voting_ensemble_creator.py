@@ -87,9 +87,9 @@ class VotingEnsembleCreator(EnsembleCreator):
         print(f"creating voting classifier {self._ensemble_name}")
         weights = [self.weight_function_(trial) for trial in trials_for_ensembling]
         trials_for_ensembling = [
-            trial for idx, trial in enumerate(trials_for_ensembling) if weights[idx] > 0
+            trial for idx, trial in enumerate(trials_for_ensembling) if weights[idx] is not None
         ]
-        weights = [weight for weight in weights if weight > 0]
+        weights = [weight for weight in weights if weight is not None]
         print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level

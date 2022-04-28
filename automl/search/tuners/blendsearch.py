@@ -1177,7 +1177,7 @@ class ConditionalBlendSearch(BlendSearch):
                 sum(
                     1
                     for i in self._points_to_evaluate_trials.values()
-                    if i[1][f"config/{META_KEY}/init"]
+                    if i[1].get(f"config/{META_KEY}/init", None)
                 )
                 >= self._points_to_evaluate_len
             )
@@ -1391,29 +1391,30 @@ class ConditionalBlendSearch(BlendSearch):
 
     def _valid(self, config: dict, step_multiplier=1) -> bool:
         """config validator"""
-        normalized_config = self._ls.normalize(config)
         step_size = self._ls.STEPSIZE * step_multiplier
+        admissible_min_denorm = self._ls.denormalize({k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()})
+        admissible_max_denorm = self._ls.denormalize({k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()})
         for key in self._gs_admissible_min:
             if key in config:
-                value = normalized_config[key]
+                value = config[key]
                 # logger.info(
                 #     f"{key},{value},{self._admissible_min[key]},{self._admissible_max[key]}")
                 if (
                     self._cost_bounds[key] != "upper"
-                    and value + step_size < self._gs_admissible_min[key]
+                    and value < admissible_min_denorm[key]
                 ):
                     print(
-                        f"normalized key {key} is invalid due to {value+ step_size} < {self._gs_admissible_min[key]}"
+                        f"key {key} is invalid due to {value} < {admissible_min_denorm[key]}"
                     )
                     # print(f"suggested config {config}")
                     # print(f"valid config {self._make_config_valid(config)}")
                     return False
                 elif (
                     self._cost_bounds[key] != "lower"
-                    and value > self._gs_admissible_max[key] + step_size
+                    and value > admissible_max_denorm[key]
                 ):
                     print(
-                        f"normalized key {key} is invalid due to {value} > {self._gs_admissible_max[key] + step_size}"
+                        f"key {key} is invalid due to {value} > {admissible_max_denorm[key]}"
                     )
                     # print(f"suggested config {config}")
                     # print(f"valid config {self._make_config_valid(config)}")
@@ -1617,7 +1618,7 @@ class ConditionalBlendSearch(BlendSearch):
         return config, prune_attr, 0
 
     def _get_ei_space(self):
-        step_size = self._ls.STEPSIZE - EPS
+        step_size = self._ls.STEPSIZE # - EPS
         denorm_gs_admissible_min = self._ls.denormalize(
             {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
         )
@@ -1628,6 +1629,7 @@ class ConditionalBlendSearch(BlendSearch):
         for k in denorm_gs_admissible_min:
             ei_space[k].lower = denorm_gs_admissible_min[k]
             ei_space[k].upper = denorm_gs_admissible_max[k]
+        print(f"EI Space {ei_space}")
         return get_optuna_trial_suggestions(ei_space)
 
     def _suggest_from_global_search(
@@ -1664,14 +1666,12 @@ class ConditionalBlendSearch(BlendSearch):
                     trial_id, 1, retry=False, iter=i
                 )
                 if config and config["Estimator"] != estimator:
-                    config, prune_attr = None, None
-                if config:
+                    pass
+                elif config:
                     return config, prune_attr, 0, estimator
 
-            if config and (
-                not backup
-                or not self._search_thread_pool[backup].estimator == estimator
-            ):
+            last_estimator_config = last_estimator_config or config
+            if last_estimator_config:
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
                     trial_id,
@@ -1801,19 +1801,9 @@ class ConditionalBlendSearch(BlendSearch):
                 )
 
             if not config:
-                if proposing_thread:
+                if proposing_thread and proposing_thread in self._search_thread_pool:
                     # local search thread finishes
-                    if self._search_thread_pool[proposing_thread].converged:
-                        for key in self._ls_bound_max:
-                            if (
-                                key
-                                in self._search_thread_pool[
-                                    proposing_thread
-                                ]._search_alg.space
-                            ):
-                                self._ls_bound_max[key] += self._ls.STEPSIZE
-                                self._ls_bound_min[key] -= self._ls.STEPSIZE
-                        del self._search_thread_pool[proposing_thread]
+                    self._clean(proposing_thread)
                 return None
 
             config = self._clean_and_enforce_config(config, prune_attr)
@@ -1966,6 +1956,7 @@ class ConditionalBlendSearch(BlendSearch):
         merge local threads if they are close
         """
         assert thread_id
+        assert thread_id in self._search_thread_pool
         todelete = set()
         for id in self._search_thread_pool:
             if id and id != thread_id:

@@ -359,10 +359,12 @@ class RandomForestSamplerModel(BaseSamplerModel):
             self.ei_objective(trial)
             return 1
 
-        trials = [
-            _run_trial(opt_func, self._rng)
-            for _ in range(self.n_ei_candidates)
+        trials = [_run_trial(opt_func, self._rng) for _ in range(self.n_ei_candidates)]
+        completed_trials = [
+            completed_trial.params for completed_trial in self._complete_trials
         ]
+        trials = [trial for trial in trials if trial not in completed_trials]
+        print(f"trials len {len(trials)}")
         xs, _ = self._preprocess_trials(trials, fit=False)
         x_pred, x_var = self._get_model_preds(xs)
         acq_values = self.acq_function(

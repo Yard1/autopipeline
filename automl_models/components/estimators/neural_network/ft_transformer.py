@@ -126,8 +126,8 @@ class FTTransformerClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
             X_cat = X.select_dtypes(include="category")
             return super().predict_proba(
                 {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
-            )
-        return super().predict_proba(X)
+            ).squeeze()
+        return super().predict_proba(X).squeeze()
 
 
 class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
@@ -213,11 +213,11 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         )
         return super().fit(
             {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
-            y.to_numpy("int64"),
+            y.to_numpy("float32").reshape(-1, 1),
             **fit_params
         )
 
-    def predict_proba(self, X):
+    def predict(self, X):
         if self.n_jobs and self.n_jobs > 0:
             os.environ["OMP_NUM_THREADS"] = str(self.n_jobs)
             torch.set_num_threads(self.n_jobs)
@@ -227,5 +227,5 @@ class FTTransformerRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
             X_cat = X.select_dtypes(include="category")
             return super().predict_proba(
                 {"x_num": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
-            )
-        return super().predict_proba(X)
+            ).squeeze()
+        return super().predict_proba(X).squeeze()

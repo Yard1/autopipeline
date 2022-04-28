@@ -144,8 +144,8 @@ class FastAINNClassifier(AutoMLSkorchMixin, NeuralNetClassifier):
             X_cat = X.select_dtypes(include="category")
             return super().predict_proba(
                 {"x_cont": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
-            )
-        return super().predict_proba(X)
+            ).squeeze()
+        return super().predict_proba(X).squeeze()
 
 
 class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
@@ -215,7 +215,7 @@ class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
         )
         return super().fit(
             {"x_cont": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")},
-            y.to_numpy("int64"),
+            y.to_numpy("float32").reshape(-1, 1),
             **fit_params
         )
 
@@ -229,5 +229,5 @@ class FastAINNRegressor(AutoMLSkorchMixin, NeuralNetRegressor):
             X_cat = X.select_dtypes(include="category")
             return super().predict(
                 {"x_cont": X_num.to_numpy("float32"), "x_cat": X_cat.to_numpy("int32")}
-            )
-        return super().predict(X)
+            ).squeeze()
+        return super().predict(X).squeeze()

@@ -254,7 +254,7 @@ class SklearnTrainable(Trainable):
             y_ref=self.refs[prefix + "y_"]
             # return_train_score=self.return_train_score,
         )
-        print("cv done")
+        print(f"cv done")
 
         estimator_fit_time = time.time() - time_cv
         metrics = {
@@ -280,7 +280,7 @@ class SklearnTrainable(Trainable):
                     test_metrics["recall"],
                     test_metrics["specificity"],
                 )
-            logger.debug("scoring test done")
+            print("scoring test done")
         else:
             self.estimator = estimator
 

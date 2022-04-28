@@ -135,44 +135,42 @@ class Trainer:
             ),
             problem_type=self.problem_type,
         )
-        self.secondary_ensembles = (
-            secondary_ensembles
-            or [
-                GreedyEnsembleCreator(
-                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
-                        configurations_to_select=100,
-                        percentile_threshold=85,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
-                    n_initial_estimators=5,
+        self.secondary_ensembles = secondary_ensembles or [
+            GreedyEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=100,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
                 ),
-                VotingEnsembleCreator(
-                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
-                        configurations_to_select=20,
-                        percentile_threshold=85,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
+                problem_type=self.problem_type,
+                n_initial_estimators=5,
+            ),
+            VotingEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=20,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
                 ),
-                VotingByMetricEnsembleCreator(
-                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
-                        configurations_to_select=20,
-                        percentile_threshold=85,
-                        use_only_last_results=False,
-                    ),
-                    problem_type=self.problem_type,
+                problem_type=self.problem_type,
+            ),
+            VotingByMetricEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=20,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
                 ),
-                # SelectFromModelStackingEnsembleCreator(
-                #     ensemble_strategy=EnsembleBest(
-                #         configurations_to_select=100,
-                #         percentile_threshold=1,
-                #         use_only_last_results=False,
-                #     ),
-                #     problem_type=self.problem_type,
-                # ),
-            ]
-            + [
+                problem_type=self.problem_type,
+            ),
+            # SelectFromModelStackingEnsembleCreator(
+            #     ensemble_strategy=EnsembleBest(
+            #         configurations_to_select=100,
+            #         percentile_threshold=1,
+            #         use_only_last_results=False,
+            #     ),
+            #     problem_type=self.problem_type,
+            # ),
+        ] + (
+            [
                 VotingSoftEnsembleCreator(
                     ensemble_strategy=OneRoundRobinThenEnsembleBest(
                         configurations_to_select=20,
@@ -265,7 +263,7 @@ class Trainer:
     @property
     def default_metric_name(self) -> str:
         if self.problem_type == ProblemType.BINARY:
-            return "optimized_precision"
+            return "f1"
         elif self.problem_type == ProblemType.MULTICLASS:
             return "matthews_corrcoef"
         elif self.problem_type == ProblemType.REGRESSION:
@@ -703,6 +701,12 @@ class Trainer:
             return self.get_pipeline_by_id(id)
 
     def fit(self, X, y, X_test=None, y_test=None, groups=None):
+        if not self.target_metric in self.scoring_dict:
+            raise ValueError(
+                f"Wrong target metric {self.target_metric}. "
+                f"Valid metrics: {self.scoring_dict.keys()}"
+            )
+
         self.current_stacking_level = -1
 
         self.cv_ = self._get_cv(self.problem_type, self.cv)
