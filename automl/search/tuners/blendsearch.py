@@ -880,8 +880,8 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_EVERY_N_ITER = 16
-    _MAX_GS_RETRIES = 2
+    _FORCE_GS_EVERY_N_ITER = 8
+    _MAX_GS_RETRIES = 3
 
     def __init__(
         self,
@@ -1166,6 +1166,7 @@ class ConditionalBlendSearch(BlendSearch):
         if result is None:
             result = {}
 
+        finished_count = None
         if not self._init_finished:
             self._points_to_evaluate_trials[trial_id] = (
                 trial_id,
@@ -1173,14 +1174,16 @@ class ConditionalBlendSearch(BlendSearch):
                 error,
                 condition_kwargs,
             )
-            self._init_finished = (
-                sum(
+            finished_count =sum(
                     1
                     for i in self._points_to_evaluate_trials.values()
-                    if i[1].get(f"config/{META_KEY}/init", None)
+                    if i[1].get(f"config/{META_KEY}/init", True)
                 )
-                >= self._points_to_evaluate_len
+            self._init_finished = (
+                finished_count >= self._points_to_evaluate_len
             )
+        
+        print(f"self._init_finished {self._init_finished} finished_count {finished_count}  self._points_to_evaluate_len { self._points_to_evaluate_len}")
 
         if self._init_finished:
             # TODO if we are caching and without early stopping, consider only estimator fit time for priority
@@ -1196,15 +1199,17 @@ class ConditionalBlendSearch(BlendSearch):
                     reverse=True,
                 )
 
-                mean_metric = sum(
-                    trial[1][self._metric] * self._ls.metric_op
-                    for trial in clean_sorted_evaluted_trials
-                ) / len(clean_sorted_evaluted_trials)
+                median_metric = np.percentile(
+                    [
+                        trial[1][self._metric] * self._ls.metric_op
+                        for trial in clean_sorted_evaluted_trials
+                    ], 75
+                )
 
                 cutoff_trial = next(
                     trial
                     for trial in clean_sorted_evaluted_trials
-                    if (trial[1][self._metric] * self._ls.metric_op) <= mean_metric
+                    if (trial[1][self._metric] * self._ls.metric_op) <= median_metric
                 )
                 # cutoff_trial = clean_sorted_evaluted_trials[
                 #    len(clean_sorted_evaluted_trials) // 2
@@ -1392,8 +1397,12 @@ class ConditionalBlendSearch(BlendSearch):
     def _valid(self, config: dict, step_multiplier=1) -> bool:
         """config validator"""
         step_size = self._ls.STEPSIZE * step_multiplier
-        admissible_min_denorm = self._ls.denormalize({k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()})
-        admissible_max_denorm = self._ls.denormalize({k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()})
+        admissible_min_denorm = self._ls.denormalize(
+            {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
+        )
+        admissible_max_denorm = self._ls.denormalize(
+            {k: min(1, v + step_size) for k, v in self._gs_admissible_max.items()}
+        )
         for key in self._gs_admissible_min:
             if key in config:
                 value = config[key]
@@ -1618,7 +1627,7 @@ class ConditionalBlendSearch(BlendSearch):
         return config, prune_attr, 0
 
     def _get_ei_space(self):
-        step_size = self._ls.STEPSIZE # - EPS
+        step_size = self._ls.STEPSIZE  # - EPS
         denorm_gs_admissible_min = self._ls.denormalize(
             {k: max(0, v - step_size) for k, v in self._gs_admissible_min.items()}
         )
@@ -1629,7 +1638,6 @@ class ConditionalBlendSearch(BlendSearch):
         for k in denorm_gs_admissible_min:
             ei_space[k].lower = denorm_gs_admissible_min[k]
             ei_space[k].upper = denorm_gs_admissible_max[k]
-        print(f"EI Space {ei_space}")
         return get_optuna_trial_suggestions(ei_space)
 
     def _suggest_from_global_search(
@@ -1649,8 +1657,12 @@ class ConditionalBlendSearch(BlendSearch):
             config = self._search_thread_pool[0].suggest(trial_id, reask=not retry)
         prune_attr = config.get(self._ls.prune_attr, None) if config else None
         skip = self._should_skip(0, trial_id, config)
-        estimator = config["Estimator"] if config else None
-        last_estimator_config = config
+        if skip:
+            estimator = None
+            last_estimator_config = None
+        else:
+            estimator = config["Estimator"] if config else None
+            last_estimator_config = config
 
         if not skip and self._valid(
             config,
@@ -1665,12 +1677,13 @@ class ConditionalBlendSearch(BlendSearch):
                 config, prune_attr, _, _ = self._suggest_from_global_search(
                     trial_id, 1, retry=False, iter=i
                 )
-                if config and config["Estimator"] != estimator:
+                if config and (estimator and config["Estimator"] != estimator):
                     pass
                 elif config:
                     return config, prune_attr, 0, estimator
 
             last_estimator_config = last_estimator_config or config
+            estimator = last_estimator_config["Estimator"]
             if last_estimator_config:
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
@@ -1738,6 +1751,7 @@ class ConditionalBlendSearch(BlendSearch):
 
             config = self._clean_and_enforce_config(config, prune_attr)
             if not config:
+                self._points_to_evaluate_len -= 1
                 return None
         else:
             if not self._init_finished:
@@ -1838,6 +1852,8 @@ class ConditionalBlendSearch(BlendSearch):
         ) = self._has_config_been_already_tried(config)
 
         if result is not None:
+            if init:
+                self._points_to_evaluate_len -= 1
             return None
 
         self._result[config_signature] = {}

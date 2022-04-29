@@ -701,7 +701,7 @@ class Trainer:
             return self.get_pipeline_by_id(id)
 
     def fit(self, X, y, X_test=None, y_test=None, groups=None):
-        if not self.target_metric in self.scoring_dict:
+        if self.target_metric not in self.scoring_dict:
             raise ValueError(
                 f"Wrong target metric {self.target_metric}. "
                 f"Valid metrics: {self.scoring_dict.keys()}"

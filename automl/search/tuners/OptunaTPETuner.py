@@ -378,7 +378,7 @@ class ConditionalOptunaSearchCatBoost(ConditionalOptunaSearch):
     def _get_sampler(self, n_startup_trials, seed, **kwargs):
         params = dict(
             constant_liar=True,
-            n_ei_candidates=10000,
+            n_ei_candidates=20000,
             warn_independent_sampling=False,
             random_fraction=0.1,
         )

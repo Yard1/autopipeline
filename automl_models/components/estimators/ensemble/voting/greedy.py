@@ -7,6 +7,7 @@ from typing import List, Optional
 import numpy as np
 from collections import Counter
 
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection._validation import (
     _score,
     check_cv,
@@ -32,7 +33,7 @@ from ..utils import (
 
 
 class FakeRegressor:
-    def __init__(self, pred) -> None:
+    def __init__(self, pred, labels=None) -> None:
         self.pred = pred
 
     def predict(self, *args, **kwargs):
@@ -40,6 +41,10 @@ class FakeRegressor:
 
 
 class FakeClassifier(FakeRegressor):
+    def __init__(self, pred, labels) -> None:
+        super().__init__(pred)
+        self.classes_ = LabelEncoder().fit(labels).classes_
+
     def predict(self, *args, **kwargs):
         try:
             return np.argmax(self.pred, axis=1)
@@ -62,7 +67,7 @@ def _get_initial_estimators(
         test_scores = [0] * len(predictions[0])
         for i in range(len(predictions[0])):
             test_scores[i] = _score(
-                fake_estimator(pred[i]),
+                fake_estimator(pred[i], labels[i]),
                 None,
                 labels[i],
                 scorer,
@@ -153,7 +158,7 @@ def _fit_greedy_ensemble(
                 )
 
                 test_scores[i] = _score(
-                    fake_estimator(fant_ensemble_predictions[i]),
+                    fake_estimator(fant_ensemble_predictions[i], labels[i]),
                     None,
                     labels[i],
                     scorer,

@@ -121,14 +121,27 @@ def create_pipeline_blueprint(
         "ElasticNet": ElasticNet(),
         "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.01),
         "LGBMClassifier": LGBMClassifier(),
+        "LGBMClassifier_UnBalanced": LGBMClassifier(class_weight=None),
         "LGBMRegressor": LGBMRegressor(),
         "CatBoostClassifierBinary": CatBoostClassifierBinary(),
         "CatBoostClassifierMulticlass": CatBoostClassifierMulticlass(),
         "CatBoostRegressor": CatBoostRegressor(),
+        "CatBoostClassifierBinary_UnBalanced": CatBoostClassifierBinary(
+            auto_class_weights=None
+        ),
+        "CatBoostClassifierMulticlass_UnBalanced": CatBoostClassifierMulticlass(
+            auto_class_weights=None
+        ),
         "RandomForestClassifier": RandomForestClassifier(),
         "RandomForestRegressor": RandomForestRegressor(),
         "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
         "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
+        "RandomForestClassifier_UnBalanced": RandomForestClassifier(
+            class_weight=None
+        ),
+        "ExtraTreesClassifier_UnBalanced": RandomForestClassifier(
+            randomization_type="et", class_weight=None
+        ),
         "LinearSVC": LinearSVC(),
         "LinearSVR": LinearSVR(),
         "KNeighborsClassifier": KNeighborsClassifier(),
