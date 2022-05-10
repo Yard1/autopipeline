@@ -1174,16 +1174,16 @@ class ConditionalBlendSearch(BlendSearch):
                 error,
                 condition_kwargs,
             )
-            finished_count =sum(
-                    1
-                    for i in self._points_to_evaluate_trials.values()
-                    if i[1].get(f"config/{META_KEY}/init", True)
-                )
-            self._init_finished = (
-                finished_count >= self._points_to_evaluate_len
+            finished_count = sum(
+                1
+                for i in self._points_to_evaluate_trials.values()
+                if i[1].get(f"config/{META_KEY}/init", True)
             )
-        
-        print(f"self._init_finished {self._init_finished} finished_count {finished_count}  self._points_to_evaluate_len { self._points_to_evaluate_len}")
+            self._init_finished = finished_count >= self._points_to_evaluate_len
+
+        print(
+            f"self._init_finished {self._init_finished} finished_count {finished_count}  self._points_to_evaluate_len { self._points_to_evaluate_len}"
+        )
 
         if self._init_finished:
             # TODO if we are caching and without early stopping, consider only estimator fit time for priority
@@ -1203,7 +1203,8 @@ class ConditionalBlendSearch(BlendSearch):
                     [
                         trial[1][self._metric] * self._ls.metric_op
                         for trial in clean_sorted_evaluted_trials
-                    ], 75
+                    ],
+                    75,
                 )
 
                 cutoff_trial = next(

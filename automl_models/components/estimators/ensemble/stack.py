@@ -222,6 +222,15 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             self.min_n_jobs_per_estimator,
             self.max_n_jobs_per_estimator,
         )
+        memory = check_memory(self.memory)
+        fit_estimators_cached = memory.cache(
+            fit_estimators,
+            ignore=["parallel", "clone_function", "X_ray", "y_ray", "pg", "sample_weight_ray"],
+        )
+        get_cv_predictions_cached = memory.cache(
+            get_cv_predictions,
+            ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
+        )
         X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
         with ray_pg_context(pg) as pg:
 
@@ -229,17 +238,20 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             # base estimators will be used in transform, predict, and
             # predict_proba. They are exposed publicly.
             # if not hasattr(self, "estimators_"):
-            self.estimators_ = fit_estimators(
+            self.estimators_ = fit_estimators_cached(
                 parallel,
                 all_estimators,
-                X_ray,
-                y_ray,
-                sample_weight_ray,
+                X,
+                y,
+                sample_weight,
                 partial(
                     clone_with_n_jobs,
                     n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
                 ),
                 pg=pg,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                sample_weight_ray=sample_weight_ray,
             )
 
             self.named_estimators_ = Bunch()
@@ -268,14 +280,9 @@ class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
             fit_params = (
                 {"sample_weight": sample_weight} if sample_weight is not None else None
             )
-            memory = check_memory(self.memory)
-            get_cv_predictions_cached = memory.cache(
-                get_cv_predictions,
-                ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
-            )
             predictions = get_cv_predictions_cached(
                 parallel=parallel,
-                all_estimators=sorted(all_estimators, key=lambda x: str(x)),
+                all_estimators=all_estimators,
                 X=X,
                 y=y,
                 X_ray=X_ray,
@@ -487,23 +494,35 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             self.min_n_jobs_per_estimator,
             self.max_n_jobs_per_estimator,
         )
+        memory = check_memory(self.memory)
+        fit_estimators_cached = memory.cache(
+            fit_estimators,
+            ignore=["parallel", "clone_function", "X_ray", "y_ray", "pg", "sample_weight_ray"],
+        )
+        get_cv_predictions_cached = memory.cache(
+            get_cv_predictions,
+            ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
+        )
         X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
         with ray_pg_context(pg) as pg:
             # Fit the base estimators on the whole training data. Those
             # base estimators will be used in transform, predict, and
             # predict_proba. They are exposed publicly.
             # if not hasattr(self, "estimators_"):
-            self.estimators_ = fit_estimators(
+            self.estimators_ = fit_estimators_cached(
                 parallel,
                 all_estimators,
-                X_ray,
-                y_ray,
-                sample_weight_ray,
+                X,
+                y,
+                sample_weight,
                 partial(
                     clone_with_n_jobs,
                     n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
                 ),
                 pg=pg,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                sample_weight_ray=sample_weight_ray,
             )
 
             self.named_estimators_ = Bunch()
@@ -532,14 +551,9 @@ class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
             fit_params = (
                 {"sample_weight": sample_weight} if sample_weight is not None else None
             )
-            memory = check_memory(self.memory)
-            get_cv_predictions_cached = memory.cache(
-                get_cv_predictions,
-                ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
-            )
             predictions = get_cv_predictions_cached(
                 parallel=parallel,
-                all_estimators=sorted(all_estimators, key=lambda x: str(x)),
+                all_estimators=all_estimators,
                 X=X,
                 y=y,
                 X_ray=X_ray,

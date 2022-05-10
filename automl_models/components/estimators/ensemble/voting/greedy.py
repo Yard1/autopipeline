@@ -90,7 +90,6 @@ def _fit_greedy_ensemble(
     is_classifier_ensemble,
     n_initial_estimators,
     ensemble_size,
-    n_splits,
     n_iter_no_change=None,
     actual_indices: Optional[List[int]] = None,
 ):
@@ -231,7 +230,7 @@ class GreedyEnsembleSelection:
         with ray_pg_context(pg) as pg:
             predictions = get_cv_predictions(
                 parallel=parallel,
-                all_estimators=sorted(ests, key=lambda x: str(x)),
+                all_estimators=ests,
                 X=X,
                 y=y,
                 X_ray=X_ray,
@@ -293,7 +292,6 @@ class GreedyEnsembleSelection:
                     is_classifier(self),
                     self.n_initial_estimators,
                     self._ensemble_size_not_none,
-                    self.cv.get_n_splits(),
                     self.n_iter_no_change,
                 )
             )
@@ -325,7 +323,6 @@ class GreedyEnsembleSelection:
                     is_classifier(self),
                     self.n_initial_estimators,
                     self._ensemble_size_not_none,
-                    self.cv.get_n_splits(),
                     self.n_iter_no_change,
                     actual_indices=actual_indices,
                 )
@@ -345,7 +342,6 @@ class GreedyEnsembleSelection:
                         is_classifier(self),
                         self.n_initial_estimators,
                         self._ensemble_size_not_none,
-                        self.cv.get_n_splits(),
                         self.n_iter_no_change,
                     )
                 )

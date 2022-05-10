@@ -45,9 +45,10 @@ class StackingEnsembleCreator(EnsembleCreator):
         ensemble_strategy: EnsembleStrategy,
         problem_type: ProblemType,
         *,
+        stack: bool = False,
         final_estimator: Optional[Estimator] = None,
     ) -> None:
-        super().__init__(ensemble_strategy, problem_type)
+        super().__init__(ensemble_strategy, problem_type, stack=stack)
         self.final_estimator = final_estimator
 
     @property
@@ -108,7 +109,9 @@ class StackingEnsembleCreator(EnsembleCreator):
             y_test_original=y_test_original,
             **kwargs,
         )
-        trials_for_ensembling = self.select_trials_for_ensemble(results, self.trial_ids_for_ensembling_)
+        trials_for_ensembling = self.select_trials_for_ensemble(
+            results, self.trial_ids_for_ensembling_
+        )
         print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level
@@ -125,12 +128,9 @@ class StackingEnsembleCreator(EnsembleCreator):
             cv=kwargs["stacking_cv"],
             n_jobs=None,
             memory=dynamic_memory_factory(kwargs.get("cache", None)),
-            **(self.init_kwargs or {})
+            **(self.init_kwargs or {}),
         )()
-        if previous_stack:
-            stacked_ensemble = clone(previous_stack)
-            stacked_ensemble.set_deep_final_estimator(ensemble)
-            ensemble = stacked_ensemble
+        ensemble = self._stack_if_needed(previous_stack, ensemble)
         ensemble.set_params(passthrough=False)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
@@ -139,7 +139,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         ensemble.fit(
             X,
             y,
-            #save_predictions="deep",
+            # save_predictions="deep",
         )
         # X_stack = ensemble.get_deep_final_estimator(
         #     fitted=True, up_to_stack=True
@@ -151,7 +151,7 @@ class StackingEnsembleCreator(EnsembleCreator):
         # else:
         #     X_test_stack = None
 
-        return ensemble#, X_stack, X_test_stack
+        return ensemble  # , X_stack, X_test_stack
 
     def clear_stacked_predictions(self, ensemble):
         return
@@ -240,11 +240,15 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         ensemble_strategy: EnsembleStrategy,
         problem_type: ProblemType,
         *,
+        stack: bool = False,
         final_estimator: Optional[Estimator] = None,
         max_estimators: int = 10,
     ) -> None:
         super().__init__(
-            ensemble_strategy, problem_type, final_estimator=final_estimator
+            ensemble_strategy,
+            problem_type,
+            final_estimator=final_estimator,
+            stack=stack,
         )
         self.max_estimators = max_estimators
 
@@ -299,6 +303,16 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         else:
             raise ValueError(f"Unknown ProblemType {self.problem_type}")
 
+    def _stack_if_needed(self, previous_stack, ensemble, original_ensemble):
+        if self.stack and previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.set_deep_final_estimator(ensemble)
+            original_ensemble = ensemble
+            ensemble = stacked_ensemble
+        else:
+            original_ensemble = ensemble
+        return original_ensemble, ensemble
+
     def _fit_ensemble(
         self,
         X: pd.DataFrame,
@@ -334,7 +348,9 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             y_test_original=y_test_original,
             **kwargs,
         )
-        trials_for_ensembling = self.select_trials_for_ensemble(results, self.trial_ids_for_ensembling_)
+        trials_for_ensembling = self.select_trials_for_ensemble(
+            results, self.trial_ids_for_ensembling_
+        )
         print(f"getting estimators for {self._ensemble_name}")
         estimators = self._get_estimators_for_ensemble(
             trials_for_ensembling, current_stacking_level
@@ -351,15 +367,11 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             cv=kwargs["stacking_cv"],
             n_jobs=None,
             memory=dynamic_memory_factory(kwargs.get("cache", None)),
-            **(self.init_kwargs or {})
+            **(self.init_kwargs or {}),
         )()
-        if previous_stack:
-            stacked_ensemble = clone(previous_stack)
-            stacked_ensemble.set_deep_final_estimator(ensemble)
-            original_ensemble = ensemble
-            ensemble = stacked_ensemble
-        else:
-            original_ensemble = ensemble
+        original_ensemble, ensemble = self._stack_if_needed(
+            previous_stack, ensemble, original_ensemble
+        )
         ensemble.set_params(passthrough=False)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
@@ -369,7 +381,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             ensemble.fit(
                 X,
                 y,
-                #save_predictions="deep",
+                # save_predictions="deep",
             )
         except ValueError as e:
             # this is hacky but means we don't have to overwrite sklearn
@@ -386,7 +398,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
                 ensemble.fit(
                     X,
                     y,
-                    #save_predictions="deep",
+                    # save_predictions="deep",
                 )
             else:
                 raise e
@@ -394,7 +406,7 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
         original_ensemble = ensemble.get_deep_final_estimator(
             fitted=True, up_to_stack=True
         )
-        #X_stack = original_ensemble.stacked_predictions_
+        # X_stack = original_ensemble.stacked_predictions_
         print(X_test.columns)
         # if X_test_original is not None:
         #     # TODO optimize this
@@ -447,4 +459,4 @@ class SelectFromModelStackingEnsembleCreator(StackingEnsembleCreator):
             PandasSelectColumns(columns_selected),
         )
 
-        return ensemble#, X_stack, X_test_stack
+        return ensemble  # , X_stack, X_test_stack

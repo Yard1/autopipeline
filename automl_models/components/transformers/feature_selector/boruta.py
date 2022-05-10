@@ -234,6 +234,10 @@ class _BorutaSHAP(BorutaPy):
                 self.support_ = self.support_ + self.support_weak_
             else:
                 self.support_ = (self.support_ + 1).astype(bool)
+
+        columns_to_keep = set(self._transform(X, weak=False, return_df=True).columns)
+        self.columns_to_remove_ = set(X.columns) - columns_to_keep
+
         return self
 
     def transform(self, X):
@@ -259,7 +263,7 @@ class _BorutaSHAP(BorutaPy):
             selected by Boruta.
         """
 
-        return self._transform(X, weak=False, return_df=True)
+        return X.drop(list(self.columns_to_remove_), axis=1)
 
     def fit_transform(self, X, y):
         """
@@ -287,8 +291,8 @@ class _BorutaSHAP(BorutaPy):
             selected by Boruta.
         """
 
-        self._fit(X, y)
-        return self._transform(X, weak=False, return_df=True)
+        self.fit(X, y)
+        return self.transform(X)
 
     def _check_params(self, X, y):
         """
@@ -331,3 +335,6 @@ class _BorutaSHAP(BorutaPy):
 class BorutaSHAP(PandasDataFrameTransformerMixin, _BorutaSHAP):
     def get_dtypes(self, Xt, X, y=None):
         return Xt.dtypes.to_dict()
+
+    def get_columns(self, Xt, X, y=None):
+        return Xt.columns

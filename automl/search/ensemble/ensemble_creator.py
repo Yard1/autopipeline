@@ -28,11 +28,14 @@ class EnsembleCreator(ABC):
         self,
         ensemble_strategy: EnsembleStrategy,
         problem_type: ProblemType,
-        **init_kwargs
+        *,
+        stack: bool = False,
+        **init_kwargs,
     ) -> None:
         self.ensemble_strategy = ensemble_strategy
         self.problem_type = problem_type
         self.init_kwargs = init_kwargs
+        self.stack = stack
 
     @property
     def ensemble_class(self) -> type:
@@ -63,6 +66,13 @@ class EnsembleCreator(ABC):
                 for trial_result in trials_for_ensembling
             ]
         return ret
+
+    def _stack_if_needed(self, previous_stack, ensemble):
+        if self.stack and previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.set_deep_final_estimator(ensemble)
+            ensemble = stacked_ensemble
+        return ensemble
 
     def select_trial_ids_for_ensemble(
         self,
@@ -103,6 +113,4 @@ class EnsembleCreator(ABC):
         **kwargs,
     ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)
-        self.select_trial_ids_for_ensemble(
-            X, y, results, pipeline_blueprint
-        )
+        self.select_trial_ids_for_ensemble(X, y, results, pipeline_blueprint)

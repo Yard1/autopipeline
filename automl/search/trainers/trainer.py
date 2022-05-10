@@ -134,6 +134,7 @@ class Trainer:
                 configurations_to_select=10, percentile_threshold=51
             ),
             problem_type=self.problem_type,
+            stack=True,
         )
         self.secondary_ensembles = secondary_ensembles or [
             GreedyEnsembleCreator(
@@ -191,7 +192,7 @@ class Trainer:
             if self.problem_type.is_classification()
             else []
         )
-        self.secondary_level = secondary_level
+        self.secondary_level = ComponentLevel.translate(secondary_level)
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None

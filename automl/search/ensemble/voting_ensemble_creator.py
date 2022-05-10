@@ -87,7 +87,9 @@ class VotingEnsembleCreator(EnsembleCreator):
         print(f"creating voting classifier {self._ensemble_name}")
         weights = [self.weight_function_(trial) for trial in trials_for_ensembling]
         trials_for_ensembling = [
-            trial for idx, trial in enumerate(trials_for_ensembling) if weights[idx] is not None
+            trial
+            for idx, trial in enumerate(trials_for_ensembling)
+            if weights[idx] is not None
         ]
         weights = [weight for weight in weights if weight is not None]
         print(f"getting estimators for {self._ensemble_name}")
@@ -103,10 +105,7 @@ class VotingEnsembleCreator(EnsembleCreator):
             n_jobs=-1,  # TODO make dynamic
             **{**(self.init_kwargs or {}), **self.ensemble_args_},
         )()
-        if previous_stack:
-            stacked_ensemble = clone(previous_stack)
-            stacked_ensemble.set_deep_final_estimator(ensemble)
-            ensemble = stacked_ensemble
+        ensemble = self._stack_if_needed(previous_stack, ensemble)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")
@@ -256,10 +255,7 @@ class GreedyEnsembleCreator(VotingSoftEnsembleCreator):
             n_iter_no_change=50,
             **{**(self.init_kwargs or {}), **self.ensemble_args_},
         )()
-        if previous_stack:
-            stacked_ensemble = clone(previous_stack)
-            stacked_ensemble.set_deep_final_estimator(ensemble)
-            ensemble = stacked_ensemble
+        ensemble = self._stack_if_needed(previous_stack, ensemble)
         logger.debug("ensemble created")
         logger.debug("fitting ensemble")
         print(f"fitting ensemble {self}")

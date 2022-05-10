@@ -7,7 +7,7 @@ from imblearn.over_sampling import (
 )
 from sklearn.base import BaseEstimator, clone
 
-from ...compatibility.pandas import PandasDataFrameTransformerMixin, categorical_columns_to_int_categories
+from ...compatibility.pandas import categorical_columns_to_int_categories
 from ..encoder.ordinal_encoder import PandasOrdinalEncoder
 from ..transformer import DataType
 from ...utils import validate_type

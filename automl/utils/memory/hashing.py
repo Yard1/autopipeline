@@ -190,20 +190,22 @@ class xxPandasHasher(xxNumpyHasher):
     def _hash_pandas(self, obj):
         try:
             hashed_obj = fast_hash_pandas_object(obj)
-            return (obj.__class__, hashed_obj)
+            if hasattr(obj, "columns"):
+                return obj.__class__, hashed_obj, (obj.columns, obj.dtypes)
+            elif hasattr(obj, "name"):
+                return obj.__class__, hashed_obj, (obj.name, obj.dtype)
+            return obj.__class__, hashed_obj, None
         except TypeError:
-            return None, obj
+            return None, obj, None
 
     def save(self, obj):
         """Subclass the save method, to hash ndarray subclass, rather
         than pickling them. Off course, this is a total abuse of
         the Pickler class.
         """
-        klass, obj = self._hash_pandas(obj)
+        klass, obj, metadata = self._hash_pandas(obj)
 
-        if isinstance(obj, self.np.ndarray) and not (
-            obj.dtype.hasobject and obj.ndim > 2
-        ):
+        if isinstance(obj, self.np.ndarray) and not obj.dtype.hasobject:
             # Compute a hash of the object
             # The update function of the hash requires a c_contiguous buffer.
             if obj.shape == ():
@@ -240,7 +242,7 @@ class xxPandasHasher(xxNumpyHasher):
             # We store the class, to be able to distinguish between
             # Objects with the same binary content, but different
             # classes.
-            if not klass:
+            if klass is None:
                 if self.coerce_mmap and isinstance(obj, self.np.memmap):
                     # We don't make the difference between memmap and
                     # normal ndarrays, to be able to reload previously
@@ -252,10 +254,17 @@ class xxPandasHasher(xxNumpyHasher):
             # different views on the same data with different dtypes.
 
             # The object will be pickled by the pickler hashed at the end.
-            obj = (
-                klass,
-                ("HASHED", obj.dtype, obj.shape, obj.strides),
-            )
+            if metadata is not None:
+                obj = (
+                    klass,
+                    ("HASHED", obj.dtype, obj.shape, obj.strides),
+                    metadata
+                )
+            else:
+                obj = (
+                    klass,
+                    ("HASHED", obj.dtype, obj.shape, obj.strides),
+                )
         elif isinstance(obj, self.np.dtype):
             # numpy.dtype consistent hashing is tricky to get right. This comes
             # from the fact that atomic np.dtype objects are interned:

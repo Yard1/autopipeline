@@ -156,6 +156,7 @@ class SklearnTrainable(Trainable):
     # return Resources(cpu=0, gpu=0, extra_cpu=cls.N_JOBS, extra_gpu=0)
 
     def _train(self):
+        gc.collect()
         self.estimator = None
         time_cv = time.time()
         estimator = self.pipeline_blueprint(random_state=self.random_state)
@@ -231,10 +232,10 @@ class SklearnTrainable(Trainable):
                 num_cpus=n_jobs_per_fold, placement_group=get_current_placement_group()
             ).remote(
                 estimator,
-                self.X_,
-                self.y_,
-                self.X_test_,
-                self.y_test_,
+                self.refs[prefix + "X_"],
+                self.refs[prefix + "y_"],
+                self.refs[prefix + "X_test_"],
+                self.refs[prefix + "y_test_"],
                 scoring_with_dummies,
             )
 

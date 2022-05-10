@@ -116,6 +116,7 @@ def _cross_val_predict_ray_remotes(
     X_ref=None,
     y_ref=None,
 ):
+    print(f"getting preds for {estimator}")
     X_ref = X_ref or ray_put_if_needed(X)
     y_ref = y_ref or ray_put_if_needed(y)
     X, y, groups = indexable(X, y, groups)
@@ -165,6 +166,7 @@ def _cross_val_predict_ray_remotes(
         )
         for train, test in splits
     ]
+    print(f"finished getting preds for {estimator}")
     return predictions, test_indices, encode
 
 
@@ -379,8 +381,9 @@ def fit_estimators(
     pg=None,
     X_ray=None,
     y_ray=None,
+    sample_weight_ray=None,
 ):
-    if should_use_ray(parallel):
+    if pg or should_use_ray(parallel):
         cloned_estimators = [
             ray_put_if_needed(clone_function(est))
             for est in all_estimators
@@ -388,7 +391,7 @@ def fit_estimators(
         ]
         X_ref = ray_put_if_needed(X_ray or X)
         y_ref = ray_put_if_needed(y_ray or y)
-        sample_weight_ref = ray_put_if_needed(sample_weight)
+        sample_weight_ref = ray_put_if_needed(sample_weight_ray or sample_weight)
         estimators = ray.get(
             [
                 ray_fit_single_estimator.options(
@@ -477,7 +480,8 @@ def get_cv_predictions(
     groups=None,
     return_type="concat",
 ):
-    if should_use_ray(parallel):
+    print(f"getting cv predictions")
+    if pg or should_use_ray(parallel):
         cloned_estimators = [
             (
                 ray_put_if_needed(

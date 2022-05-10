@@ -70,7 +70,7 @@ class PandasDataFrameTransformerMixin:
         if isinstance(X, pd.Series):
             X = pd.DataFrame(X, columns=self.columns_)
         validate_type(X, "X", pd.DataFrame)
-        if not sorted(self.columns_) == sorted(X.columns):
+        if not set(self.columns_) == set(X.columns):
             raise ValueError(
                 f"Column mismatch. Expected {self.columns_}, got {X.columns}"
             )

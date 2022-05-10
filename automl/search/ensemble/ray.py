@@ -2,7 +2,6 @@ from automl.search.ensemble.ensemble_creator import EnsembleCreator
 from automl.search.ensemble.stacking_ensemble_creator import StackingEnsembleCreator
 import numpy as np
 import traceback
-from ray.util.joblib import register_ray
 from ..utils import score_test
 
 ENSEMBLE_STORE_NAME = "ensembles"
@@ -48,7 +47,6 @@ def ray_fit_ensemble_and_return_stacked_preds_remote(
     ensemble_config,
     scoring_dict,
 ):
-    register_ray()
     # with joblib.parallel_backend("sequential"):
     main_stacking_ensemble_fitted = (
         main_stacking_ensemble.fit_ensemble_and_return_stacked_preds(**ensemble_config)
@@ -65,7 +63,6 @@ def ray_fit_ensemble(
     ensemble_config,
     scoring_dict,
 ):
-    register_ray()
     # with joblib.parallel_backend("sequential"):
     print(f"ray_fit_ensemble {ensemble}")
     try:
