@@ -116,7 +116,6 @@ def _cross_val_predict_ray_remotes(
     X_ref=None,
     y_ref=None,
 ):
-    print(f"getting preds for {estimator}")
     X_ref = X_ref or ray_put_if_needed(X)
     y_ref = y_ref or ray_put_if_needed(y)
     X, y, groups = indexable(X, y, groups)
@@ -166,7 +165,6 @@ def _cross_val_predict_ray_remotes(
         )
         for train, test in splits
     ]
-    print(f"finished getting preds for {estimator}")
     return predictions, test_indices, encode
 
 
