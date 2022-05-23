@@ -4,9 +4,9 @@ import numpy as np
 
 from imblearn.pipeline import Pipeline as _ImblearnPipeline
 from sklearn.utils import _print_elapsed_time
-from sklearn.utils.metaestimators import if_delegate_has_method
+from sklearn.utils.metaestimators import available_if
 from sklearn.base import is_classifier, clone, is_regressor
-from sklearn.pipeline import Pipeline, check_memory
+from sklearn.pipeline import Pipeline, check_memory, _final_estimator_has
 from time import time
 
 from ...utils import validate_type
@@ -245,7 +245,7 @@ class BasePipeline(_ImblearnPipeline):
             self.final_estimator_fit_time_ = time() - final_estimator_time_start
             return r
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("fit_predict"))
     def fit_predict(self, X, y=None, **fit_params):
         X, y = self._convert_to_df_if_needed(X, y, fit=True)
         if self.target_pipeline:
@@ -270,7 +270,7 @@ class BasePipeline(_ImblearnPipeline):
             y_pred = self.target_pipeline.inverse_transform(y_pred)
         return y_pred
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("predict"))
     def predict(self, X, **predict_params):
         Xt = self._transform(X, with_final=False)
         memory = check_memory(self.memory)
@@ -282,7 +282,7 @@ class BasePipeline(_ImblearnPipeline):
             y_pred = self.target_pipeline.inverse_transform(y_pred)
         return y_pred
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("predict_proba"))
     def predict_proba(self, X, **predict_params):
         Xt = self._transform(X, with_final=False)
         memory = check_memory(self.memory)
@@ -291,7 +291,7 @@ class BasePipeline(_ImblearnPipeline):
         )
         return predict_proba_cached(self._final_estimator, Xt, **predict_params)
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("decision_function"))
     def decision_function(self, X, **decision_params):
         Xt = self._transform(X, with_final=False)
         memory = check_memory(self.memory)
@@ -300,14 +300,14 @@ class BasePipeline(_ImblearnPipeline):
         )
         return decision_function_cached(self._final_estimator, Xt, **decision_params)
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("score_samples"))
     def score_samples(self, X, **score_params):
         Xt = self._transform(X, with_final=False)
         memory = check_memory(self.memory)
         score_samples_cached = memory.cache(_score_samples)
         return score_samples_cached(self._final_estimator, Xt, **score_params)
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("predict_log_proba"))
     def predict_log_proba(self, X, **predict_params):
         Xt = self._transform(X, with_final=False)
         memory = check_memory(self.memory)
@@ -316,7 +316,7 @@ class BasePipeline(_ImblearnPipeline):
         )
         return predict_log_proba_cached(self._final_estimator, Xt, **predict_params)
 
-    @if_delegate_has_method(delegate="_final_estimator")
+    @available_if(_final_estimator_has("score"))
     def score(self, X, y=None, **score_params):
         if is_classifier(self._final_estimator):
             from sklearn.metrics import accuracy_score

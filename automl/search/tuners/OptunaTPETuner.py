@@ -189,7 +189,7 @@ class ConditionalOptunaSearch(OptunaSearch):
                 return values[0]
         return getattr(ot_trial, fn)(*args, **kwargs)
 
-    def _get_params(self, ot_trial, space, params=None):
+    def _get_params(self, ot_trial: ot.Trial, space, params=None):
         params = params or {}
 
         for key, condition in self._conditional_space.items():
@@ -204,9 +204,12 @@ class ConditionalOptunaSearch(OptunaSearch):
                 if dependent_name in space and (
                     required_values is True or len(required_values) > 1
                 ):
-                    params[dependent_name] = self._get_optuna_trial_value(
-                        ot_trial, space[dependent_name]
-                    )
+                    try:
+                        params[dependent_name] = self._get_optuna_trial_value(
+                            ot_trial, space[dependent_name]
+                        )
+                    except ValueError:
+                        params[dependent_name] = required_values[0]
                 elif len(required_values) == 1:
                     params[dependent_name] = required_values[0]
                 else:
