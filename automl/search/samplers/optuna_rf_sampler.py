@@ -36,7 +36,7 @@ from automl_models.components.estimators.tree.gradient_booster import (
 
 from .random_forest import RandomForestRegressorWithStd
 
-EPS = 1e-6
+EPS = 1e-4
 
 
 @contextmanager
@@ -172,6 +172,7 @@ def ei(par):
         random_state=None,
     ):
 
+        exploration_constant = 0  # covered by noise
         py, ps2 = predicted_value, predicted_std
         ps = np.sqrt(ps2)
         normed = (
@@ -181,9 +182,12 @@ def ei(par):
             - (
                 0
                 if not noise
-                else np.sqrt(2.0 * noise)
-                * norm.rvs(size=py.shape, random_state=random_state)
+                else (
+                    np.sqrt(2.0 * noise)
+                    * norm.rvs(size=py.shape, random_state=random_state)
+                )
             )
+            + exploration_constant
         ) / ps
         phi = norm.pdf(normed)
         Phi = norm.cdf(normed)
