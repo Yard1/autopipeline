@@ -1684,8 +1684,8 @@ class ConditionalBlendSearch(BlendSearch):
                     return config, prune_attr, 0, estimator
 
             last_estimator_config = last_estimator_config or config
-            estimator = last_estimator_config["Estimator"]
             if last_estimator_config:
+                estimator = last_estimator_config["Estimator"]
                 self._mark_global_search_suggestion_as_an_error(trial_id)
                 config, prune_attr, _ = self._force_suggestion_to_be_valid(
                     trial_id,

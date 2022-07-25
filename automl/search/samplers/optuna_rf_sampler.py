@@ -240,8 +240,8 @@ class RandomForestSamplerModel(BaseSamplerModel):
         max_depth: Optional[int] = None,
         random_state: Optional[int] = None,
         independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
-        early_stopping_patience: int = 50,
-        early_stopping_delay: int = 10,
+        # early_stopping_patience: int = 50,
+        # early_stopping_delay: int = 10,
     ) -> None:
         self.study = study
         self.search_space = search_space
@@ -261,8 +261,8 @@ class RandomForestSamplerModel(BaseSamplerModel):
             seed=random_state, **independent_sampler_kwargs
         )
         self.ei_objective = ei_objective
-        self.early_stopping_patience = early_stopping_patience
-        self.early_stopping_delay = early_stopping_delay
+        # self.early_stopping_patience = early_stopping_patience
+        # self.early_stopping_delay = early_stopping_delay
 
         self._rng = np.random.RandomState(self.random_state)
         self._model = RandomForestRegressorWithStd(
@@ -431,6 +431,7 @@ class RandomForestSamplerModel(BaseSamplerModel):
         ys = pd.Series(ys).astype(float)
         if fit:
             ys = self._transform_y(ys)
+            self.best_value = ys.min()
 
         x_nums, x_cats = self._impute(x_nums, x_cats, fit)
         x_cats = self._encode(x_cats, ys, fit)
@@ -452,7 +453,6 @@ class RandomForestSamplerModel(BaseSamplerModel):
             ys_n = pd.Series(
                 power_transform(numpy_ys / ys_std, method="box-cox").flatten()
             )
-        self.best_value = ys_n.min()
         return ys_n
 
     def _impute(
@@ -501,8 +501,8 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
         max_depth: Optional[int] = None,
         random_state: Optional[int] = None,
         independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
-        early_stopping_patience: int = 50,
-        early_stopping_delay: int = 128,
+        # early_stopping_patience: int = 50,
+        # early_stopping_delay: int = 128,
     ) -> None:
         self.study = study
         self.search_space = search_space
@@ -522,8 +522,8 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
             seed=random_state, **independent_sampler_kwargs
         )
         self.ei_objective = ei_objective
-        self.early_stopping_patience = early_stopping_patience
-        self.early_stopping_delay = early_stopping_delay
+        # self.early_stopping_patience = early_stopping_patience
+        # self.early_stopping_delay = early_stopping_delay
         self.num_ensembles = 10
 
         self._rng = np.random.RandomState(self.random_state)
@@ -561,6 +561,9 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
 
     def _encode(self, x_cats: pd.DataFrame, ys: pd.Series, fit: bool) -> pd.DataFrame:
         return x_cats
+
+    def _transform_y(self, ys: pd.Series) -> pd.Series:
+        return ys
 
 
 class RandomForestSampler(BaseSampler):
