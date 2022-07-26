@@ -2058,15 +2058,14 @@ class BlendSearchTuner(RayTuneTuner):
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
             min_dist /= self.X_.shape[0]
-            min_dist = max(min_dist, 10000 / self.X_.shape[0])
+            if min_dist < 1:
+                min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
-            self._searcher_kwargs["prune_attr"] = "dataset_fraction"
-            self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)
-            self._searcher_kwargs["max_resource"] = 1.0
-            self._searcher_kwargs["reduction_factor"] = step
-            logger.debug(self._searcher_kwargs["prune_attr"])
-        else:
-            self.early_stopping_fractions_ = [1]
+                self._searcher_kwargs["prune_attr"] = "dataset_fraction"
+                self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)
+                self._searcher_kwargs["max_resource"] = 1.0
+                self._searcher_kwargs["reduction_factor"] = step
+                logger.debug(self._searcher_kwargs["prune_attr"])
         self.early_stopping_fractions_ = [1]
 
     def _add_extra_random_trials_to_default_grid(self):
