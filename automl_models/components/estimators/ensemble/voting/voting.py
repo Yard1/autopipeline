@@ -152,7 +152,7 @@ class PandasVotingClassifier(_VotingClassifier):
         if self.weights is None:
             return None
         return [
-            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop" and w
+            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop"
         ]
 
     def predict(self, X):
@@ -192,8 +192,9 @@ class PandasVotingClassifier(_VotingClassifier):
             predictions = _get_predictions(
                 parallel, list(self.named_estimators_.values()), X, "predict", pg=pg
             )
+        predictions = [x.reshape(-1, 1) for x in predictions]
 
-        return np.asarray(predictions).T
+        return np.hstack(predictions)
 
     def _collect_probas(self, X):
         """Collect results from clf.predict_proba calls."""
@@ -293,7 +294,7 @@ class PandasVotingRegressor(_VotingRegressor):
         if self.weights is None:
             return None
         return [
-            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop" and w
+            w for est, w in zip(self.estimators, self.weights) if est[1] != "drop"
         ]
 
     def predict(self, X):
@@ -320,5 +321,6 @@ class PandasVotingRegressor(_VotingRegressor):
             predictions = _get_predictions(
                 parallel, list(self.named_estimators_.values()), X, "predict", pg=pg
             )
+        predictions = [x.reshape(-1, 1) for x in predictions]
 
-        return np.asarray(predictions).T
+        return np.hstack(predictions)

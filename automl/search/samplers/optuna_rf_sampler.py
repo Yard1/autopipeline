@@ -685,7 +685,8 @@ class RandomForestSampler(BaseSampler):
         )
         model.tell(complete_trials)
         self._last_model = model._model
-        return model.ask(trial)
+        ret = model.ask(trial)
+        return {k: v for k, v in ret.items() if k in search_space}
 
     def sample_independent(
         self,

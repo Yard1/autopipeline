@@ -26,7 +26,7 @@ def get_rf_n_estimators(config, space):
 
 def get_rf_sqrt_features(config, space):
     X = config.X
-    return np.sqrt(X.shape[1]) / X.shape[1]
+    return max(0.1, np.sqrt(X.shape[1]) / X.shape[1])
 
 
 class RandomForestClassifier(TreeEstimator):

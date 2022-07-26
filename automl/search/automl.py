@@ -7,8 +7,7 @@ from IPython.display import HTML
 
 import numpy as np
 import pandas as pd
-from pandas.core.algorithms import isin
-from pandas.api.types import is_numeric_dtype, is_integer_dtype, is_float_dtype
+from pandas.api.types import is_integer_dtype, is_float_dtype
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split, BaseCrossValidator
@@ -26,15 +25,14 @@ from ..components import DataType, ComponentLevel
 from ..problems import ProblemType
 from ..components import LabelEncoder
 from ..utils import validate_type
-from .utils import flatten_iterable, get_obj_name, ray_context
-
+from ..utils.string import removeprefix
+from .utils import flatten_iterable, get_obj_name, ray_context, ray_score_test
 from automl_models.components.preprocessing.prepare_data import (
     PrepareDataFrame,
     clean_df,
 )
 
 import ray
-import warnings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -255,7 +253,9 @@ class AutoML(BaseEstimator):
         self.problem_type_, y = self._determine_problem_type(problem_type, y)
 
         self.cv_ = get_cv_for_problem_type(self.problem_type_, self.cv)
-        self.stacking_cv_ = get_cv_for_problem_type(self.problem_type_, self.stacking_cv)
+        self.stacking_cv_ = get_cv_for_problem_type(
+            self.problem_type_, self.stacking_cv
+        )
 
         y.index = list(X.index)
 
@@ -311,7 +311,16 @@ class AutoML(BaseEstimator):
         self.trainer_.fit(X, y, X_test=self.X_test_, y_test=self.y_test_)
 
         self.results_ = self._get_results()
-        self.best_id_ = str(self.results_.index[0])
+        try:
+            self.best_id_ = str(self.results_.index[0])
+        except Exception:
+            self.best_id_ = None
+        try:
+            self.best_id_non_ensemble_ = str(
+                self.results_[self.results_["Ensemble"] == False].index[0]
+            )
+        except Exception:
+            self.best_id_non_ensemble_ = None
         # self._displays["results_display"].clear_all()
         self._displays["results_display"].display(self.results_.head(20))
 
@@ -320,7 +329,12 @@ class AutoML(BaseEstimator):
     @property
     def best_pipeline_(self):
         check_is_fitted(self)
-        return self.get_pipeline_by_id(self.best_id_)
+        return self.get_pipeline_by_id(self.best_id_, refit=True)
+
+    @property
+    def best_pipeline_non_ensemble_(self):
+        check_is_fitted(self)
+        return self.get_pipeline_by_id(self.best_id_non_ensemble_, refit=True)
 
     def visualize_pipeline(self, id_or_pipeline: Union[str, Pipeline]):
         if isinstance(id_or_pipeline, Pipeline):
@@ -330,6 +344,38 @@ class AutoML(BaseEstimator):
         html_repr = HTML(estimator_html_repr(pipeline))
         # self._displays["pipeline_display"].display(html_repr, display_type="html")
         return html_repr
+
+    def score_pipeline(self, id_or_pipeline: Union[str, Pipeline]):
+        if isinstance(id_or_pipeline, Pipeline):
+            pipeline = id_or_pipeline
+            # id = None
+        else:
+            results = self.results_.loc[[id_or_pipeline]]
+            test_metrics = {}
+            any_not_nan = False
+            for col in results.columns:
+                if col.startswith("Test "):
+                    value = results.iloc[0][col]
+                    test_metrics[removeprefix(col, "Test ")] = value
+                    if not pd.isnull(value):
+                        any_not_nan = True
+
+            if any_not_nan:
+                return test_metrics
+
+            pipeline = self._get_pipeline_by_id(id_or_pipeline, refit=False)
+            # id = id_or_pipeline
+        pipeline.steps = pipeline.steps[1:]
+        test_ret = ray_score_test.remote(
+            pipeline,
+            self.X_,
+            self.y_,
+            self.X_test_,
+            self.y_test_,
+            self.trainer_.scoring_dict,
+        )
+        ret = ray.get(test_ret)
+        return ret[0]
 
     def get_pipeline_by_id(self, id, refit: Union[bool, str] = False):
         return self._get_pipeline_by_id(id, refit=refit, copy=True)
@@ -412,6 +458,7 @@ class AutoML(BaseEstimator):
         d["Total Time (s)"] = result["time_total_s"]
         d["Estimator Fit Time (s)"] = result["estimator_fit_time"]
         d["Dataset Fraction"] = result.get("dataset_fraction", 1.0)
+        d["Ensemble"] = False
 
         return d
 
@@ -432,10 +479,11 @@ class AutoML(BaseEstimator):
         d["Total Time (s)"] = None
         d["Estimator Fit Time (s)"] = None
         d["Dataset Fraction"] = 1.0
+        d["Ensemble"] = True
 
         return d
 
-    def _get_results(self, show_full_trials_only: bool = True):
+    def _get_results(self, show_full_trials_only: bool = False) -> pd.DataFrame:
         check_is_fitted(self)
         all_results = []
         for stacking_level, results in enumerate(self.trainer_.all_results_):
@@ -467,7 +515,11 @@ class AutoML(BaseEstimator):
             pd.DataFrame(all_results)
             .set_index("Id", drop=True)
             .sort_values(
-                by=[f"Test {metric_to_sort_by}", f"Validation {metric_to_sort_by}"],
+                by=[
+                    "Dataset Fraction",
+                    f"Test {metric_to_sort_by}",
+                    f"Validation {metric_to_sort_by}",
+                ],
                 ascending=False,
             )
         )
