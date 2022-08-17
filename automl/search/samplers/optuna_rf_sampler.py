@@ -577,7 +577,7 @@ class RandomForestSampler(BaseSampler):
         n_ei_candidates: int = 10,
         seed: Optional[int] = None,
         independent_sampler: Type[BaseSampler] = RandomSampler,
-        random_fraction: float = 0.3,
+        random_fraction: float = 0,
         constant_liar: bool = False,
         warn_independent_sampling: bool = True,
         independent_sampler_kwargs: Optional[Dict[str, Any]] = None,
