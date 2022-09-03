@@ -298,4 +298,5 @@ def dynamic_memory_factory(cache, **kwargs):
         return cache
     memory = tempfile.gettempdir() if cache is True else cache
     memory = memory if not memory == os.getcwd() else ".."
-    return DynamicMemory(memory, **kwargs)
+    bytes_limit = kwargs.pop("bytes_limit", 10000000000)
+    return DynamicMemory(memory, bytes_limit=bytes_limit, **kwargs)
