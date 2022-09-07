@@ -325,9 +325,9 @@ def hash(obj, hash_name="md5", coerce_mmap=False):
             "Valid options for 'hash_name' are {}. "
             "Got hash_name={!r} instead.".format(valid_hash_names, hash_name)
         )
-    if "pandas" in sys.modules:
+    #if "pandas" in sys.modules:
         hasher = xxPandasHasher(hash_name=hash_name, coerce_mmap=coerce_mmap)
-    elif "numpy" in sys.modules:
+    if "numpy" in sys.modules:
         hasher = xxNumpyHasher(hash_name=hash_name, coerce_mmap=coerce_mmap)
     else:
         hasher = xxHasher(hash_name=hash_name)
