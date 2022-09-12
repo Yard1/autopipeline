@@ -185,7 +185,6 @@ srsly==1.0.5
 statsmodels==0.13.1
 stevedore==3.5.0
 tabulate==0.8.9
-tbb==2021.5.0
 tenacity==8.0.1
 tensorboardX==2.4.1
 terminado==0.12.1

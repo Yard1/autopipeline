@@ -185,6 +185,89 @@ class xxNumpyHasher(NumpyHasher):
         if return_digest:
             return self._hash.hexdigest()
 
+    def save(self, obj):
+        """ Subclass the save method, to hash ndarray subclass, rather
+            than pickling them. Off course, this is a total abuse of
+            the Pickler class.
+        """
+        if isinstance(obj, self.np.ndarray) and not obj.dtype.hasobject:
+            # Compute a hash of the object
+            # The update function of the hash requires a c_contiguous buffer.
+            if obj.shape == ():
+                # 0d arrays need to be flattened because viewing them as bytes
+                # raises a ValueError exception.
+                obj_c_contiguous = obj.flatten()
+            elif obj.flags.c_contiguous:
+                obj_c_contiguous = obj
+            elif obj.flags.f_contiguous:
+                obj_c_contiguous = obj.T
+            else:
+                # Cater for non-single-segment arrays: this creates a
+                # copy, and thus aleviates this issue.
+                # XXX: There might be a more efficient way of doing this
+                obj_c_contiguous = obj.flatten()
+
+            # memoryview is not supported for some dtypes, e.g. datetime64, see
+            # https://github.com/numpy/numpy/issues/4983. The
+            # workaround is to view the array as bytes before
+            # taking the memoryview.
+            self._hash.update(
+                self._getbuffer(obj_c_contiguous.view(self.np.uint8)))
+
+            # We store the class, to be able to distinguish between
+            # Objects with the same binary content, but different
+            # classes.
+            if self.coerce_mmap and isinstance(obj, self.np.memmap):
+                # We don't make the difference between memmap and
+                # normal ndarrays, to be able to reload previously
+                # computed results with memmap.
+                klass = self.np.ndarray
+            else:
+                klass = obj.__class__
+            # We also return the dtype and the shape, to distinguish
+            # different views on the same data with different dtypes.
+
+            # The object will be pickled by the pickler hashed at the end.
+            obj = (klass, ('HASHED', obj.dtype, obj.shape, obj.strides))
+        elif isinstance(obj, self.np.dtype):
+            # numpy.dtype consistent hashing is tricky to get right. This comes
+            # from the fact that atomic np.dtype objects are interned:
+            # ``np.dtype('f4') is np.dtype('f4')``. The situation is
+            # complicated by the fact that this interning does not resist a
+            # simple pickle.load/dump roundtrip:
+            # ``pickle.loads(pickle.dumps(np.dtype('f4'))) is not
+            # np.dtype('f4') Because pickle relies on memoization during
+            # pickling, it is easy to
+            # produce different hashes for seemingly identical objects, such as
+            # ``[np.dtype('f4'), np.dtype('f4')]``
+            # and ``[np.dtype('f4'), pickle.loads(pickle.dumps('f4'))]``.
+            # To prevent memoization from interfering with hashing, we isolate
+            # the serialization (and thus the pickle memoization) of each dtype
+            # using each time a different ``pickle.dumps`` call unrelated to
+            # the current Hasher instance.
+            self._hash.update("_HASHED_DTYPE".encode('utf-8'))
+            self._hash.update(pickle.dumps(obj))
+            return
+        if not isinstance(obj, type) and hasattr(obj, "__joblib_hash__"):
+            obj = obj.__joblib_hash__()
+
+        ignored_attrs = {}
+        attrs_to_ignore = set()
+        if not isinstance(obj, type):
+            if (hasattr(obj, "fit") or hasattr(obj, "transform")):
+                attrs_to_ignore.update(ATTRIBUTES_TO_IGNORE)
+            if hasattr(obj, "__joblib_hash_attrs_to_ignore__"):
+                attrs_to_ignore.update(obj.__joblib_hash_attrs_to_ignore__())
+        if attrs_to_ignore:
+            for attr in attrs_to_ignore:
+                if hasattr(obj, attr):
+                    ignored_attrs[attr] = getattr(obj, attr)
+                    setattr(obj, attr, None)
+        Hasher.save(self, obj)
+        if attrs_to_ignore:
+            for attr, value in ignored_attrs.items():
+                setattr(obj, attr, value)
+
 
 class xxPandasHasher(xxNumpyHasher):
     def _hash_pandas(self, obj):
