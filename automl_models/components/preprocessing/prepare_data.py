@@ -56,7 +56,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         int_dtype: Optional[type] = None,
         ordinal_columns: Optional[Dict[str, list]] = None,
         copy_X: bool = True,
-        variance_threshold: float = 0.01,
+        variance_threshold: float = 0.0,
         missing_values_threshold: float = 0.3,
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:

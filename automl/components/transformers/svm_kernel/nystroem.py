@@ -44,7 +44,7 @@ class NystroemSigmoid(SVMKernel):
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
-    _component_level = ComponentLevel.RARE
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_tuning_grid = {
         "gamma": CategoricalDistribution(["scale", "auto"]),

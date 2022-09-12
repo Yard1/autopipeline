@@ -18,7 +18,7 @@ class CategoryCoalescer(Transformer):
     _default_tuning_grid = {
         "minimum_fraction": UniformDistribution(0.0001, UPPER_BOUNDS, log=True, cost_related=False),
     }
-    _component_level = ComponentLevel.RARE
+    _component_level = ComponentLevel.COMMON
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

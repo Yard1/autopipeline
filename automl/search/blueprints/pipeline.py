@@ -151,6 +151,7 @@ def create_pipeline_blueprint(
         "FastAINNClassifier": FastAINNClassifier(),
         "FastAINNRegressor": FastAINNRegressor(),
         "GaussianNB": GaussianNB(),
+        "QuadraticDiscriminantAnalysis": QuadraticDiscriminantAnalysis(),
     }
     components = {
         **passthrough,
