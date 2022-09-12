@@ -880,7 +880,7 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_EVERY_N_ITER = 8
+    _FORCE_GS_EVERY_N_ITER = 32
     _MAX_GS_RETRIES = 3
 
     def __init__(
