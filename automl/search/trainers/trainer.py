@@ -192,7 +192,7 @@ class Trainer:
             if self.problem_type.is_classification()
             else []
         )
-        self.secondary_level = ComponentLevel.translate(secondary_level)
+        self.secondary_level = ComponentLevel.translate(secondary_level) if secondary_level else None
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None

@@ -24,7 +24,7 @@ class PandasCategoryCoalescer(
         ]
         if value_counts_below_fraction.empty:
             return col
-        categories_to_replace = list(value_counts_below_fraction.index)
+        categories_to_replace = [str(x) for x in value_counts_below_fraction.index]
         combined_category_name = "_".join(categories_to_replace)
         self.coalesced_categories_[col.name] = (
             categories_to_replace,

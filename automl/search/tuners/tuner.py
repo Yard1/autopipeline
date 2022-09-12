@@ -375,7 +375,7 @@ class RayTuneTuner(Tuner):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
         self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
-        print(f"columns to tune: {self.X_.columns} {self.X_.dtypes}")
+        print(f"columns to tune: {self.X_.columns}\n{self.X_.dtypes}\n{self.X_.shape}")
         n_splits = self.cv.get_n_splits(self.X_, self.y_)
         n_jobs_per_fold = max(
             1,
