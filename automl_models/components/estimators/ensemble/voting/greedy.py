@@ -228,28 +228,29 @@ class GreedyEnsembleSelection:
         )
         X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
         with ray_pg_context(pg) as pg:
-            predictions = get_cv_predictions(
-                parallel=parallel,
-                all_estimators=ests,
-                X=X,
-                y=y,
-                X_ray=X_ray,
-                y_ray=y_ray,
-                cv=deepcopy(self.cv),
-                fit_params=fit_params,
-                verbose=self.verbose,
-                stack_method=[method] * len(ests),
-                n_jobs=self.n_jobs,
-                pg=pg,
-                return_type="refs",
-            )
+            if not hasattr(self, "weights_"):
+                predictions = get_cv_predictions(
+                    parallel=parallel,
+                    all_estimators=ests,
+                    X=X,
+                    y=y,
+                    X_ray=X_ray,
+                    y_ray=y_ray,
+                    cv=deepcopy(self.cv),
+                    fit_params=fit_params,
+                    verbose=self.verbose,
+                    stack_method=[method] * len(ests),
+                    n_jobs=self.n_jobs,
+                    pg=pg,
+                    return_type="refs",
+                )
 
-            cv = check_cv(deepcopy(self.cv), y, classifier=is_classifier(self))
-            splits = list(cv.split(X, y, groups))
-            labels = [_safe_indexing(y, test) for _, test in splits]
+                cv = check_cv(deepcopy(self.cv), y, classifier=is_classifier(self))
+                splits = list(cv.split(X, y, groups))
+                labels = [_safe_indexing(y, test) for _, test in splits]
 
-            self._bag_greedy_ensembles(predictions, labels, pg)
-            self._calculate_weights()
+                self._bag_greedy_ensembles(predictions, labels, pg)
+                self._calculate_weights()
             weights = self.weights_
             ests_to_fit = [
                 ests[i] for i in range(len(ests)) if weights[i] and ests[i] != "drop"
@@ -275,6 +276,7 @@ class GreedyEnsembleSelection:
                 self.estimators_.append(current_est)
 
     def _bag_greedy_ensembles(self, predictions, labels, pg):
+        print("Bagging greedy ensembles...")
         scorer = check_scoring(self, scoring=self.scoring)
         n_bags = self.n_bags or 1
         labels_ref = ray.put(labels)

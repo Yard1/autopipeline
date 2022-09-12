@@ -123,6 +123,8 @@ class BaseSamplerModel(object, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def tell(
         self,
+        complete_trials: List[FrozenTrial],
+        n_actually_completed_trials: int = -1
     ):
         raise NotImplementedError
 
@@ -279,6 +281,9 @@ class RandomForestSamplerModel(BaseSamplerModel):
             cv=KFold(5, shuffle=True, random_state=random_state),
         )
         self._noise = 0
+        self._trials_cache = None
+        self._complete_trials = None
+        self._n_complete_trials = 0
 
     def _get_search_space_bounds(self) -> Dict[str, Tuple[float, float]]:
         search_space_bounds = {}
@@ -363,25 +368,34 @@ class RandomForestSamplerModel(BaseSamplerModel):
             self.ei_objective(trial)
             return 1
 
-        trials = [_run_trial(opt_func, self._rng) for _ in range(self.n_ei_candidates)]
-        completed_trials = [
-            completed_trial.params for completed_trial in self._complete_trials
-        ]
-        trials = [trial for trial in trials if trial not in completed_trials]
-        print(f"trials len {len(trials)}")
-        xs, _ = self._preprocess_trials(trials, fit=False)
-        x_pred, x_var = self._get_model_preds(xs)
-        acq_values = self.acq_function(
-            self.best_value,
-            x_pred,
-            x_var,
-            noise=self._noise,
-            random_state=self.random_state,
-        )
-        best_acq = np.argmax(acq_values)
-        if not acq_values[best_acq]:
-            best_acq = np.argmin(x_pred)
-        return trials[best_acq][0]
+        if not self._trials_cache or len(self._trials_cache[1]) < 1:
+            print("creating new trials cache")
+            trials = [_run_trial(opt_func, self._rng) for _ in range(self.n_ei_candidates)]
+            completed_trials = [
+                completed_trial.params for completed_trial in self._complete_trials
+            ]
+            trials = [trial for trial in trials if trial not in completed_trials]
+            print(f"trials len {len(trials)}")
+            xs, _ = self._preprocess_trials(trials, fit=False)
+            x_pred, x_var = self._get_model_preds(xs)
+            acq_values = self.acq_function(
+                self.best_value,
+                x_pred,
+                x_var,
+                noise=self._noise,
+                random_state=self.random_state,
+            )
+            acq_values_indexed = np.stack((np.arange(len(acq_values)), acq_values), axis=1)
+            acq_values_indexed = acq_values_indexed[acq_values_indexed[:, 1].argsort()[::-1]]
+            self._trials_cache = (trials, acq_values_indexed)
+        else:
+            print("reusing existing trials cache")
+            trials, acq_values_indexed = self._trials_cache
+        print(f"len acq_values_indexed {len(acq_values_indexed)}")
+        print(acq_values_indexed[:5,:])
+        best_trial = trials[int(acq_values_indexed[0,0])][0]
+        self._trials_cache = (trials, np.delete(acq_values_indexed, 0, 0))
+        return best_trial
 
     # def ask(
     #     self,
@@ -407,8 +421,14 @@ class RandomForestSamplerModel(BaseSamplerModel):
     def tell(
         self,
         complete_trials: List[FrozenTrial],
+        n_actually_completed_trials: int = -1
     ):
+        if self._n_complete_trials >= n_actually_completed_trials - 1:
+            print(f"{self._n_complete_trials} == {n_actually_completed_trials}, not telling again")
+            return
+        self._trials_cache = None
         self._complete_trials = complete_trials
+        self._n_complete_trials = n_actually_completed_trials if n_actually_completed_trials > -1 else 0
         xs, ys = self._preprocess_trials(
             [(trial.params, trial.value) for trial in complete_trials], fit=True
         )
@@ -537,12 +557,23 @@ class CatBoostSamplerModel(RandomForestSamplerModel):
             random_seed=random_state,
         )
         self._noise = 0
+        self._trials_cache = None
+        self._complete_trials = None
+        self._n_complete_trials = 0
+
 
     def tell(
         self,
         complete_trials: List[FrozenTrial],
+        n_actually_completed_trials: int = -1
     ):
+        print(f"tell complete trials {self._n_complete_trials} == {n_actually_completed_trials}")
+        if self._n_complete_trials >= n_actually_completed_trials - 1:
+            print("not telling again")
+            return
+        self._trials_cache = None
         self._complete_trials = complete_trials
+        self._n_complete_trials = n_actually_completed_trials if n_actually_completed_trials > -1 else 0
         xs, ys = self._preprocess_trials(
             [(trial.params, trial.value) for trial in complete_trials], fit=True
         )
@@ -602,6 +633,7 @@ class RandomForestSampler(BaseSampler):
         self._consider_pruned_trials = True
         self._worst_trial_value = float("-inf")
         self._best_trial_value = float("inf")
+        self._last_model = None
 
     def reseed_rng(self) -> None:
         self._rng = np.random.RandomState()
@@ -683,9 +715,12 @@ class RandomForestSampler(BaseSampler):
             random_state=self._rng.randint(0, 2 ** 16),
             independent_sampler_kwargs=self._independent_sampler_kwargs,
         )
-        model.tell(complete_trials)
-        self._last_model = model._model
+        if self._last_model:
+            model._n_complete_trials = self._last_model._n_complete_trials
+            model._trials_cache = self._last_model._trials_cache
+        model.tell(complete_trials, n)
         ret = model.ask(trial)
+        self._last_model = model
         return {k: v for k, v in ret.items() if k in search_space}
 
     def sample_independent(
