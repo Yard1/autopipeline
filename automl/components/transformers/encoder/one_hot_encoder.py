@@ -46,6 +46,6 @@ class OneHotEncoder(Encoder):
                         for col in config.X.select_dtypes("category")
                     ]
                 )
-                <= config.X.shape[1] * 4
+                <= min(config.X.shape[1] * 4, 500)
             )
         )
