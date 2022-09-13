@@ -296,14 +296,12 @@ class RayTuneTuner(Tuner):
         return len(self.default_grid_) + self.num_samples
 
     def _set_cache(self):
-        validate_type(self.cache, "cache", (str, bool))
+        # validate_type(self.cache, "cache", (str, bool))
         if not self.cache:
             self._cache = None
         else:
             self._cache = self.cache
-
-        if self._cache:
-            logger.info(f"Cache dir set as '{self._cache}'")
+            logger.info(f"Cache set as '{self._cache}'")
 
     def _shuffle_default_grid(self):
         grid_by_rarity = defaultdict(list)

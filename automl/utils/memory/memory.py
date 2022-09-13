@@ -293,10 +293,11 @@ class DynamicMemory(Memory):
         )
 
 
-def dynamic_memory_factory(cache, **kwargs):
+def dynamic_memory_factory(cache, *, run_id=None, **kwargs):
     if isinstance(cache, Memory):
         return cache
     memory = tempfile.gettempdir() if cache is True else cache
+    memory = os.path.join(memory, run_id) if run_id else memory
     memory = memory if not memory == os.getcwd() else ".."
     bytes_limit = kwargs.pop("bytes_limit", 10000000000)
     return DynamicMemory(memory, bytes_limit=bytes_limit, **kwargs)

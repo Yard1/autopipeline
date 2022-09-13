@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import gc
+import uuid
 
 from copy import deepcopy
 from collections import defaultdict
@@ -112,6 +113,7 @@ class Trainer:
         secondary_level: Optional[ComponentLevel] = None,
         tune_kwargs: dict = None,
     ) -> None:
+        self.run_id = str(uuid.uuid1().hex)[:8]
         self.problem_type = problem_type
         self.cv = cv
         self.stacking_cv = stacking_cv
@@ -123,7 +125,7 @@ class Trainer:
         self.target_metric = target_metric or self.default_metric_name
         self.random_state = random_state
         self.early_stopping = early_stopping
-        self.cache = cache
+        self.cache = dynamic_memory_factory(cache, run_id=self.run_id)
         self.secondary_tuning_strategy = (
             secondary_tuning_strategy
             or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=85)
