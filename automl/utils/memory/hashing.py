@@ -263,10 +263,12 @@ class xxNumpyHasher(NumpyHasher):
                 if hasattr(obj, attr):
                     ignored_attrs[attr] = getattr(obj, attr)
                     setattr(obj, attr, None)
-        Hasher.save(self, obj)
-        if attrs_to_ignore:
-            for attr, value in ignored_attrs.items():
-                setattr(obj, attr, value)
+        try:
+            Hasher.save(self, obj)
+        finally:
+            if attrs_to_ignore:
+                for attr, value in ignored_attrs.items():
+                    setattr(obj, attr, value)
 
 
 class xxPandasHasher(xxNumpyHasher):
@@ -383,10 +385,12 @@ class xxPandasHasher(xxNumpyHasher):
                 if hasattr(obj, attr):
                     ignored_attrs[attr] = getattr(obj, attr)
                     setattr(obj, attr, None)
-        Hasher.save(self, obj)
-        if attrs_to_ignore:
-            for attr, value in ignored_attrs.items():
-                setattr(obj, attr, value)
+        try:
+            Hasher.save(self, obj)
+        finally:
+            if attrs_to_ignore:
+                for attr, value in ignored_attrs.items():
+                    setattr(obj, attr, value)
 
 
 def hash(obj, hash_name="md5", coerce_mmap=False):

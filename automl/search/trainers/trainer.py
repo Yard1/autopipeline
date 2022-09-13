@@ -1,4 +1,5 @@
 from sklearn.utils.validation import check_is_fitted
+from automl.search.cv.base_cv import get_resampling_for_problem_type
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
 from typing import List, Optional, Union, Tuple
@@ -17,6 +18,7 @@ from sklearn.model_selection import (
     KFold,
     StratifiedKFold,
     cross_validate,
+    BaseShuffleSplit,
 )
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.preprocessing import LabelEncoder
@@ -194,7 +196,9 @@ class Trainer:
             if self.problem_type.is_classification()
             else []
         )
-        self.secondary_level = ComponentLevel.translate(secondary_level) if secondary_level else None
+        self.secondary_level = (
+            ComponentLevel.translate(secondary_level) if secondary_level else None
+        )
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None
@@ -272,9 +276,27 @@ class Trainer:
         elif self.problem_type == ProblemType.REGRESSION:
             return "r2"
 
-    def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
+    def _get_cv(
+        self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int, None]
+    ):
         validate_type(cv, "cv", (BaseCrossValidator, _RepeatedSplits, int, None))
         return get_cv_for_problem_type(problem_type, n_splits=cv)
+
+    def _get_resampling(
+        self,
+        problem_type: ProblemType,
+        cv: Union[BaseCrossValidator, BaseShuffleSplit, float, int, None],
+        time_budget: float,
+        X: pd.DataFrame,
+    ):
+        validate_type(
+            cv,
+            "cv",
+            (BaseCrossValidator, _RepeatedSplits, BaseShuffleSplit, float, int, None),
+        )
+        return get_resampling_for_problem_type(
+            problem_type, n_splits=cv, time_budget=time_budget, shape=X.shape, random_state=self.random_state
+        )
 
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
         categorical_columns = list(X.select_dtypes(include="category").columns)
@@ -712,7 +734,7 @@ class Trainer:
 
         self.current_stacking_level = -1
 
-        self.cv_ = self._get_cv(self.problem_type, self.cv)
+        self.cv_ = self._get_resampling(self.problem_type, self.cv, self.tuning_time, X)
         self.stacking_cv_ = self._get_cv(self.problem_type, self.stacking_cv)
         self.pipeline_blueprints_: List[TopPipeline] = []
         self.secondary_pipeline_blueprints_: List[TopPipeline] = []
@@ -723,6 +745,8 @@ class Trainer:
         self.ensembles_ = []
         self.ensemble_results_ = []
         self.meta_columns_ = []
+
+        print(f"Using resampling {self.cv_}")
 
         self._fit_one_layer(
             X,

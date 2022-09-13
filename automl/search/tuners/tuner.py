@@ -375,19 +375,16 @@ class RayTuneTuner(Tuner):
         tune_kwargs["num_samples"] = self.total_num_samples
         print(f"columns to tune: {self.X_.columns}\n{self.X_.dtypes}\n{self.X_.shape}")
         n_splits = self.cv.get_n_splits(self.X_, self.y_)
-        n_jobs_per_fold = max(
-            1,
-            self.trainable_n_jobs
-            // (
-                n_splits
-                + int(
-                    self.X_test_ is not None
-                    and self.trainable_n_jobs % (n_splits + 1) == 0
-                )
-            ),
+        n_splits += int(
+            self.X_test_ is not None and self.trainable_n_jobs % (n_splits + 1) == 0
         )
-        n_jobs_per_fold = int(pow(2, int(math.log(n_jobs_per_fold, 2))))
-        bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
+        if n_splits != 1:
+            n_jobs_per_fold = max(1, self.trainable_n_jobs // n_splits)
+            n_jobs_per_fold = int(pow(2, int(math.log(n_jobs_per_fold, 2))))
+            bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
+        else:
+            n_jobs_per_fold = self.trainable_n_jobs
+            bundles = 1
         tune_kwargs["resources_per_trial"] = PlacementGroupFactory(
             [{}] + [{"CPU": n_jobs_per_fold}] * bundles
         )

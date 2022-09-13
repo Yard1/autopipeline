@@ -10,7 +10,7 @@ import pandas as pd
 from pandas.api.types import is_integer_dtype, is_float_dtype
 
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import train_test_split, BaseCrossValidator
+from sklearn.model_selection import train_test_split, BaseCrossValidator, BaseShuffleSplit
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -81,10 +81,10 @@ class AutoML(BaseEstimator):
         validate_type(self.level, "level", (str, int, ComponentLevel))
         validate_type(self.problem_type, "problem_type", (str, ProblemType, type(None)))
         validate_type(
-            self.cv, "cv", (int, BaseCrossValidator, _RepeatedSplits)
+            self.cv, "cv", (int, float, None, BaseShuffleSplit, BaseCrossValidator, _RepeatedSplits)
         )  # use check_cv instead
         validate_type(
-            self.stacking_cv, "stacking_cv", (int, BaseCrossValidator, _RepeatedSplits)
+            self.stacking_cv, "stacking_cv", (int, None, BaseCrossValidator, _RepeatedSplits)
         )  # use check_cv instead
         validate_type(self.test_size, "test_size", float)
         if isinstance(self.cv, int) and self.cv < 2:
@@ -252,11 +252,6 @@ class AutoML(BaseEstimator):
 
         self.problem_type_, y = self._determine_problem_type(problem_type, y)
 
-        self.cv_ = get_cv_for_problem_type(self.problem_type_, self.cv)
-        self.stacking_cv_ = get_cv_for_problem_type(
-            self.problem_type_, self.stacking_cv
-        )
-
         y.index = list(X.index)
 
         self.y_steps_.append(("PrepareTarget", y_validator))
@@ -296,8 +291,8 @@ class AutoML(BaseEstimator):
             problem_type=self.problem_type_,
             random_state=self.random_seed_,
             level=self.level_,
-            cv=self.cv_,
-            stacking_cv=self.stacking_cv_,
+            cv=self.cv,
+            stacking_cv=self.stacking_cv,
             categorical_columns=categorical_columns,
             numeric_columns=numeric_columns,
             target_metric=self.target_metric,

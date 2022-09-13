@@ -6,10 +6,13 @@ from sklearn.linear_model import (
 from .linear_model_estimator import LinearModelEstimator
 from ....problems import ProblemType
 from ....search.distributions import UniformDistribution
+from ...component import ComponentLevel
 
 
 class LinearRegression(LinearModelEstimator):
     _component_class = _LinearRegression
+
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_parameters = {
         "fit_intercept": True,
@@ -29,6 +32,8 @@ class LinearRegression(LinearModelEstimator):
 
 class ElasticNet(LinearModelEstimator):
     _component_class = _ElasticNet
+
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_parameters = {
         "alpha": 1.0,
@@ -58,6 +63,8 @@ class ElasticNet(LinearModelEstimator):
 
 class ElasticNetCV(LinearModelEstimator):
     _component_class = _ElasticNetCV
+
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_parameters = {
         "l1_ratio": [0.1, 0.5, 0.7, 0.9, 0.95, 0.99, 1],

@@ -5,10 +5,13 @@ from sklearn.linear_model import (
 from .linear_model_estimator import LinearModelEstimator
 from ....problems import ProblemType
 from ....search.distributions import UniformDistribution, CategoricalDistribution
+from ...component import ComponentLevel
 
 
 class LogisticRegression(LinearModelEstimator):
     _component_class = _LogisticRegression
+
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_parameters = {
         "penalty": "elasticnet",
@@ -40,6 +43,8 @@ class LogisticRegression(LinearModelEstimator):
 
 class LogisticRegressionCV(LinearModelEstimator):
     _component_class = _LogisticRegressionCV
+
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_parameters = {
         "penalty": "elasticnet",

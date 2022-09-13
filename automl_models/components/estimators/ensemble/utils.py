@@ -8,6 +8,7 @@ from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
     remove_placement_group,
+    get_current_placement_group
 )
 from copy import deepcopy
 from sklearn.base import clone, is_classifier
@@ -124,8 +125,8 @@ def _cross_val_predict_ray_remotes(
     splits = list(cv.split(X, y, groups))
 
     test_indices = np.concatenate([test for _, test in splits])
-    if not _check_is_permutation(test_indices, _num_samples(X)):
-        raise ValueError("cross_val_predict only works for partitions")
+    # if not _check_is_permutation(test_indices, _num_samples(X)):
+    #    raise ValueError("cross_val_predict only works for partitions")
 
     # If classification methods produce multiple columns of output,
     # we need to manually encode classes to ensure consistent column ordering.
@@ -418,7 +419,7 @@ ray_call_method = ray.remote(call_method)
 def should_use_ray(parallel: Parallel) -> bool:
     return parallel.n_jobs not in (1, None) and (
         "ray" in parallel._backend.__class__.__name__.lower()  # or ray.is_initialized()
-    )
+    ) and not get_current_placement_group()
 
 
 def put_args_if_ray(parallel: Parallel, *args):
