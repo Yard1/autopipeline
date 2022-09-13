@@ -106,7 +106,7 @@ class Trainer:
         secondary_ensembles: Optional[List[EnsembleCreator]] = None,
         stacking_level: int = 0,
         return_test_scores_during_tuning: bool = True,
-        early_stopping: bool = False,
+        early_stopping: bool = True,
         cache: Union[str, bool] = False,
         random_state=None,
         secondary_level: Optional[ComponentLevel] = None,

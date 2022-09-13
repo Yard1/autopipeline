@@ -880,7 +880,7 @@ class EstimatorState(Bunch):
 class ConditionalBlendSearch(BlendSearch):
     """class for BlendSearch algorithm"""
 
-    _FORCE_GS_EVERY_N_ITER = 4096
+    _FORCE_GS_EVERY_N_ITER = 64
     _MAX_GS_RETRIES = 3
 
     def __init__(
@@ -2053,11 +2053,17 @@ class BlendSearchTuner(RayTuneTuner):
 
     def _set_up_early_stopping(self, X, y, groups=None):
         step = 4
+        print(self.X_.shape[0])
+        print(self.X_.shape[1])
+        print(self.early_stopping)
         if self.early_stopping and self.X_.shape[0] * self.X_.shape[1] > 100001:
-            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 1000
+            min_dist = self.cv.get_n_splits(self.X_, self.y_, self.groups_) * 10
+            print(min_dist)
             if self.problem_type.is_classification():
                 min_dist *= len(self.y_.cat.categories)
+            print(min_dist)
             min_dist /= self.X_.shape[0]
+            print(min_dist)
             if min_dist < 1:
                 min_dist = max(min_dist, 10000 / self.X_.shape[0])
 
@@ -2065,7 +2071,7 @@ class BlendSearchTuner(RayTuneTuner):
                 self._searcher_kwargs["min_resource"] = np.around(min_dist, 2)
                 self._searcher_kwargs["max_resource"] = 1.0
                 self._searcher_kwargs["reduction_factor"] = step
-                logger.debug(self._searcher_kwargs["prune_attr"])
+                print(f"Setting early stopping min_resource {self._searcher_kwargs['min_resource']} max_resource {self._searcher_kwargs['max_resource']}")
         self.early_stopping_fractions_ = [1]
 
     def _add_extra_random_trials_to_default_grid(self):
