@@ -124,11 +124,17 @@ class AutoMLSkorchMixin:
 
         if isinstance(self.train_split, type):
             if not hasattr(self, "train_split_"):
-                self.train_split_ = self.train_split(
-                    cv=self.cv,
-                    random_state=self.random_state,
-                    stratified=is_classifier(self),
-                )
+                try:
+                    self.train_split_ = self.train_split(
+                        cv=self.cv,
+                        random_state=self.random_state,
+                        stratified=is_classifier(self),
+                    )
+                except:
+                    self.train_split_ = self.train_split(
+                        cv=self.cv,
+                        random_state=self.random_state,
+                    )
             train_split = self.train_split_
         else:
             train_split = self.train_split
