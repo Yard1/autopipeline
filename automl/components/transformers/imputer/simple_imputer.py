@@ -14,7 +14,7 @@ class SimpleNumericImputer(Imputer):
     _default_parameters = {
         "strategy": "median",
         "fill_value": 0,
-        "verbose": 0,
+        "verbose": "deprecated",
         "copy": True,
         "add_indicator": False,
     }
@@ -28,7 +28,7 @@ class SimpleCategoricalImputer(Imputer):
     _default_parameters = {
         "strategy": "most_frequent",
         "fill_value": "missing_value",
-        "verbose": 0,
+        "verbose": "deprecated",
         "copy": True,
         "add_indicator": False,
     }

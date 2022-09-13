@@ -63,6 +63,7 @@ from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
 from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
+from ..tuners.trainable import _SubsampleMetaSplitterWithStratify
 from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
 from ...components.estimators.linear_model import LogisticRegressionCV, ElasticNetCV
@@ -91,7 +92,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class Trainer:
     def __init__(
         self,
@@ -115,7 +115,7 @@ class Trainer:
         secondary_level: Optional[ComponentLevel] = None,
         tune_kwargs: dict = None,
     ) -> None:
-        self.run_id = str(uuid.uuid1().hex)[:8]
+        self.run_id = f"autopipeline_{str(uuid.uuid1().hex)[:8]}"
         self.problem_type = problem_type
         self.cv = cv
         self.stacking_cv = stacking_cv
@@ -295,7 +295,11 @@ class Trainer:
             (BaseCrossValidator, _RepeatedSplits, BaseShuffleSplit, float, int, None),
         )
         return get_resampling_for_problem_type(
-            problem_type, n_splits=cv, time_budget=time_budget, shape=X.shape, random_state=self.random_state
+            problem_type,
+            n_splits=cv,
+            time_budget=time_budget,
+            shape=X.shape,
+            random_state=self.random_state,
         )
 
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
@@ -346,9 +350,7 @@ class Trainer:
             widget=self.last_tuner_.widget_ if self.last_tuner_ else None,
             plot_callback=self.last_tuner_.plot_callback_ if self.last_tuner_ else None,
             stacking_level=self.current_stacking_level,
-            previous_stack=self.get_main_stacking_ensemble_at_level(
-                self.current_stacking_level - 1
-            ),
+            previous_stack=self.previous_stack,
             **self.tune_kwargs,
         )
         self.tuners_.append(tuner)
@@ -403,6 +405,53 @@ class Trainer:
         else:
             X_test_tuning = None
             y_test_tuning = None
+
+        if self.previous_stack:
+            min_resource = self.last_tuner_._searcher_kwargs.get("min_resource", 1.0)
+            reduction_factor = self.last_tuner_._searcher_kwargs.get(
+                "reduction_factor", 1
+            )
+            resource_fractions = {min_resource}
+            resource = min_resource
+            while resource < 1:
+                if resource * self.resource_multiple_factor > self.max_resource:
+                    resource = 1
+                else:
+                    resource *= reduction_factor
+                resource_fractions.add(resource)
+
+            for prune_attr in resource_fractions:
+                is_early_stopping_on = prune_attr and prune_attr < 1.0
+
+                if is_early_stopping_on:
+                    subsample_cv = _SubsampleMetaSplitterWithStratify(
+                        base_cv=self.cv_,
+                        fraction=prune_attr,
+                        subsample_test=True,
+                        random_state=self.random_state,
+                        stratify=self.problem_type.is_classification(),
+                    )
+                else:
+                    subsample_cv = self.cv_
+
+            stack = clone(self.previous_stack)
+            final_estimator = DummyClassifier(strategy="constant", constant=0) if self.problem_type.is_classification() else DummyRegressor(strategy="constant", constant=0)
+            stack.set_params(n_jobs=-1)
+            stack = stack_estimator(final_estimator, stack)
+            cross_validate(
+                stack,
+                X,
+                y,
+                cv=subsample_cv,
+                groups=groups,
+                error_score="raise",
+                return_estimator=False,
+                n_jobs=1,
+                verbose=1,
+            )
+            if X_test_tuning is not None:
+                stack.fit(X, y)
+
         results, _, pipeline_blueprint = self._tune(
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
         )
@@ -451,6 +500,10 @@ class Trainer:
             groups=groups,
         )
 
+    @property
+    def previous_stack(self):
+        return self.get_main_stacking_ensemble_at_level(self.current_stacking_level - 1)
+
     def _create_ensembles(
         self,
         X,
@@ -474,9 +527,7 @@ class Trainer:
             "metric": self.scoring_dict[self.target_metric],
             "random_state": self.random_state,
             "current_stacking_level": self.current_stacking_level,
-            "previous_stack": self.get_main_stacking_ensemble_at_level(
-                self.current_stacking_level - 1
-            ),
+            "previous_stack": self.previous_stack,
             "X_test": X_test,
             "y_test": y_test,
             "X_test_original": X_test_original,
@@ -503,6 +554,7 @@ class Trainer:
                 ),
             )
         ]
+
         if self.current_stacking_level >= self.stacking_level:
             ray_jobs += [
                 (
