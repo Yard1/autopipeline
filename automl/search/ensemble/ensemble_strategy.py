@@ -76,10 +76,13 @@ class EnsembleStrategy(ABC):
         return _discard_below_max_dataset_fraction(_merge_dicts(results))
 
     def get_percentile(self, results: Dict[str, Any]):
-        return np.percentile(
-            [result["mean_validation_score"] for result in results.values()],
-            self.percentile_threshold,
-        )
+        try:
+            return np.percentile(
+                [result["mean_validation_score"] for result in results.values()],
+                self.percentile_threshold,
+            )
+        except:
+            return 0
 
 
 class RoundRobinEstimator(EnsembleStrategy):
