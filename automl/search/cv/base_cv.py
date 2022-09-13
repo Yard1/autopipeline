@@ -25,6 +25,8 @@ def get_resampling_for_problem_type(
     random_state=None,
 ) -> Union[BaseCrossValidator, BaseShuffleSplit]:
     if n_splits is None:
+        if time_budget and isinstance(time_budget, list):
+            time_budget = sum(time_budget)
         if (
             time_budget is None
             or shape[0] * shape[1] / 0.9 < SMALL_LARGE_THRES * (time_budget / 3600)
