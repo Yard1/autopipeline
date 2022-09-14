@@ -145,7 +145,10 @@ def _cross_val_predict_ray_remotes(
                 y_enc[:, i_label] = LabelEncoder().fit_transform(y[:, i_label])
             y = y_enc
 
-    y.index = list(X.index)
+    try:
+        y.index = list(X.index)
+    except:
+        pass
 
     # We clone the estimator to make sure that all the folds are
     # independent, and that it is pickle-able.
