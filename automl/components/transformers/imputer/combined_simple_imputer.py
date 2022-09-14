@@ -37,7 +37,7 @@ class CombinedSimpleImputer(Imputer):
         "numeric_fill_value": 0,
         "categorical_strategy": "most_frequent",
         "categorical_fill_value": "missing_value",
-        "verbose": "deprecated",
+        "verbose": 0,
         "copy": True,
         "n_jobs": 1,
         "transformer_weights": None,
