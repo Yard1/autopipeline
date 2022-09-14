@@ -413,9 +413,9 @@ class Trainer:
             )
             resource_fractions = {min_resource}
             resource = min_resource
-            while resource < 1:
-                if resource * self.resource_multiple_factor > self.max_resource:
-                    resource = 1
+            while resource < 1.0:
+                if resource * reduction_factor > 1.0:
+                    resource = 1.0
                 else:
                     resource *= reduction_factor
                 resource_fractions.add(resource)
