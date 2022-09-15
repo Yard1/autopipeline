@@ -22,7 +22,7 @@ from joblib.logger import format_time
 
 from .hashing import hash
 
-BYTES_LIMIT = 1024 * 1024 * 1024
+BYTES_LIMIT = 1024 * 1024 * 1024 * 10
 
 class DynamicMemorizedFunc(MemorizedFunc):
     def __init__(
