@@ -211,12 +211,8 @@ class Trainer:
     def get_main_stacking_ensemble_at_level(self, stacking_level):
         if stacking_level < 0:
             return None
-        ret = self.ensembles_[stacking_level][self.main_stacking_ensemble_name]
+        ret = self.ensembles_[stacking_level].get(self.main_stacking_ensemble_name, None)
         return ret
-
-    @property
-    def previous_main_stacking_ensemble(self):
-        return self.get_main_stacking_ensemble_at_level(self.current_stacking_level - 1)
 
     @property
     def main_stacking_ensemble_name(self) -> str:
