@@ -443,7 +443,7 @@ class Trainer:
                     groups=groups,
                     error_score="raise",
                     return_estimator=False,
-                    n_jobs=-1,
+                    n_jobs=1,
                     verbose=1,
                 )
                 if X_test_tuning is not None:
