@@ -430,23 +430,24 @@ class Trainer:
                 else:
                     subsample_cv = self.cv_
 
-            stack = clone(self.previous_stack)
-            final_estimator = DummyClassifier(strategy="constant", constant=0) if self.problem_type.is_classification() else DummyRegressor(strategy="constant", constant=0)
-            stack.set_params(n_jobs=-1)
-            stack = stack_estimator(final_estimator, stack)
-            cross_validate(
-                stack,
-                X,
-                y,
-                cv=subsample_cv,
-                groups=groups,
-                error_score="raise",
-                return_estimator=False,
-                n_jobs=1,
-                verbose=1,
-            )
-            if X_test_tuning is not None:
-                stack.fit(X, y)
+                stack = clone(self.previous_stack)
+                final_estimator = DummyClassifier(strategy="constant", constant=0) if self.problem_type.is_classification() else DummyRegressor(strategy="constant", constant=0)
+                stack.set_params(n_jobs=-1)
+                stack = stack_estimator(final_estimator, stack)
+                print(f"starting stack job for {prune_attr}")
+                cross_validate(
+                    stack,
+                    X,
+                    y,
+                    cv=subsample_cv,
+                    groups=groups,
+                    error_score="raise",
+                    return_estimator=False,
+                    n_jobs=-1,
+                    verbose=1,
+                )
+                if X_test_tuning is not None:
+                    stack.fit(X, y)
 
         results, _, pipeline_blueprint = self._tune(
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
@@ -539,17 +540,17 @@ class Trainer:
 
         ray_ensemble_config = ensemble_config
         ray_scoring_dict = self.scoring_dict
-        # ray_jobs = [
-        #     (
-        #         self.main_stacking_ensemble._ensemble_name,
-        #         ray_fit_ensemble_and_return_stacked_preds_remote(
-        #             self.main_stacking_ensemble,
-        #             ray_ensemble_config,
-        #             ray_scoring_dict,
-        #             # ray_cache_actor=self.last_tuner_.ray_cache_,
-        #         ),
-        #     )
-        # ]
+        ray_jobs = [
+            (
+                self.main_stacking_ensemble._ensemble_name,
+                ray_fit_ensemble_and_return_stacked_preds_remote(
+                    self.main_stacking_ensemble,
+                    ray_ensemble_config,
+                    ray_scoring_dict,
+                    # ray_cache_actor=self.last_tuner_.ray_cache_,
+                ),
+            )
+        ]
 
         ray_jobs = []
 
@@ -567,8 +568,6 @@ class Trainer:
                 for ensemble in self.secondary_ensembles or []
             ]
 
-        print("starting ensemble jobs")
-
         # def to_iterator(obj_ids):
         #     while obj_ids:
         #         done, obj_ids = ray.wait(obj_ids)
@@ -584,11 +583,10 @@ class Trainer:
                     return i
             return None
 
-        # main_result = ray_results.pop(0)
-        # main_result_name, main_result = main_result
-        # (main_stacking_ensemble_fitted, score) = main_result
-        # scores = {main_result_name: score}
-        scores = {}
+        main_result = ray_results.pop(0)
+        main_result_name, main_result = main_result
+        (main_stacking_ensemble_fitted, score) = main_result
+        scores = {main_result_name: score}
         if ray_results:
             scores = {
                 **scores,
@@ -605,7 +603,7 @@ class Trainer:
             }
         else:
             fitted_ensembles = {}
-        # fitted_ensembles[main_result_name] = main_stacking_ensemble_fitted
+        fitted_ensembles[main_result_name] = main_stacking_ensemble_fitted
 
         self.ensemble_results_.append({})
         self.ensembles_.append(fitted_ensembles)
