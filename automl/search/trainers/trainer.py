@@ -552,10 +552,8 @@ class Trainer:
             )
         ]
 
-        ray_jobs = []
-
         if self.current_stacking_level >= self.stacking_level:
-            ray_jobs = [
+            ray_jobs += [
                 (
                     ensemble._ensemble_name,
                     ray_fit_ensemble(
