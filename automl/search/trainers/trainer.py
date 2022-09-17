@@ -435,19 +435,20 @@ class Trainer:
                 stack.set_params(n_jobs=-1)
                 stack = stack_estimator(final_estimator, stack)
                 print(f"starting stack job for {prune_attr}")
-                cross_validate(
-                    stack,
-                    X,
-                    y,
-                    cv=subsample_cv,
-                    groups=groups,
-                    error_score="raise",
-                    return_estimator=False,
-                    n_jobs=1,
-                    verbose=1,
-                )
-                if X_test_tuning is not None:
-                    stack.fit(X, y)
+                with joblib.parallel_backend("ray"):
+                    cross_validate(
+                        stack,
+                        X,
+                        y,
+                        cv=subsample_cv,
+                        groups=groups,
+                        error_score="raise",
+                        return_estimator=False,
+                        n_jobs=1,
+                        verbose=1,
+                    )
+                    if X_test_tuning is not None:
+                        stack.fit(X, y)
 
         results, _, pipeline_blueprint = self._tune(
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
