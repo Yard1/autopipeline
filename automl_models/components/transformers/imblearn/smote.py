@@ -23,7 +23,7 @@ class SMOTENJobsMixin:
         except ValueError:
             pass
 
-    def _fit_resample(*args, **kwargs):
+    def _fit_resample(self, *args, **kwargs):
         try:
             return super()._fit_resample(*args, **kwargs)
         except ValueError:
