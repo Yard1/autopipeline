@@ -19,9 +19,18 @@ class SMOTENJobsMixin:
     def _validate_estimator(self):
         super()._validate_estimator()
         try:
-            self.nn_k_.set_params(n_jobs=self.n_jobs)
+            self.nn_k_.set_params(n_jobs=int(self.n_jobs))
         except ValueError:
             pass
+
+    def _fit_resample(*args, **kwargs):
+        try:
+            return super()._fit_resample(*args, **kwargs)
+        except ValueError:
+            self.nn_k_.set_params(n_jobs=1)
+            ret = super()._fit_resample(*args, **kwargs)
+            self.nn_k_.set_params(n_jobs=int(self.n_jobs))
+            return ret
 
 
 class SMOTEN(SMOTENJobsMixin, _SMOTEN):
