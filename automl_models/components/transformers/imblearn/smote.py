@@ -14,12 +14,16 @@ from ...utils import validate_type
 
 # TODO consider caching for KNN inside SMOTE?
 
+def _set_n_jobs(nn_k, n_jobs):
+    if n_jobs is not None:
+        n_jobs = int(n_jobs)
+    nn_k.set_params(n_jobs=n_jobs)
 
 class SMOTENJobsMixin:
     def _validate_estimator(self):
         super()._validate_estimator()
         try:
-            self.nn_k_.set_params(n_jobs=int(self.n_jobs))
+            _set_n_jobs(self.nn_k_, self.n_jobs)
         except ValueError:
             pass
 
@@ -27,9 +31,9 @@ class SMOTENJobsMixin:
         try:
             return super()._fit_resample(*args, **kwargs)
         except ValueError:
-            self.nn_k_.set_params(n_jobs=1)
+            _set_n_jobs(self.nn_k_, 1)
             ret = super()._fit_resample(*args, **kwargs)
-            self.nn_k_.set_params(n_jobs=int(self.n_jobs))
+            _set_n_jobs(self.nn_k_, self.n_jobs)
             return ret
 
 
