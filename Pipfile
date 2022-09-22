@@ -37,6 +37,10 @@ boruta = {git = "https://github.com/scikit-learn-contrib/boruta_py.git"}
 ray = {extras = ["default", "tune"], file = "https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-2.0.0.dev0-cp38-cp38-manylinux2014_x86_64.whl"}
 pymoo = "<0.5.0"
 tensorboardx = "*"
+skorch = "*"
+rtdl = "*"
+ranger21 = {git = "https://github.com/lessw2020/Ranger21.git"}
+fasttreeshap = "*"
 
 [requires]
 python_version = "3.8"

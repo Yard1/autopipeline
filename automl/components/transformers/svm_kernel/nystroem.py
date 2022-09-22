@@ -19,15 +19,15 @@ class NystroemRBF(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 500,
+        "n_components": None,
         "random_state": 0,
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
-    _component_level = ComponentLevel.RARE
+    _component_level = ComponentLevel.NECESSARY
 
     _default_tuning_grid = {
-        "gamma": CategoricalDistribution(["scale", 1.0, 0.1, "auto"])
+        "gamma": CategoricalDistribution(["scale", "auto"])
     }
 
 
@@ -39,14 +39,14 @@ class NystroemSigmoid(SVMKernel):
         "coef0": 0,
         "degree": 3,
         "kernel_params": None,
-        "n_components": 500,
+        "n_components": None,
         "random_state": 0,
         "n_jobs": None,
     }
     _allowed_dtypes = {DataType.NUMERIC, DataType.CATEGORICAL}
-    _component_level = ComponentLevel.RARE
+    _component_level = ComponentLevel.UNCOMMON
 
     _default_tuning_grid = {
-        "gamma": CategoricalDistribution(["scale", 1.0, 0.1, "auto"]),
+        "gamma": CategoricalDistribution(["scale", "auto"]),
         # "coef0": UniformDistribution(-1, 1),
     }

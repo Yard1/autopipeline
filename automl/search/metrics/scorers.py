@@ -1,3 +1,5 @@
+from traceback import format_exc
+import warnings
 import numpy as np
 
 from sklearn.metrics._scorer import (
@@ -33,6 +35,12 @@ class MultimetricScorerWithErrorScore(_MultimetricScorer):
                     raise e
                 else:
                     score = self._error_score
+                print(
+                    f"Scoring failed. The score on this train-test partition for "
+                    f"these parameters will be set to {self._error_score}. Details: \n"
+                    f"{format_exc()}",
+                    UserWarning,
+                )
             scores[name] = score
         return scores
 

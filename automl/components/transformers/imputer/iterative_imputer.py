@@ -11,12 +11,12 @@ class IterativeImputer(Imputer):
     _default_parameters = {
         "regressor": "LGBMRegressor",
         "classifier": "LGBMClassifier",
-        "max_iter": 4,
+        "max_iter": 8,
         "verbose": 0,
         "random_state": 0,
         "n_jobs": 1,
     }
-    _component_level = ComponentLevel.UNCOMMON
+    _component_level = ComponentLevel.RARE
 
 
 # class SimpleCategoricalImputer(Imputer):

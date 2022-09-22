@@ -98,6 +98,7 @@ def with_parameters(trainable, **kwargs):
                 setup_kwargs = {}
                 for k in keys:
                     setup_kwargs[k] = parameter_registry.get(prefix + k)
+                # Only change in AutoPipeline, different setup call with refs
                 super(_Inner, self).setup(
                     config, refs=(parameter_registry.references,), **setup_kwargs
                 )

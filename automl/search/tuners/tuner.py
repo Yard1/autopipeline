@@ -3,13 +3,16 @@ import plotly.graph_objs as go
 from time import sleep
 import numpy as np
 import pandas as pd
-import collections
+import math
 import gc
 from abc import ABC
+from collections import defaultdict
 
 import ray
 import ray.exceptions
 from ray import tune
+from ray.tune.trial import Trial, date_str
+from ray.tune.utils.placement_groups import PlacementGroupFactory
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection._search_successive_halving import _SubsampleMetaSplitter
@@ -18,7 +21,6 @@ from sklearn.model_selection._search import ParameterGrid
 from .with_parameters import with_parameters
 
 from .trainable import SklearnTrainable
-from ..store import RayStore
 from .utils import get_all_tunable_params
 from ...components import Component, ComponentConfig
 from ...components.flow.pipeline import TopPipeline
@@ -39,6 +41,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _create_dirname(trial: Trial) -> str:
+    return f"{str(trial)}_{date_str()}"
+
+
 class Tuner(ABC):
     def __init__(
         self,
@@ -53,6 +59,8 @@ class Tuner(ABC):
         target_metric=None,
         scoring=None,
         display: Optional[IPythonDisplay] = None,
+        stacking_level: int = 0,
+        previous_stack=None,
     ) -> None:
         self.problem_type = problem_type
         self.pipeline_blueprint = pipeline_blueprint
@@ -61,7 +69,9 @@ class Tuner(ABC):
         self.use_extended = use_extended
         self.num_samples = num_samples
         self.time_budget_s = time_budget_s
-        self.display = display or IPythonDisplay("tuner_best_plot_display")
+        self.stacking_level = stacking_level
+        self.display = display
+        self.previous_stack = previous_stack
         # TODO reenable
         # assert target_metric in scoring
 
@@ -235,6 +245,10 @@ class RayTuneTuner(Tuner):
         max_concurrent: int = 1,
         trainable_n_jobs: int = 4,
         display: Optional[IPythonDisplay] = None,
+        stacking_level: int = 0,
+        widget: Optional[go.FigureWidget] = None,
+        plot_callback: Optional[BestPlotCallback] = None,
+        previous_stack=None,
         **tune_kwargs,
     ) -> None:
         self.cache = cache
@@ -243,18 +257,21 @@ class RayTuneTuner(Tuner):
         self.num_samples = num_samples
         self.max_concurrent = max_concurrent
         self.trainable_n_jobs = trainable_n_jobs
+        self.widget = widget
+        self.plot_callback = plot_callback
         self._tune_kwargs = {
             "run_or_experiment": None,
             "search_alg": None,
             "scheduler": None,
             "num_samples": num_samples,
             "time_budget_s": time_budget_s,
-            "verbose": 2,
-            "reuse_actors": False,
-            "fail_fast": False,  # TODO change to False when ready
-            # "resources_per_trial": {"cpu": self.trainable_n_jobs},
+            "verbose": 1,
+            "reuse_actors": True,
+            "fail_fast": True,  # TODO change to False when ready
             "stop": {"training_iteration": 1},
-            "max_failures": 2,
+            "max_failures": 0,
+            # "checkpoint_at_end": True,
+            "trial_dirname_creator": _create_dirname,
         }
         super().__init__(
             problem_type=problem_type,
@@ -268,6 +285,8 @@ class RayTuneTuner(Tuner):
             target_metric=target_metric,
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             display=display,
+            stacking_level=stacking_level,
+            previous_stack=previous_stack,
         )
 
     @property
@@ -277,21 +296,36 @@ class RayTuneTuner(Tuner):
         return len(self.default_grid_) + self.num_samples
 
     def _set_cache(self):
-        validate_type(self.cache, "cache", (str, bool))
+        # validate_type(self.cache, "cache", (str, bool))
         if not self.cache:
             self._cache = None
         else:
             self._cache = self.cache
-
-        if self._cache:
-            logger.info(f"Cache dir set as '{self._cache}'")
+            logger.info(f"Cache set as '{self._cache}'")
 
     def _shuffle_default_grid(self):
-        # default python hash is different on every run
-        self.default_grid_.sort(
-            key=lambda x: xxd_hash(tuple((k, v) for k, v in x.items()))
-        )
-        np.random.default_rng(seed=self.random_state).shuffle(self.default_grid_)
+        grid_by_rarity = defaultdict(list)
+        rng = np.random.default_rng
+        for item in self.default_grid_:
+            grid_by_rarity[
+                (
+                    max(
+                        v._component_level
+                        for v in item.values()
+                        if isinstance(v, Component)
+                    ),
+                    item["Estimator"]._component_level,
+                )
+            ].append(item)
+        rarities = list(grid_by_rarity.keys())
+        rarities.sort()
+        new_default_grid = []
+        for rarity in rarities:
+            # default python hash is different on every run
+            grid_by_rarity[rarity].sort(key=lambda x: xxd_hash(tuple(k for k in x)))
+            rng(seed=self.random_state).shuffle(grid_by_rarity[rarity])
+            new_default_grid.extend(grid_by_rarity[rarity])
+        self.default_grid_ = new_default_grid
 
     def _pre_search(self, X, y, X_test=None, y_test=None, groups=None):
         super()._pre_search(X, y, X_test=X_test, y_test=y_test, groups=groups)
@@ -312,45 +346,49 @@ class RayTuneTuner(Tuner):
                 if str(v) in self.component_strings_:
                     conf[k] = str(v)
 
-    def _get_objects_from_ray_store(self, ray_cache):
-        self.fold_predictions_ = {}
-        self.test_predictions_ = {}
-        self.fitted_estimators_ = {}
-
-        logger.debug("getting estimators from ray object store")
-        self.fitted_estimators_ = ray.get(
-            ray_cache.get_all_cached_objects.remote("fitted_estimators")
-        )
-
-        logger.debug("getting fold predictions from ray object store")
-        fold_predictions = ray.get(
-            ray_cache.get_all_cached_objects.remote("fold_predictions")
-        )
-        for key in self.analysis_.results.keys():
-            self.fold_predictions_[key] = fold_predictions.get(key, {})
-
-        logger.debug("getting test predictions from ray object store")
-        test_predictions = ray.get(
-            ray_cache.get_all_cached_objects.remote("test_predictions")
-        )
-        for key in self.analysis_.results.keys():
-            self.test_predictions_[key] = test_predictions.get(key, {})
+    def _configure_callbacks(self, tune_kwargs):
+        # TODO make this better
+        display = self.display or IPythonDisplay("tuner_best_plot_display")
+        if not self.widget:
+            self.widget_ = go.FigureWidget()
+            self.widget_.add_scatter(mode="lines+markers", name="Best validation score")
+            self.widget_.add_scatter(mode="lines+markers", name="Best test score")
+            self.widget_.add_scatter(mode="lines", name="Mean score")
+            self.widget_.add_scatter(mode="markers", name="Validation score")
+            display.display(self.widget_)
+        else:
+            self.widget_ = self.widget
+        callbacks = tune_kwargs.get("callbacks", [])
+        if self.plot_callback:
+            self.plot_callback_ = self.plot_callback
+        else:
+            self.plot_callback_ = BestPlotCallback(
+                widget=self.widget_,
+                metric=self.target_metric,
+            )  # TODO metric
+        tune_kwargs["callbacks"] = callbacks
+        tune_kwargs["callbacks"].append(self.plot_callback_)
 
     def _run_search(self):
         tune_kwargs = {**self._tune_kwargs, **self.tune_kwargs}
-        # TODO make this better
-        self.widget_ = go.FigureWidget()
-        self.widget_.add_scatter(mode="lines+markers", name="Best validation score")
-        self.widget_.add_scatter(mode="lines+markers", name="Best test score")
-        self.widget_.add_scatter(mode="lines", name="Mean score")
-        self.widget_.add_scatter(mode="markers", name="Validation score")
-        self.display.display(self.widget_)
-        plot_callback = BestPlotCallback(
-            widget=self.widget_, metric=self.target_metric
-        )  # TODO metric
+        self._configure_callbacks(tune_kwargs)
         tune_kwargs["num_samples"] = self.total_num_samples
-        tune_kwargs["callbacks"] = tune_kwargs.get("callbacks", [])
-        tune_kwargs["callbacks"].append(plot_callback)
+        print(f"columns to tune: {self.X_.columns}\n{self.X_.dtypes}\n{self.X_.shape}")
+        n_splits = self.cv.get_n_splits(self.X_, self.y_)
+        n_splits += int(
+            self.X_test_ is not None and self.trainable_n_jobs % (n_splits + 1) == 0
+        )
+        if n_splits != 1:
+            n_jobs_per_fold = max(1, self.trainable_n_jobs // n_splits)
+            n_jobs_per_fold = int(pow(2, int(math.log(n_jobs_per_fold, 2))))
+            bundles = max(1, self.trainable_n_jobs // n_jobs_per_fold)
+        else:
+            n_jobs_per_fold = self.trainable_n_jobs
+            bundles = 1
+        tune_kwargs["resources_per_trial"] = PlacementGroupFactory(
+            [{}] + [{"CPU": n_jobs_per_fold}] * bundles
+        )
+
         params = {
             "X_": self.X_,
             "y_": self.y_,
@@ -368,36 +406,20 @@ class RayTuneTuner(Tuner):
             "random_state": self.random_state,
             "prune_attr": self._searcher_kwargs.get("prune_attr", None),
             "cache": self._cache,
+            "previous_stack": self.previous_stack,
+            "n_jobs": self.trainable_n_jobs,
+            "n_jobs_per_fold": n_jobs_per_fold,
         }
         gc.collect()
-        self.ray_cache_name_ = "ray_cache"
-        try:
-            self.ray_cache_ = ray.get_actor(self.ray_cache_name_)
-        except Exception:
-            try:
-                self.ray_cache_ = RayStore.options(
-                    name=self.ray_cache_name_, lifetime="detached"
-                ).remote(name=self.ray_cache_name_)
-            except Exception:
-                try:
-                    ray.kill(ray.get_actor(self.ray_cache_name_), no_restart=True)
-                except Exception:
-                    pass
-                self.ray_cache_ = RayStore.options(
-                    name=self.ray_cache_name_, lifetime="detached"
-                ).remote(name=self.ray_cache_name_)
 
-        params["ray_cache_actor"] = self.ray_cache_
         tune_kwargs["run_or_experiment"] = type(
-            "SklearnTrainable", (SklearnTrainable,), {"N_JOBS": self.trainable_n_jobs}
+            "SklearnTrainable", (SklearnTrainable,), {}
         )
         tune_kwargs["run_or_experiment"] = with_parameters(
             tune_kwargs["run_or_experiment"], **params
         )
 
         self.analysis_ = tune.run(**tune_kwargs)
-
-        self._get_objects_from_ray_store(self.ray_cache_)
 
         gc.collect()
 

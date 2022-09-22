@@ -1,5 +1,7 @@
+from automl.components.transformers.transformer import Transformer
 from .imputer import Imputer
-from ...component import ComponentLevel
+from ...component import ComponentLevel, ComponentConfig
+from ....search.stage import AutoMLStage
 
 from ....search.distributions import CategoricalDistribution, FunctionDistribution
 
@@ -45,3 +47,6 @@ class CombinedSimpleImputer(Imputer):
         "categorical_strategy": FunctionDistribution(get_categorical_strategy),
     }
     _component_level = ComponentLevel.NECESSARY
+
+    def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
+        return Transformer.is_component_valid(self, config, stage)

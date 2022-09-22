@@ -20,6 +20,7 @@ class SHAPSelectFromModelClassification(FeatureSelector):
         "importance_getter": "auto",
         "n_estimators": "auto",
         "random_state": 0,
+        "n_jobs": 1
     }
     _component_level = ComponentLevel.COMMON
     _problem_types = {ProblemType.BINARY, ProblemType.MULTICLASS}

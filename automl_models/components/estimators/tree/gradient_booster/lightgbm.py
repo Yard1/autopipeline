@@ -1,5 +1,6 @@
 from pandas.api.types import is_integer_dtype
 from lightgbm import LGBMClassifier, LGBMRegressor
+from lightgbm.callback import early_stopping
 from sklearn.model_selection import train_test_split
 
 
@@ -87,16 +88,13 @@ class LGBMClassifierWithAutoEarlyStopping(LGBMClassifier):
         eval_sample_weight=None,
         eval_init_score=None,
         eval_metric=None,
-        early_stopping_rounds=None,
         verbose=False,
         feature_name="auto",
         categorical_feature="auto",
         callbacks=None,
         init_model=None,
     ):
-        if early_stopping_rounds is None and _auto_early_stopping_condition(
-            self.early_stopping_condition, X, y
-        ):
+        if eval_set is None:
             try:
                 X_train, X_eval, y_train, y_eval = train_test_split(
                     X,
@@ -116,8 +114,18 @@ class LGBMClassifierWithAutoEarlyStopping(LGBMClassifier):
                 )
             assert len(X_eval) > 0
             eval_set = (X_eval, y_eval)
+        if eval_metric is None:
             eval_metric = self.scoring if self.scoring != "loss" else None
+        if (
+            callbacks and not any(isinstance(cb, early_stopping) for cb in callbacks)
+        ) and _auto_early_stopping_condition(self.early_stopping_condition, X, y):
             early_stopping_rounds = self.n_iter_no_change
+            callbacks = callbacks or []
+            callbacks.append(
+                early_stopping(
+                    early_stopping_rounds, first_metric_only=True, verbose=False
+                )
+            )
         else:
             X_train = X
             y_train = y
@@ -131,7 +139,6 @@ class LGBMClassifierWithAutoEarlyStopping(LGBMClassifier):
             eval_sample_weight=eval_sample_weight,
             eval_init_score=eval_init_score,
             eval_metric=eval_metric,
-            early_stopping_rounds=early_stopping_rounds,
             verbose=verbose,
             feature_name=feature_name,
             categorical_feature=categorical_feature,
@@ -208,16 +215,13 @@ class LGBMRegressorWithAutoEarlyStopping(LGBMRegressor):
         eval_sample_weight=None,
         eval_init_score=None,
         eval_metric=None,
-        early_stopping_rounds=None,
         verbose=False,
         feature_name="auto",
         categorical_feature="auto",
         callbacks=None,
         init_model=None,
     ):
-        if early_stopping_rounds is None and _auto_early_stopping_condition(
-            self.early_stopping_condition, X, y
-        ):
+        if eval_set is None:
             X_train, X_eval, y_train, y_eval = train_test_split(
                 X,
                 y,
@@ -227,8 +231,18 @@ class LGBMRegressorWithAutoEarlyStopping(LGBMRegressor):
             )
             assert len(X_eval) > 0
             eval_set = (X_eval, y_eval)
+        if eval_metric is None:
             eval_metric = self.scoring if self.scoring != "loss" else None
+        if (
+            callbacks and not any(isinstance(cb, early_stopping) for cb in callbacks)
+        ) and _auto_early_stopping_condition(self.early_stopping_condition, X, y):
             early_stopping_rounds = self.n_iter_no_change
+            callbacks = callbacks or []
+            callbacks.append(
+                early_stopping(
+                    early_stopping_rounds, first_metric_only=True, verbose=False
+                )
+            )
         else:
             X_train = X
             y_train = y
@@ -242,7 +256,6 @@ class LGBMRegressorWithAutoEarlyStopping(LGBMRegressor):
             eval_sample_weight=eval_sample_weight,
             eval_init_score=eval_init_score,
             eval_metric=eval_metric,
-            early_stopping_rounds=early_stopping_rounds,
             verbose=verbose,
             feature_name=feature_name,
             categorical_feature=categorical_feature,

@@ -1,4 +1,3 @@
-from automl.search.store import CachedObject
 import contextlib
 from copy import deepcopy
 import io
@@ -7,9 +6,9 @@ from typing import List, Optional, Union, Tuple
 import pandas as pd
 import numpy as np
 from abc import ABC
-import gc
+from collections import ChainMap
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from ...components.estimators.ensemble.ensemble import Ensemble
 from .ensemble_strategy import EnsembleStrategy
@@ -29,9 +28,14 @@ class EnsembleCreator(ABC):
         self,
         ensemble_strategy: EnsembleStrategy,
         problem_type: ProblemType,
+        *,
+        stack: bool = False,
+        **init_kwargs,
     ) -> None:
         self.ensemble_strategy = ensemble_strategy
         self.problem_type = problem_type
+        self.init_kwargs = init_kwargs
+        self.stack = stack
 
     @property
     def ensemble_class(self) -> type:
@@ -43,14 +47,12 @@ class EnsembleCreator(ABC):
     def _treat_kwargs(self, kwargs: dict) -> dict:
         kwargs = kwargs.copy()
         for k in kwargs:
-            if isinstance(kwargs[k], CachedObject):
-                kwargs[k] = kwargs[k].object
             if isinstance(kwargs[k], dict):
                 kwargs[k] = self._treat_kwargs(kwargs[k])
         return kwargs
 
     def _get_estimators_for_ensemble(
-        self, trials_for_ensembling, current_stacking_level, previous_stack
+        self, trials_for_ensembling, current_stacking_level
     ):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
             io.StringIO()
@@ -59,35 +61,45 @@ class EnsembleCreator(ABC):
                 (
                     f"meta-{current_stacking_level}_{trial_result['trial_id']}",
                     # deepcopy(trial_result["estimator"]),
-                    stack_estimator(trial_result["estimator"], previous_stack),
+                    clone(trial_result["estimator"]),
                 )
                 for trial_result in trials_for_ensembling
             ]
         return ret
+
+    def _stack_if_needed(self, previous_stack, ensemble):
+        if self.stack and previous_stack:
+            stacked_ensemble = clone(previous_stack)
+            stacked_ensemble.set_deep_final_estimator(ensemble)
+            ensemble = stacked_ensemble
+        return ensemble
 
     def select_trial_ids_for_ensemble(
         self,
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
     ) -> List[BaseEstimator]:
         self.trial_ids_for_ensembling_ = self.ensemble_strategy.select_trial_ids(
             X=X,
             y=y,
             results=results,
-            results_df=results_df,
             pipeline_blueprint=pipeline_blueprint,
         )
         return self.trial_ids_for_ensembling_
+
+    def select_trials_for_ensemble(self, results, trial_ids_for_ensembling):
+        if not isinstance(results, list):
+            results = [results]
+        results = dict(ChainMap(*results))
+        return [results[k] for k in trial_ids_for_ensembling]
 
     def fit_ensemble(
         self,
         X: pd.DataFrame,
         y: pd.Series,
         results: dict,
-        results_df: pd.DataFrame,
         pipeline_blueprint,
         metric_name: str,
         metric,
@@ -101,6 +113,4 @@ class EnsembleCreator(ABC):
         **kwargs,
     ) -> BaseEstimator:
         self._configure_ensemble(metric_name, metric, random_state)
-        self.select_trial_ids_for_ensemble(
-            X, y, results, results_df, pipeline_blueprint
-        )
+        self.select_trial_ids_for_ensemble(X, y, results, pipeline_blueprint)

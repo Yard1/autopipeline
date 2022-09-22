@@ -2,8 +2,19 @@ import pandas as pd
 from catboost import CatBoostClassifier, CatBoostRegressor
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 
+from pandas.api.types import is_categorical_dtype
 
-class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin, BaseEstimator):
+
+def categorical_column_to_int(col):
+    if is_categorical_dtype(col.dtype):
+        col = col.copy()
+        col = col.cat.codes
+    return col
+
+
+class CatBoostClassifierWithAutoCatFeatures(
+    CatBoostClassifier, ClassifierMixin, BaseEstimator
+):
     def get_params(self, deep=True):
         r = super().get_params(deep=deep)
         r["auto_class_weights"] = r.get("auto_class_weights", None)
@@ -36,7 +47,7 @@ class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin,
         if isinstance(X, pd.DataFrame) and not cat_features:
             cat_features = list(X.select_dtypes(include="category").columns)
         return super().fit(
-            X,
+            X.apply(categorical_column_to_int),
             y=y,
             cat_features=cat_features,
             text_features=text_features,
@@ -60,7 +71,9 @@ class CatBoostClassifierWithAutoCatFeatures(CatBoostClassifier, ClassifierMixin,
         )
 
 
-class CatBoostRegressorWithAutoCatFeatures(CatBoostRegressor, RegressorMixin, BaseEstimator):
+class CatBoostRegressorWithAutoCatFeatures(
+    CatBoostRegressor, RegressorMixin, BaseEstimator
+):
     def __repr__(self, N_CHAR_MAX=700) -> str:
         return BaseEstimator.__repr__(self, N_CHAR_MAX=N_CHAR_MAX)
 
@@ -89,7 +102,7 @@ class CatBoostRegressorWithAutoCatFeatures(CatBoostRegressor, RegressorMixin, Ba
         if isinstance(X, pd.DataFrame) and not cat_features:
             cat_features = list(X.select_dtypes(include="category").columns)
         return super().fit(
-            X,
+            X.apply(categorical_column_to_int),
             y=y,
             cat_features=cat_features,
             sample_weight=sample_weight,

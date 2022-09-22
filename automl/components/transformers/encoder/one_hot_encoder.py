@@ -17,7 +17,7 @@ class OneHotEncoder(Encoder):
         "drop": "if_binary",
         "sparse": False,
         "dtype": np.bool,
-        "handle_unknown": "ignore",
+        "handle_unknown": "error",
     }
     _allowed_dtypes = {DataType.CATEGORICAL}
     _component_level = ComponentLevel.NECESSARY
@@ -46,6 +46,6 @@ class OneHotEncoder(Encoder):
                         for col in config.X.select_dtypes("category")
                     ]
                 )
-                <= config.X.shape[1] * 2
+                <= min(config.X.shape[1] * 4, 500)
             )
         )

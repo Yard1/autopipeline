@@ -1,12 +1,14 @@
 import itertools
 from typing import Optional
 import sys
-import io
 
 import numpy as np
 
 import pickle
-from joblib.hashing import Hasher, NumpyHasher
+from joblib.hashing import Hasher, NumpyHasher, hash as joblib_hash
+
+from sklearn.base import clone
+from sklearn.utils.validation import check_is_fitted, NotFittedError
 
 from pandas.util import hash_pandas_object, hash_array
 from pandas.core.util.hashing import _default_hash_key, hash_tuples, combine_hash_arrays
@@ -20,6 +22,7 @@ from pandas.core.dtypes.generic import (
 from xxhash import xxh3_128
 
 Pickler = pickle._Pickler
+ATTRIBUTES_TO_IGNORE = set(("verbose", "memory", "n_jobs", "thread_count", "device", "silent"))
 
 
 def fast_hash_pandas_object(
@@ -107,14 +110,14 @@ def fast_hash_pandas_object(
 
 
 class _FileWriteToHash(object):
-    """ For Pickler, a file-like api that translates file.write(bytes) to
-        hash.update(bytes)
-        From the Pickler docs:
-        - https://docs.python.org/3/library/pickle.html#pickle.Pickler
-        > The file argument must have a write() method that accepts a single
-        > bytes argument. It can thus be an on-disk file opened for binary
-        > writing, an io.BytesIO instance, or any other custom object that meets
-        > this interface.
+    """For Pickler, a file-like api that translates file.write(bytes) to
+    hash.update(bytes)
+    From the Pickler docs:
+    - https://docs.python.org/3/library/pickle.html#pickle.Pickler
+    > The file argument must have a write() method that accepts a single
+    > bytes argument. It can thus be an on-disk file opened for binary
+    > writing, an io.BytesIO instance, or any other custom object that meets
+    > this interface.
     """
 
     def __init__(self, hash):
@@ -122,6 +125,7 @@ class _FileWriteToHash(object):
 
     def write(self, bytes):
         self.hash.update(bytes)
+
 
 class xxHasher(Hasher):
     def __init__(self, hash_name="md5"):
@@ -139,7 +143,7 @@ class xxHasher(Hasher):
             # calls, which will in turn relay to self._hash.update(bytes)
             self.dump(obj)
         except pickle.PicklingError as e:
-            e.args += ('PicklingError while hashing %r: %r' % (obj, e),)
+            e.args += ("PicklingError while hashing %r: %r" % (obj, e),)
             raise
         # dumps = self.stream.getvalue()
         # self._hash.update(dumps)
@@ -170,28 +174,7 @@ class xxNumpyHasher(NumpyHasher):
         else:
             self._getbuffer = memoryview
 
-
-class xxPandasHasher(xxNumpyHasher):
-    def _hash_pandas(self, obj):
-        try:
-            hashed_obj = fast_hash_pandas_object(obj)
-            return (obj.__class__, hashed_obj)
-        except TypeError:
-            return obj
-
     def hash(self, obj, return_digest=True):
-        try:
-            if isinstance(obj, dict):
-                n_obj = (obj.__class__, {k: self._hash_pandas(v) for k, v in obj.items()})
-            elif isinstance(obj, list):
-                n_obj = (obj.__class__, [self._hash_pandas(v) for v in obj])
-            elif isinstance(obj, tuple):
-                n_obj = (obj.__class__, tuple([self._hash_pandas(v) for v in obj]))
-            else:
-                n_obj = self._hash_pandas(obj)
-            obj = n_obj
-        except:
-            pass
         try:
             self.dump(obj)
         except pickle.PicklingError as e:
@@ -203,13 +186,111 @@ class xxPandasHasher(xxNumpyHasher):
             return self._hash.hexdigest()
 
     def save(self, obj):
+        """ Subclass the save method, to hash ndarray subclass, rather
+            than pickling them. Off course, this is a total abuse of
+            the Pickler class.
+        """
+        if isinstance(obj, self.np.ndarray) and not obj.dtype.hasobject:
+            # Compute a hash of the object
+            # The update function of the hash requires a c_contiguous buffer.
+            if obj.shape == ():
+                # 0d arrays need to be flattened because viewing them as bytes
+                # raises a ValueError exception.
+                obj_c_contiguous = obj.flatten()
+            elif obj.flags.c_contiguous:
+                obj_c_contiguous = obj
+            elif obj.flags.f_contiguous:
+                obj_c_contiguous = obj.T
+            else:
+                # Cater for non-single-segment arrays: this creates a
+                # copy, and thus aleviates this issue.
+                # XXX: There might be a more efficient way of doing this
+                obj_c_contiguous = obj.flatten()
+
+            # memoryview is not supported for some dtypes, e.g. datetime64, see
+            # https://github.com/numpy/numpy/issues/4983. The
+            # workaround is to view the array as bytes before
+            # taking the memoryview.
+            self._hash.update(
+                self._getbuffer(obj_c_contiguous.view(self.np.uint8)))
+
+            # We store the class, to be able to distinguish between
+            # Objects with the same binary content, but different
+            # classes.
+            if self.coerce_mmap and isinstance(obj, self.np.memmap):
+                # We don't make the difference between memmap and
+                # normal ndarrays, to be able to reload previously
+                # computed results with memmap.
+                klass = self.np.ndarray
+            else:
+                klass = obj.__class__
+            # We also return the dtype and the shape, to distinguish
+            # different views on the same data with different dtypes.
+
+            # The object will be pickled by the pickler hashed at the end.
+            obj = (klass, ('HASHED', obj.dtype, obj.shape, obj.strides))
+        elif isinstance(obj, self.np.dtype):
+            # numpy.dtype consistent hashing is tricky to get right. This comes
+            # from the fact that atomic np.dtype objects are interned:
+            # ``np.dtype('f4') is np.dtype('f4')``. The situation is
+            # complicated by the fact that this interning does not resist a
+            # simple pickle.load/dump roundtrip:
+            # ``pickle.loads(pickle.dumps(np.dtype('f4'))) is not
+            # np.dtype('f4') Because pickle relies on memoization during
+            # pickling, it is easy to
+            # produce different hashes for seemingly identical objects, such as
+            # ``[np.dtype('f4'), np.dtype('f4')]``
+            # and ``[np.dtype('f4'), pickle.loads(pickle.dumps('f4'))]``.
+            # To prevent memoization from interfering with hashing, we isolate
+            # the serialization (and thus the pickle memoization) of each dtype
+            # using each time a different ``pickle.dumps`` call unrelated to
+            # the current Hasher instance.
+            self._hash.update("_HASHED_DTYPE".encode('utf-8'))
+            self._hash.update(pickle.dumps(obj))
+            return
+        if not isinstance(obj, type) and hasattr(obj, "__joblib_hash__"):
+            obj = obj.__joblib_hash__()
+
+        ignored_attrs = {}
+        attrs_to_ignore = set()
+        if not isinstance(obj, type):
+            if (hasattr(obj, "fit") or hasattr(obj, "transform")):
+                attrs_to_ignore.update(ATTRIBUTES_TO_IGNORE)
+            if hasattr(obj, "__joblib_hash_attrs_to_ignore__"):
+                attrs_to_ignore.update(obj.__joblib_hash_attrs_to_ignore__())
+        if attrs_to_ignore:
+            for attr in attrs_to_ignore:
+                if hasattr(obj, attr):
+                    ignored_attrs[attr] = getattr(obj, attr)
+                    setattr(obj, attr, None)
+        try:
+            Hasher.save(self, obj)
+        finally:
+            if attrs_to_ignore:
+                for attr, value in ignored_attrs.items():
+                    setattr(obj, attr, value)
+
+
+class xxPandasHasher(xxNumpyHasher):
+    def _hash_pandas(self, obj):
+        try:
+            hashed_obj = fast_hash_pandas_object(obj)
+            if hasattr(obj, "columns"):
+                return obj.__class__, hashed_obj, (obj.columns, obj.dtypes)
+            elif hasattr(obj, "name"):
+                return obj.__class__, hashed_obj, (obj.name, obj.dtype)
+            return obj.__class__, hashed_obj, None
+        except TypeError:
+            return None, obj, None
+
+    def save(self, obj):
         """Subclass the save method, to hash ndarray subclass, rather
         than pickling them. Off course, this is a total abuse of
         the Pickler class.
         """
-        if isinstance(obj, self.np.ndarray) and not (
-            obj.dtype.hasobject and obj.ndim > 2
-        ):
+        klass, obj, metadata = self._hash_pandas(obj)
+
+        if isinstance(obj, self.np.ndarray) and not obj.dtype.hasobject:
             # Compute a hash of the object
             # The update function of the hash requires a c_contiguous buffer.
             if obj.shape == ():
@@ -241,26 +322,34 @@ class xxPandasHasher(xxNumpyHasher):
             # https://github.com/numpy/numpy/issues/4983. The
             # workaround is to view the array as bytes before
             # taking the memoryview.
-            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint16)))
+            self._hash.update(self._getbuffer(obj_c_contiguous.view(self.np.uint8)))
 
             # We store the class, to be able to distinguish between
             # Objects with the same binary content, but different
             # classes.
-            if self.coerce_mmap and isinstance(obj, self.np.memmap):
-                # We don't make the difference between memmap and
-                # normal ndarrays, to be able to reload previously
-                # computed results with memmap.
-                klass = self.np.ndarray
-            else:
-                klass = obj.__class__
+            if klass is None:
+                if self.coerce_mmap and isinstance(obj, self.np.memmap):
+                    # We don't make the difference between memmap and
+                    # normal ndarrays, to be able to reload previously
+                    # computed results with memmap.
+                    klass = self.np.ndarray
+                else:
+                    klass = obj.__class__
             # We also return the dtype and the shape, to distinguish
             # different views on the same data with different dtypes.
 
             # The object will be pickled by the pickler hashed at the end.
-            obj = (
-                klass,
-                ("HASHED", obj.dtype, obj.shape, obj.strides),
-            )
+            if metadata is not None:
+                obj = (
+                    klass,
+                    ("HASHED", obj.dtype, obj.shape, obj.strides),
+                    metadata
+                )
+            else:
+                obj = (
+                    klass,
+                    ("HASHED", obj.dtype, obj.shape, obj.strides),
+                )
         elif isinstance(obj, self.np.dtype):
             # numpy.dtype consistent hashing is tricky to get right. This comes
             # from the fact that atomic np.dtype objects are interned:
@@ -280,7 +369,28 @@ class xxPandasHasher(xxNumpyHasher):
             self._hash.update("_HASHED_DTYPE".encode("utf-8"))
             self._hash.update(pickle.dumps(obj))
             return
-        Hasher.save(self, obj)
+
+        if not isinstance(obj, type) and hasattr(obj, "__joblib_hash__"):
+            obj = obj.__joblib_hash__()
+
+        ignored_attrs = {}
+        attrs_to_ignore = set()
+        if not isinstance(obj, type):
+            if (hasattr(obj, "fit") or hasattr(obj, "transform")):
+                attrs_to_ignore.update(ATTRIBUTES_TO_IGNORE)
+            if hasattr(obj, "__joblib_hash_attrs_to_ignore__"):
+                attrs_to_ignore.update(obj.__joblib_hash_attrs_to_ignore__())
+        if attrs_to_ignore:
+            for attr in attrs_to_ignore:
+                if hasattr(obj, attr):
+                    ignored_attrs[attr] = getattr(obj, attr)
+                    setattr(obj, attr, None)
+        try:
+            Hasher.save(self, obj)
+        finally:
+            if attrs_to_ignore:
+                for attr, value in ignored_attrs.items():
+                    setattr(obj, attr, value)
 
 
 def hash(obj, hash_name="md5", coerce_mmap=False):
@@ -302,11 +412,10 @@ def hash(obj, hash_name="md5", coerce_mmap=False):
             "Valid options for 'hash_name' are {}. "
             "Got hash_name={!r} instead.".format(valid_hash_names, hash_name)
         )
-    if "pandas" in sys.modules:
+    #if "pandas" in sys.modules:
         hasher = xxPandasHasher(hash_name=hash_name, coerce_mmap=coerce_mmap)
-    elif "numpy" in sys.modules:
+    if "numpy" in sys.modules:
         hasher = xxNumpyHasher(hash_name=hash_name, coerce_mmap=coerce_mmap)
     else:
         hasher = xxHasher(hash_name=hash_name)
     return hasher.hash(obj)
-

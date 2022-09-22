@@ -2,11 +2,12 @@ import numpy as np
 
 from typing import Optional
 
+from automl.components.transformers.category_coalescer import CategoryCoalescer
+
 from ..stage import AutoMLStage
 from ...problems.problem_type import ProblemType
 from ...components.flow import (
     ColumnTransformer,
-    Pipeline,
     TopPipeline,
 )
 from ...components.transformers import *
@@ -14,6 +15,9 @@ from ...components.estimators import *
 from ...components.component import Component, ComponentLevel, ComponentConfig
 from ...components.estimators.linear_model.linear_model_estimator import (
     LinearModelEstimator,
+)
+from ...components.estimators.neural_network.neural_network_estimator import (
+    NeuralNetworkEstimator,
 )
 from ...components.estimators.knn.knn_estimator import KNNEstimator
 from ...utils import validate_type
@@ -23,7 +27,7 @@ from automl_models.components.flow.column_transformer import make_column_selecto
 
 def _scaler_passthrough_condition(config, stage) -> bool:
     return config.estimator is None or not isinstance(
-        config.estimator, (LinearModelEstimator, KNNEstimator)
+        config.estimator, (LinearModelEstimator, KNNEstimator, NeuralNetworkEstimator)
     )
 
 
@@ -67,6 +71,8 @@ def create_pipeline_blueprint(
             validity_condition=_scaler_passthrough_condition
         ),
     }
+    unknown_categories = {"UnknownCategoriesDropper": UnknownCategoriesDropper()}
+    category_coalescers = {"CategoryCoalescer": CategoryCoalescer()}
     imbalance = {"AutoSMOTE": AutoSMOTE()}
     imputers = {
         "CombinedSimpleImputer": CombinedSimpleImputer(),
@@ -76,6 +82,7 @@ def create_pipeline_blueprint(
         "CombinedScalerTransformer": CombinedScalerTransformer(),
         "MinMaxScaler": MinMaxScaler(),
     }
+    target_transformers = {"QuantileTransformer": QuantileTargetTransformer()}
     binary_encoders = {
         "BinaryEncoder": BinaryEncoder(),
     }
@@ -84,14 +91,14 @@ def create_pipeline_blueprint(
         "CatBoostEncoderBinary": CatBoostEncoderBinary(),
         "CatBoostEncoderMulticlass": CatBoostEncoderMulticlass(),
         "CatBoostEncoderRegression": CatBoostEncoderRegression(),
-        "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
-        "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
-        "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
+        # "BayesianTargetEncoderBinary": BayesianTargetEncoderBinary(),
+        # "BayesianTargetEncoderMulticlass": BayesianTargetEncoderMulticlass(),
+        # "BayesianTargetEncoderRegression": BayesianTargetEncoderRegression(),
     }
     oridinal_encoder = {"OrdinalEncoder": OrdinalEncoder()}
     feature_selectors = {
-        "BorutaSHAPClassification": BorutaSHAPClassification(),
-        "BorutaSHAPRegression": BorutaSHAPRegression(),
+        # "BorutaSHAPClassification": BorutaSHAPClassification(),
+        # "BorutaSHAPRegression": BorutaSHAPRegression(),
         "SHAPSelectFromModelClassification": SHAPSelectFromModelClassification(),
         "SHAPSelectFromModelRegression": SHAPSelectFromModelRegression(),
     }
@@ -108,27 +115,48 @@ def create_pipeline_blueprint(
         # "DecisionTreeClassifier": DecisionTreeClassifier(),
         # "DecisionTreeRegressor": DecisionTreeRegressor(),
         "LogisticRegression": LogisticRegression(),
-        "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
-        "LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.0001),
+        # "LogisticRegression_L1": LogisticRegression(l1_ratio=1),
+        "LogisticRegression_EN": LogisticRegression(l1_ratio=0.15, alpha=0.01),
         "LinearRegression": LinearRegression(),
         "ElasticNet": ElasticNet(),
-        "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.0001),
+        "ElasticNet_EN": ElasticNet(l1_ratio=0.15, alpha=0.01),
         "LGBMClassifier": LGBMClassifier(),
+        "LGBMClassifier_UnBalanced": LGBMClassifier(class_weight=None),
         "LGBMRegressor": LGBMRegressor(),
         "CatBoostClassifierBinary": CatBoostClassifierBinary(),
         "CatBoostClassifierMulticlass": CatBoostClassifierMulticlass(),
         "CatBoostRegressor": CatBoostRegressor(),
+        "CatBoostClassifierBinary_UnBalanced": CatBoostClassifierBinary(
+            auto_class_weights=None
+        ),
+        "CatBoostClassifierMulticlass_UnBalanced": CatBoostClassifierMulticlass(
+            auto_class_weights=None
+        ),
         "RandomForestClassifier": RandomForestClassifier(),
         "RandomForestRegressor": RandomForestRegressor(),
         "ExtraTreesClassifier": RandomForestClassifier(randomization_type="et"),
         "ExtraTreesRegressor": RandomForestRegressor(randomization_type="et"),
+        "RandomForestClassifier_UnBalanced": RandomForestClassifier(
+            class_weight=None
+        ),
+        "ExtraTreesClassifier_UnBalanced": RandomForestClassifier(
+            randomization_type="et", class_weight=None
+        ),
         "LinearSVC": LinearSVC(),
         "LinearSVR": LinearSVR(),
         "KNeighborsClassifier": KNeighborsClassifier(),
         "KNeighborsRegressor": KNeighborsRegressor(),
+        "FTTransformerClassifier": FTTransformerClassifier(),
+        "FTTransformerRegressor": FTTransformerRegressor(),
+        "FastAINNClassifier": FastAINNClassifier(),
+        "FastAINNRegressor": FastAINNRegressor(),
+        "GaussianNB": GaussianNB(),
+        "QuadraticDiscriminantAnalysis": QuadraticDiscriminantAnalysis(),
     }
     components = {
         **passthrough,
+        **unknown_categories,
+        **category_coalescers,
         **imbalance,
         **imputers,
         **scalers_normalizers,
@@ -142,7 +170,16 @@ def create_pipeline_blueprint(
     }
 
     pipeline_steps = [
+        (
+            "target_pipeline__TransformTarget",
+            [components["Passthrough"]] + list(target_transformers.values()),
+        ),
+        ("UnknownCategories", list(unknown_categories.values())),
         ("Imputer", list(imputers.values())),
+        (
+            "CategoryCoalescer",
+            list(category_coalescers.values()),
+        ),
         (
             "FeatureSelector",
             [components["Passthrough"]] + list(feature_selectors.values()),
@@ -191,7 +228,7 @@ def create_pipeline_blueprint(
         ),
         (
             "SVMKernelApproximation",
-            [components["Passthrough"]] + list(svm_kernels.values()),
+            list(svm_kernels.values()),
         ),
         (
             "KNNTransformer",
@@ -215,10 +252,11 @@ def create_pipeline_blueprint(
         X=X,
         y=y,
     )
+    # TODO: move to trainer
+    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
+    pipeline.convert_duplicates_in_steps_to_extra_configs()
     pipeline.remove_invalid_components(
         pipeline_config=config,
         current_stage=AutoMLStage.PREPROCESSING,
     )
-    # TODO: move to trainer
-    pipeline.call_tuning_grid_funcs(config=config, stage=AutoMLStage.PREPROCESSING)
     return pipeline

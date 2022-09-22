@@ -4,6 +4,7 @@ from enum import IntEnum
 from collections import UserDict
 from ..problems import ProblemType
 from ..search.stage import AutoMLStage
+from ..search.distributions import FunctionParameter
 
 
 class ComponentLevel(IntEnum):
@@ -60,8 +61,11 @@ class Component(ABC):
     def __init__(self, tuning_grid=None, **parameters) -> None:
         self.parameters = parameters
         self.tuning_grid = tuning_grid or {}
+        self.called_default_parameters = self._default_parameters
 
         for k in self._default_tuning_grid.keys():
+            if isinstance(self._default_parameters[k], FunctionParameter):
+                continue
             if k not in self._default_parameters:
                 raise KeyError(
                     f"_default_parameters is missing key {k} present in _default_tuning_grid"
@@ -69,6 +73,8 @@ class Component(ABC):
             self._default_tuning_grid[k].default = self._default_parameters[k]
 
         for k in self._default_tuning_grid_extended.keys():
+            if isinstance(self._default_parameters[k], FunctionParameter):
+                continue
             if k not in self._default_parameters:
                 raise KeyError(
                     f"_default_parameters is missing key {k} present in _default_tuning_grid"
@@ -91,7 +97,7 @@ class Component(ABC):
     @property
     def final_parameters(self) -> dict:
         return {
-            **self._default_parameters,
+            **self.called_default_parameters,
             **self.parameters,
         }
 
@@ -123,6 +129,10 @@ class Component(ABC):
         }
 
     def call_tuning_grid_funcs(self, config: ComponentConfig, stage: AutoMLStage):
+        self.called_default_parameters = {
+            k: v(config, stage) if isinstance(v, FunctionParameter) else v
+            for k, v in self._default_parameters.items()
+        }
         self.called_tuning_grid = {
             k: v(config, stage) if callable(v) else v
             for k, v in self._default_tuning_grid.items()
@@ -131,6 +141,21 @@ class Component(ABC):
             k: v(config, stage) if callable(v) else v
             for k, v in self._default_tuning_grid_extended.items()
         }
+        for k in self.called_tuning_grid.keys():
+            if k not in self.called_default_parameters:
+                raise KeyError(
+                    f"called_default_parameters is missing key {k} present in called_tuning_grid"
+                )
+            self.called_tuning_grid[k].default = self.called_default_parameters[k]
+
+        for k in self.called_extended_tuning_grid.keys():
+            if k not in self.called_default_parameters:
+                raise KeyError(
+                    f"called_default_parameters is missing key {k} present in called_extended_tuning_grid"
+                )
+            self.called_extended_tuning_grid[
+                k
+            ].default = self.called_default_parameters[k]
 
     def is_component_valid(self, config: ComponentConfig, stage: AutoMLStage) -> bool:
         if config is None:

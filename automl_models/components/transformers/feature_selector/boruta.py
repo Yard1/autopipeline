@@ -9,9 +9,8 @@ License: BSD 3 clause
 """
 
 import numpy as np
-import shap
-import contextlib
 from boruta import BorutaPy
+import warnings
 
 from lightgbm import LGBMClassifier, LGBMRegressor
 
@@ -19,14 +18,15 @@ from sklearn.utils import check_X_y
 from sklearn.base import clone, is_classifier
 from sklearn.utils.validation import check_random_state
 
-from .utils import lightgbm_fs_config as _lightgbm_rf_config
+from automl_models.components.utils import clone_with_n_jobs
+
+from ...compatibility.pandas import PandasDataFrameTransformerMixin
+from .utils import lightgbm_fs_config, get_shap, get_tree_num
 from ..utils import categorical_column_to_int_categories
 from ..transformer import DataType
 
-import warnings
 
-
-class BorutaSHAP(BorutaPy):
+class _BorutaSHAP(BorutaPy):
     def __init__(
         self,
         estimator,
@@ -39,11 +39,12 @@ class BorutaSHAP(BorutaPy):
         verbose=0,
         early_stopping=False,
         n_iter_no_change=20,
+        n_jobs=None,
     ):
         if estimator == "LGBMRegressor":
-            estimator = LGBMRegressor(**_lightgbm_rf_config)
+            estimator = LGBMRegressor(**lightgbm_fs_config)
         elif estimator == "LGBMClassifier":
-            estimator = LGBMClassifier(**_lightgbm_rf_config)
+            estimator = LGBMClassifier(**lightgbm_fs_config)
         super().__init__(
             estimator=estimator,
             n_estimators=n_estimators,
@@ -59,6 +60,7 @@ class BorutaSHAP(BorutaPy):
         self._is_lightgbm = "LGBM" in str(self.estimator) or "lightgbm" in str(
             type(self.estimator)
         )
+        self.n_jobs = n_jobs
 
     def _get_shuffle(self, seq):
         self.random_state_.shuffle(seq)
@@ -67,7 +69,7 @@ class BorutaSHAP(BorutaPy):
     def _fit(self, X, y):
         self.random_state_ = check_random_state(self.random_state)
 
-        self.estimator_ = clone(self.estimator)
+        self.estimator_ = clone_with_n_jobs(self.estimator, n_jobs=self.n_jobs)
         self._is_classification_ = is_classifier(self.estimator_)
 
         # if self._is_classification_ and self._is_lightgbm:
@@ -232,6 +234,10 @@ class BorutaSHAP(BorutaPy):
                 self.support_ = self.support_ + self.support_weak_
             else:
                 self.support_ = (self.support_ + 1).astype(bool)
+
+        columns_to_keep = set(self._transform(X, weak=False, return_df=True).columns)
+        self.columns_to_remove_ = set(X.columns) - columns_to_keep
+
         return self
 
     def transform(self, X):
@@ -257,7 +263,7 @@ class BorutaSHAP(BorutaPy):
             selected by Boruta.
         """
 
-        return self._transform(X, weak=False, return_df=True)
+        return X.drop(list(self.columns_to_remove_), axis=1)
 
     def fit_transform(self, X, y):
         """
@@ -285,8 +291,8 @@ class BorutaSHAP(BorutaPy):
             selected by Boruta.
         """
 
-        self._fit(X, y)
-        return self._transform(X, weak=False, return_df=True)
+        self.fit(X, y)
+        return self.transform(X)
 
     def _check_params(self, X, y):
         """
@@ -300,52 +306,11 @@ class BorutaSHAP(BorutaPy):
         if self.alpha <= 0 or self.alpha > 1:
             raise ValueError("Alpha should be between 0 and 1.")
 
-    # from https://github.com/Ekeany/Boruta-Shap
     def _get_shap_imp(self, X, estimator):
-        with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
-            explainer = shap.TreeExplainer(
-                estimator, feature_perturbation="tree_path_dependent"
-            )
-            if self._is_classification_:
-                # for some reason shap returns values wraped in a list of length 1
-                shap_values = np.array(explainer.shap_values(X))
-                if isinstance(shap_values, list):
-
-                    class_inds = range(len(shap_values))
-                    shap_imp = np.zeros(shap_values[0].shape[1])
-                    for i, ind in enumerate(class_inds):
-                        shap_imp += np.abs(shap_values[ind]).mean(0)
-                    shap_values /= len(shap_values)
-
-                elif len(shap_values.shape) == 3:
-                    shap_values = np.abs(shap_values).sum(axis=0)
-                    shap_values = shap_values.mean(0)
-
-                else:
-                    shap_values = np.abs(shap_values).mean(0)
-
-            else:
-                shap_values = explainer.shap_values(X)
-                shap_values = np.abs(shap_values).mean(0)
-            return shap_values
+        return get_shap(estimator, X, n_jobs=self.n_jobs or 1)
 
     def _get_tree_num(self, n_feat):
-        depth = None
-        try:
-            depth = self.estimator_.get_params()["max_depth"]
-        except KeyError:
-            warnings.warn(
-                "The estimator does not have a max_depth property, as a result "
-                " the number of trees to use cannot be estimated automatically."
-            )
-        if depth is None:
-            depth = 10
-        # how many times a feature should be considered on average
-        f_repr = 100
-        # n_feat * 2 because the training matrix is extended with n shadow features
-        multi = (n_feat * 2) / (np.sqrt(n_feat * 2) * depth)
-        n_estimators = int(multi * f_repr)
-        return n_estimators
+        return get_tree_num(self.estimator_, n_feat)
 
     def _get_imp(self, X, y):
         try:
@@ -365,3 +330,11 @@ class BorutaSHAP(BorutaPy):
                 "are currently supported in BorutaPy."
             )
         return imp
+
+
+class BorutaSHAP(PandasDataFrameTransformerMixin, _BorutaSHAP):
+    def get_dtypes(self, Xt, X, y=None):
+        return Xt.dtypes.to_dict()
+
+    def get_columns(self, Xt, X, y=None):
+        return Xt.columns

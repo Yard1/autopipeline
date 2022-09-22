@@ -20,7 +20,7 @@ from automl_models.components.estimators.tree.gradient_booster.catboost import (
 def get_catboost_n_estimators(config, space):
     X = config.X
     if X is None:
-        return IntUniformDistribution(10, 200, log=True)
+        return IntUniformDistribution(10, 100, log=True)
     return IntUniformDistribution(10, min(2048, int(X.shape[0])), log=True)
 
 
@@ -28,13 +28,15 @@ class CatBoostClassifierBinary(GradientBoosterEstimator):
     _component_class = CatBoostClassifierWithAutoCatFeatures
 
     _default_parameters = {
-        "n_estimators": 200,
+        "n_estimators": 100,
         "learning_rate": None,
         "max_depth": 6,
         "task_type": "CPU",
         "verbose": False,
         "random_state": None,
         "auto_class_weights": "Balanced",
+        "thread_count": 1,
+        "allow_const_label": True,
     }
 
     _default_tuning_grid = {
@@ -62,13 +64,15 @@ class CatBoostClassifierMulticlass(GradientBoosterEstimator):
     _component_class = CatBoostClassifierWithAutoCatFeatures
 
     _default_parameters = {
-        "n_estimators": 200,
-        "learning_rate": 0.1,
+        "n_estimators": 100,
+        "learning_rate": None,
         "max_depth": 6,
         "task_type": "CPU",
         "verbose": False,
         "random_state": None,
         "auto_class_weights": "Balanced",
+        "thread_count": 1,
+        "allow_const_label": True,
     }
 
     _default_tuning_grid = {
@@ -76,9 +80,9 @@ class CatBoostClassifierMulticlass(GradientBoosterEstimator):
             get_catboost_n_estimators, cost_bounds="upper"
         ),
         "max_depth": IntUniformDistribution(4, 10, cost_bounds="upper"),
-        "learning_rate": UniformDistribution(
-            lower=0.005, upper=0.2, log=True, cost_bounds="lower"
-        ),
+        # "learning_rate": UniformDistribution(
+        #     lower=0.005, upper=0.2, log=True, cost_bounds="lower"
+        # ),
     }
     _default_tuning_grid_extended = {
         "auto_class_weights": CategoricalDistribution(
@@ -98,7 +102,7 @@ class CatBoostRegressor(GradientBoosterEstimator):
     _component_class = CatBoostRegressorWithAutoCatFeatures
 
     _default_parameters = {
-        "n_estimators": 200,
+        "n_estimators": 100,
         "learning_rate": 0.1,
         "max_depth": 6,
         "task_type": "CPU",

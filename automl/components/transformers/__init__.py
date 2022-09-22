@@ -8,3 +8,4 @@ from .knn import *
 
 from .transformer import Transformer, DataType
 from .passthrough import Passthrough
+from .unknown_categories import UnknownCategoriesDropper

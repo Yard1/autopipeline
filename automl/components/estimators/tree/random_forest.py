@@ -1,3 +1,5 @@
+import numpy as np
+from automl.search.distributions.distributions import FunctionParameter
 from .tree_estimator import TreeEstimator
 from ....search.distributions import (
     CategoricalDistribution,
@@ -22,6 +24,11 @@ def get_rf_n_estimators(config, space):
     return IntUniformDistribution(10, min(2048, int(X.shape[0])), log=True)
 
 
+def get_rf_sqrt_features(config, space):
+    X = config.X
+    return max(0.1, np.sqrt(X.shape[1]) / X.shape[1])
+
+
 class RandomForestClassifier(TreeEstimator):
     _component_class = RandomForestExtraTreesClassifier
 
@@ -33,7 +40,7 @@ class RandomForestClassifier(TreeEstimator):
         "min_samples_split": 2,
         "min_samples_leaf": 1,
         "min_weight_fraction_leaf": 1e-10,
-        "max_features": 0.2,
+        "max_features": FunctionParameter(get_rf_sqrt_features),
         "random_state": 0,
         "max_leaf_nodes": None,
         "min_impurity_decrease": 1e-10,

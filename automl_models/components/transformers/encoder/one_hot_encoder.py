@@ -20,6 +20,7 @@ class PandasOneHotEncoder(PandasDataFrameTransformerMixin, _OneHotEncoder):
         return pd.CategoricalDtype([0, 1])
 
     def _validate_keywords(self):
+        self._infrequent_enabled = False
         if self.handle_unknown not in ("error", "ignore"):
             msg = (
                 "handle_unknown should be either 'error' or 'ignore', "

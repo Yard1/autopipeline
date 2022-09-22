@@ -282,8 +282,8 @@ class DiscreteUniformDistribution(Distribution):
 
     def __init__(
         self,
-        lower: int,
-        upper: int,
+        lower: float,
+        upper: float,
         q: Optional[float] = None,
         cost_related: bool = True,
         cost_bounds: str = "both",
@@ -479,6 +479,23 @@ class FunctionDistribution(Distribution):
         except KeyError:
             pass
         return dist
+
+
+class FunctionParameter:
+    """
+    Dynamic parameter.
+
+    Parameters
+    ----------
+    function: callable:
+        Callable that returns a value.
+    """
+
+    def __init__(self, function):
+        self.function = function
+
+    def __call__(self, config, stage):
+        return self.function(config, stage)
 
 
 def get_skopt_distributions(distributions: Dict[str, Distribution]) -> dict:

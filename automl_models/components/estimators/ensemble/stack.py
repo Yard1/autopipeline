@@ -1,5 +1,7 @@
+from typing import Optional
 import numpy as np
 import pandas as pd
+from functools import partial
 
 from joblib import Parallel
 
@@ -11,30 +13,169 @@ from sklearn.preprocessing import LabelEncoder  # TODO: consider PandasLabelEnco
 from sklearn.utils import Bunch
 from sklearn.utils.fixes import delayed
 from sklearn.model_selection import check_cv
-from sklearn.base import is_classifier
-from sklearn.ensemble._base import _fit_single_estimator
-from sklearn.utils.validation import check_is_fitted
+from sklearn.base import is_classifier, clone
+from sklearn.utils.validation import check_is_fitted, check_memory
 
-from .utils import get_cv_predictions, fit_single_estimator_if_not_fitted, call_method
-from ...utils import clone_with_n_jobs_1
+
+from .utils import (
+    call_method,
+    ray_call_method,
+    should_use_ray,
+    put_args_if_ray,
+    fit_single_estimator,
+    ray_fit_single_estimator,
+    fit_estimators,
+    get_ray_pg,
+    ray_pg_context,
+    get_cv_predictions,
+)
+from ...utils import clone_with_n_jobs, ray_put_if_needed
 from ...preprocessing import PrepareDataFrame
+from ...flow import BasePipeline
 
 import logging
+import ray
 
 logger = logging.getLogger(__name__)
 
 
+def _fit_final_estimator(
+    parallel, final_estimator, X_meta, y, sample_weight, fit_kwargs, pg=None
+):
+    if should_use_ray(parallel):
+        estimator_ref = ray_put_if_needed(final_estimator)
+        X_meta_ref = ray_put_if_needed(X_meta)
+        y_ref = ray_put_if_needed(y)
+        sample_weight_ref = ray_put_if_needed(sample_weight)
+        fitted_estimator = [
+            ray.get(
+                ray_fit_single_estimator.options(
+                    placement_group=pg, num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1
+                ).remote(
+                    estimator_ref, X_meta_ref, y_ref, sample_weight_ref, **fit_kwargs
+                )
+            )
+        ]
+    else:
+        fitted_estimator = parallel(
+            delayed(fit_single_estimator)(
+                final_estimator,
+                X_meta,
+                y,
+                sample_weight=sample_weight,
+                **fit_kwargs,
+            )
+            for i in range(1)
+        )
+    return fitted_estimator
+
+
+def _get_predictions(parallel, estimators, X, stack_method, pg=None):
+    if should_use_ray(parallel):
+        estimators = [
+            (ray_put_if_needed(est), meth)
+            for est, meth in zip(estimators, stack_method)
+            if est != "drop"
+        ]
+        X_ref = ray_put_if_needed(X)
+        predictions = ray.get(
+            [
+                ray_call_method.options(
+                    placement_group=pg, num_cpus=pg.bundle_specs[-1]["CPU"] if pg else 1
+                ).remote(est, meth, X_ref)
+                for est, meth in estimators
+            ]
+        )
+    else:
+        predictions = parallel(
+            delayed(call_method)(est, meth, X)
+            for est, meth in zip(estimators, stack_method)
+            if est != "drop"
+        )
+    return predictions
+
+
+class DeepStackMixin:
+    def transform(self, X, deep: bool = False):
+        ret = self._transform(X)
+        if deep:
+            if hasattr(self, "final_estimator_") and isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                ret = self.final_estimator_.transform(ret)
+        return ret
+
+    def _get_deep_final_estimator(
+        self, est, fitted: bool = False, up_to_stack: bool = False
+    ):
+        if isinstance(est, DeepStackMixin):
+            return est.get_deep_final_estimator(fitted=fitted, up_to_stack=up_to_stack)
+        if up_to_stack:
+            return self
+        return est
+
+    def get_deep_final_estimator(self, fitted: bool = False, up_to_stack: bool = False):
+        if fitted:
+            check_is_fitted(self)
+            return self._get_deep_final_estimator(
+                self.final_estimator_, fitted=fitted, up_to_stack=up_to_stack
+            )
+        return self._get_deep_final_estimator(
+            self.final_estimator, fitted=fitted, up_to_stack=up_to_stack
+        )
+
+    def set_deep_final_estimator(
+        self, estimator, passthrough: Optional[bool] = True, n_jobs: Optional[int] = 1
+    ):
+        if isinstance(self.final_estimator, DeepStackMixin):
+            if passthrough is not None:
+                self.passthrough = passthrough
+            if n_jobs is not None:
+                self.n_jobs = n_jobs
+            return self.final_estimator.set_deep_final_estimator(estimator)
+        self.final_estimator = estimator
+        self.final_estimator_ = estimator
+        return
+
+
 # TODO handle Repeated CV (here and in trainable)
-class PandasStackingClassifier(_StackingClassifier):
+class PandasStackingClassifier(DeepStackMixin, _StackingClassifier):
+    _is_ensemble = True
+
+    def __init__(
+        self,
+        estimators,
+        final_estimator=None,
+        *,
+        cv=None,
+        stack_method="auto",
+        n_jobs=None,
+        passthrough=False,
+        verbose=0,
+        memory=None,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
+    ):
+        super().__init__(
+            estimators=estimators,
+            final_estimator=final_estimator,
+            cv=cv,
+            stack_method=stack_method,
+            n_jobs=n_jobs,
+            passthrough=passthrough,
+            verbose=verbose,
+        )
+        self.memory = memory
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
+
     def fit(
         self,
         X,
         y,
         sample_weight=None,
-        fit_final_estimator=True,
-        refit_estimators=True,
-        predictions=None,
         save_predictions=False,
+        fit_final_estimator=True,
     ):
         """Fit the estimators.
 
@@ -67,137 +208,138 @@ class PandasStackingClassifier(_StackingClassifier):
         self._le = LabelEncoder().fit(y)
         self.classes_ = self._le.classes_
         names, all_estimators = self._validate_estimators()
-        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
+        all_estimators = [clone(est) for est in all_estimators]
         self._validate_final_estimator()
         # else:
         #    self.final_estimator_ = self.final_estimator
         stack_method = [self.stack_method] * len(all_estimators)
 
-        # Fit the base estimators on the whole training data. Those
-        # base estimators will be used in transform, predict, and
-        # predict_proba. They are exposed publicly.
-        # if not hasattr(self, "estimators_"):
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est, X, y, sample_weight, force_refit=refit_estimators
-                )
-                for est in all_estimators
+        parallel = Parallel(n_jobs=self.n_jobs)
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(all_estimators),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
+        memory = check_memory(self.memory)
+        fit_estimators_cached = memory.cache(
+            fit_estimators,
+            ignore=["parallel", "clone_function", "X_ray", "y_ray", "pg", "sample_weight_ray"],
+        )
+        get_cv_predictions_cached = memory.cache(
+            get_cv_predictions,
+            ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
+        )
+        X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
+        with ray_pg_context(pg) as pg:
+
+            # Fit the base estimators on the whole training data. Those
+            # base estimators will be used in transform, predict, and
+            # predict_proba. They are exposed publicly.
+            # if not hasattr(self, "estimators_"):
+            self.estimators_ = fit_estimators_cached(
+                parallel,
+                all_estimators,
+                X,
+                y,
+                sample_weight,
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
+                pg=pg,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                sample_weight_ray=sample_weight_ray,
+            )
+
+            self.named_estimators_ = Bunch()
+            est_fitted_idx = 0
+            for name_est, org_est in zip(names, all_estimators):
+                if org_est != "drop":
+                    self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
+                    est_fitted_idx += 1
+                else:
+                    self.named_estimators_[name_est] = "drop"
+
+            # To train the meta-classifier using the most data as possible, we use
+            # a cross-validation to obtain the output of the stacked estimators.
+
+            # To ensure that the data provided to each estimator are the same, we
+            # need to set the random state of the cv if there is one and we need to
+            # take a copy.
+            cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
+            if hasattr(cv, "random_state") and cv.random_state is None:
+                cv.random_state = np.random.RandomState()
+
+            self.stack_method_ = [
+                self._method_name(name, est, meth)
+                for name, est, meth in zip(names, all_estimators, stack_method)
+            ]
+            fit_params = (
+                {"sample_weight": sample_weight} if sample_weight is not None else None
+            )
+            predictions = get_cv_predictions_cached(
+                parallel=parallel,
+                all_estimators=all_estimators,
+                X=X,
+                y=y,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                cv=cv,
+                fit_params=fit_params,
+                verbose=self.verbose,
+                stack_method=self.stack_method_,
+                n_jobs=self.n_jobs,
+                pg=pg,
+            )
+            if save_predictions == "deep" and not isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                save_predictions = True
+            X_meta = self._concatenate_predictions(
+                X,
+                predictions,
+                save_predictions if isinstance(save_predictions, bool) else False,
+            )
+
+            # Only not None or not 'drop' estimators will be used in transform.
+            # Remove the None from the method as well.
+            self.stack_method_ = [
+                meth
+                for (meth, est) in zip(self.stack_method_, all_estimators)
                 if est != "drop"
-            )
-        except Exception:  # TODO is there a better way to catch exceptions here?
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est,
-                    X,
-                    y,
-                    sample_weight,
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
+            ]
+
+            if fit_final_estimator:
+                try:
+                    self.final_estimator_.set_params(n_jobs=self.n_jobs)
+                except ValueError:
+                    pass
+                fit_kwargs = {}
+                if save_predictions == "deep" and isinstance(
+                    self.final_estimator_, DeepStackMixin
+                ):
+                    fit_kwargs = dict(save_predictions=save_predictions)
+                if self.memory and not isinstance(
+                    self.final_estimator_, (BasePipeline, DeepStackMixin)
+                ):
+                    self.final_estimator_ = BasePipeline(
+                        [("final_estimator", self.final_estimator_)], memory=self.memory
+                    )
+                fitted_estimator = _fit_final_estimator(
+                    parallel,
+                    self.final_estimator_,
+                    X_meta,
+                    y_ray,
+                    sample_weight_ray,
+                    fit_kwargs,
+                    pg=pg,
                 )
-                for est in all_estimators
-                if est != "drop"
-            )
-
-        self.named_estimators_ = Bunch()
-        est_fitted_idx = 0
-        for name_est, org_est in zip(names, all_estimators):
-            if org_est != "drop":
-                self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
-                est_fitted_idx += 1
-            else:
-                self.named_estimators_[name_est] = "drop"
-
-        # To train the meta-classifier using the most data as possible, we use
-        # a cross-validation to obtain the output of the stacked estimators.
-
-        # To ensure that the data provided to each estimator are the same, we
-        # need to set the random state of the cv if there is one and we need to
-        # take a copy.
-        cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
-        if hasattr(cv, "random_state") and cv.random_state is None:
-            cv.random_state = np.random.RandomState()
-
-        self.stack_method_ = [
-            self._method_name(name, est, meth)
-            for name, est, meth in zip(names, all_estimators, stack_method)
-        ]
-        fit_params = (
-            {"sample_weight": sample_weight} if sample_weight is not None else None
-        )
-        # if not any(self.estimators[0][0] in col for col in X.columns):
-
-        predictions = get_cv_predictions(
-            X,
-            y,
-            all_estimators,
-            self.stack_method_,
-            cv,
-            predictions=predictions,
-            n_jobs=self.n_jobs,
-            fit_params=fit_params,
-            verbose=self.verbose,
-        )
-        X_meta = self._concatenate_predictions(
-            X, predictions, save_predictions=save_predictions
-        )
-        # else:
-        #    X_meta = X
-        # Only not None or not 'drop' estimators will be used in transform.
-        # Remove the None from the method as well.
-        self.stack_method_ = [
-            meth
-            for (meth, est) in zip(self.stack_method_, all_estimators)
-            if est != "drop"
-        ]
-
-        if fit_final_estimator:
-            try:
-                self.final_estimator_.set_params(n_jobs=self.n_jobs)
-            except ValueError:
-                pass
-            _fit_single_estimator(
-                self.final_estimator_, X_meta, y, sample_weight=sample_weight
-            )
+                self.final_estimator_ = fitted_estimator[0]
 
         return self
-
-    def _transform(self, X):
-        """Concatenate and return the predictions of the estimators."""
-        check_is_fitted(self)
-
-        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
-            saved_predictions = self._saved_test_predictions
-        else:
-            saved_predictions = [None] * len(self.estimators_)
-
-        assert len(saved_predictions) == len(self.estimators_)
-
-        predictions = Parallel(n_jobs=self.n_jobs)(
-            delayed(call_method)(
-                est_meth[0],
-                est_meth[1],
-                X,
-            )
-            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
-            if est_meth[0] != "drop"
-            and saved_predictions[i] is None
-            or est_meth[1] not in saved_predictions[i]
-        )
-        predictions = list(predictions)
-
-        for i in range(len(saved_predictions)):
-            if (
-                saved_predictions[i] is None
-                or self.stack_method_[i] not in saved_predictions[i]
-            ):
-                saved_predictions[i] = predictions.pop(0)
-            else:
-                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
-
-        predictions = saved_predictions
-
-        return self._concatenate_predictions(X, predictions)
 
     def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
@@ -247,7 +389,7 @@ class PandasStackingClassifier(_StackingClassifier):
             df = self.preprocessor_.fit_transform(meta_df)
         try:
             df.index = X.index
-        except:
+        except Exception:
             pass
         if save_predictions:
             self.stacked_predictions_ = df
@@ -255,17 +397,59 @@ class PandasStackingClassifier(_StackingClassifier):
             df = pd.concat((X, df), axis=1)
         return df
 
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+        parallel = Parallel(n_jobs=self.n_jobs)
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(self.estimators_),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
+        with ray_pg_context(pg) as pg:
+            predictions = _get_predictions(
+                parallel, self.estimators_, X, self.stack_method_, pg=pg
+            )
+        return self._concatenate_predictions(X, predictions)
 
-class PandasStackingRegressor(_StackingRegressor):
+
+class PandasStackingRegressor(DeepStackMixin, _StackingRegressor):
+    _is_ensemble = True
+
+    def __init__(
+        self,
+        estimators,
+        final_estimator=None,
+        *,
+        cv=None,
+        n_jobs=None,
+        passthrough=False,
+        verbose=0,
+        memory=None,
+        min_n_jobs_per_estimator=1,
+        max_n_jobs_per_estimator=-1,
+    ):
+        super().__init__(
+            estimators=estimators,
+            final_estimator=final_estimator,
+            cv=cv,
+            n_jobs=n_jobs,
+            passthrough=passthrough,
+            verbose=verbose,
+        )
+        self.memory = memory
+        self.min_n_jobs_per_estimator = min_n_jobs_per_estimator
+        self.max_n_jobs_per_estimator = max_n_jobs_per_estimator
+
     def fit(
         self,
         X,
         y,
         sample_weight=None,
-        fit_final_estimator=True,
-        refit_estimators=True,
-        predictions=None,
         save_predictions=False,
+        fit_final_estimator=True,
     ):
         """Fit the estimators.
 
@@ -296,135 +480,137 @@ class PandasStackingRegressor(_StackingRegressor):
         )
         self.stacked_predictions_ = None
         names, all_estimators = self._validate_estimators()
-        # if not hasattr(self, "estimators_"):  # TODO Fix to make it work outside lib
+        all_estimators = [clone(est) for est in all_estimators]
         self._validate_final_estimator()
         # else:
         #    self.final_estimator_ = self.final_estimator
         stack_method = [self.stack_method] * len(all_estimators)
 
-        # Fit the base estimators on the whole training data. Those
-        # base estimators will be used in transform, predict, and
-        # predict_proba. They are exposed publicly.
-        # if not hasattr(self, "estimators_"):
-        try:
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est, X, y, sample_weight, force_refit=refit_estimators
-                )
-                for est in all_estimators
+        parallel = Parallel(n_jobs=self.n_jobs)
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(all_estimators),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
+        memory = check_memory(self.memory)
+        fit_estimators_cached = memory.cache(
+            fit_estimators,
+            ignore=["parallel", "clone_function", "X_ray", "y_ray", "pg", "sample_weight_ray"],
+        )
+        get_cv_predictions_cached = memory.cache(
+            get_cv_predictions,
+            ignore=["parallel", "verbose", "n_jobs", "X_ray", "y_ray", "pg"],
+        )
+        X_ray, y_ray, sample_weight_ray = put_args_if_ray(parallel, X, y, sample_weight)
+        with ray_pg_context(pg) as pg:
+            # Fit the base estimators on the whole training data. Those
+            # base estimators will be used in transform, predict, and
+            # predict_proba. They are exposed publicly.
+            # if not hasattr(self, "estimators_"):
+            self.estimators_ = fit_estimators_cached(
+                parallel,
+                all_estimators,
+                X,
+                y,
+                sample_weight,
+                partial(
+                    clone_with_n_jobs,
+                    n_jobs=int(pg.bundle_specs[-1]["CPU"]) if pg else 1,
+                ),
+                pg=pg,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                sample_weight_ray=sample_weight_ray,
+            )
+
+            self.named_estimators_ = Bunch()
+            est_fitted_idx = 0
+            for name_est, org_est in zip(names, all_estimators):
+                if org_est != "drop":
+                    self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
+                    est_fitted_idx += 1
+                else:
+                    self.named_estimators_[name_est] = "drop"
+
+            # To train the meta-classifier using the most data as possible, we use
+            # a cross-validation to obtain the output of the stacked estimators.
+
+            # To ensure that the data provided to each estimator are the same, we
+            # need to set the random state of the cv if there is one and we need to
+            # take a copy.
+            cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
+            if hasattr(cv, "random_state") and cv.random_state is None:
+                cv.random_state = np.random.RandomState()
+
+            self.stack_method_ = [
+                self._method_name(name, est, meth)
+                for name, est, meth in zip(names, all_estimators, stack_method)
+            ]
+            fit_params = (
+                {"sample_weight": sample_weight} if sample_weight is not None else None
+            )
+            predictions = get_cv_predictions_cached(
+                parallel=parallel,
+                all_estimators=all_estimators,
+                X=X,
+                y=y,
+                X_ray=X_ray,
+                y_ray=y_ray,
+                cv=cv,
+                fit_params=fit_params,
+                verbose=self.verbose,
+                stack_method=self.stack_method_,
+                n_jobs=self.n_jobs,
+                pg=pg,
+            )
+            if save_predictions == "deep" and not isinstance(
+                self.final_estimator_, DeepStackMixin
+            ):
+                save_predictions = True
+            X_meta = self._concatenate_predictions(
+                X,
+                predictions,
+                save_predictions if isinstance(save_predictions, bool) else False,
+            )
+
+            # Only not None or not 'drop' estimators will be used in transform.
+            # Remove the None from the method as well.
+            self.stack_method_ = [
+                meth
+                for (meth, est) in zip(self.stack_method_, all_estimators)
                 if est != "drop"
-            )
-        except Exception:  # TODO is there a better way to catch exceptions here?
-            self.estimators_ = Parallel(n_jobs=self.n_jobs)(
-                delayed(fit_single_estimator_if_not_fitted)(
-                    est,
-                    X,
-                    y,
-                    sample_weight,
-                    cloning_function=clone_with_n_jobs_1,
-                    force_refit=refit_estimators,
+            ]
+
+            if fit_final_estimator:
+                try:
+                    self.final_estimator_.set_params(n_jobs=self.n_jobs)
+                except ValueError:
+                    pass
+                fit_kwargs = {}
+                if save_predictions == "deep" and isinstance(
+                    self.final_estimator_, DeepStackMixin
+                ):
+                    fit_kwargs = dict(save_predictions=save_predictions)
+                if self.memory and not isinstance(
+                    self.final_estimator_, (BasePipeline, DeepStackMixin)
+                ):
+                    self.final_estimator_ = BasePipeline(
+                        [("final_estimator", self.final_estimator_)], memory=self.memory
+                    )
+                fitted_estimator = _fit_final_estimator(
+                    parallel,
+                    self.final_estimator_,
+                    X_meta,
+                    y_ray,
+                    sample_weight_ray,
+                    fit_kwargs,
+                    pg=pg,
                 )
-                for est in all_estimators
-                if est != "drop"
-            )
-
-        self.named_estimators_ = Bunch()
-        est_fitted_idx = 0
-        for name_est, org_est in zip(names, all_estimators):
-            if org_est != "drop":
-                self.named_estimators_[name_est] = self.estimators_[est_fitted_idx]
-                est_fitted_idx += 1
-            else:
-                self.named_estimators_[name_est] = "drop"
-
-        # To train the meta-classifier using the most data as possible, we use
-        # a cross-validation to obtain the output of the stacked estimators.
-
-        # To ensure that the data provided to each estimator are the same, we
-        # need to set the random state of the cv if there is one and we need to
-        # take a copy.
-        cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
-        if hasattr(cv, "random_state") and cv.random_state is None:
-            cv.random_state = np.random.RandomState()
-
-        self.stack_method_ = [
-            self._method_name(name, est, meth)
-            for name, est, meth in zip(names, all_estimators, stack_method)
-        ]
-        fit_params = (
-            {"sample_weight": sample_weight} if sample_weight is not None else None
-        )
-        # if not any(self.estimators[0][0] in col for col in X.columns):
-
-        predictions = get_cv_predictions(
-            X,
-            y,
-            all_estimators,
-            self.stack_method_,
-            cv,
-            predictions=predictions,
-            n_jobs=self.n_jobs,
-            fit_params=fit_params,
-            verbose=self.verbose,
-        )
-        X_meta = self._concatenate_predictions(
-            X, predictions, save_predictions=save_predictions
-        )
-        # else:
-        #    X_meta = X
-        # Only not None or not 'drop' estimators will be used in transform.
-        # Remove the None from the method as well.
-        self.stack_method_ = [
-            meth
-            for (meth, est) in zip(self.stack_method_, all_estimators)
-            if est != "drop"
-        ]
-
-        if fit_final_estimator:
-            try:
-                self.final_estimator_.set_params(n_jobs=self.n_jobs)
-            except ValueError:
-                pass
-            _fit_single_estimator(
-                self.final_estimator_, X_meta, y, sample_weight=sample_weight
-            )
+                self.final_estimator_ = fitted_estimator[0]
 
         return self
-
-    def _transform(self, X):
-        """Concatenate and return the predictions of the estimators."""
-        check_is_fitted(self)
-
-        if hasattr(self, "_saved_test_predictions") and self._saved_test_predictions:
-            saved_predictions = self._saved_test_predictions
-        else:
-            saved_predictions = [None] * len(self.estimators_)
-
-        assert len(saved_predictions) == len(self.estimators_)
-
-        predictions = Parallel(n_jobs=self.n_jobs)(
-            delayed(call_method)(
-                est_meth[0],
-                est_meth[1],
-                X,
-            )
-            for i, est_meth in enumerate(zip(self.estimators_, self.stack_method_))
-            if est_meth[0] != "drop"
-            and saved_predictions[i] is None
-            or est_meth[1] not in saved_predictions[i]
-        )
-        predictions = list(predictions)
-
-        for i in range(len(saved_predictions)):
-            if (
-                saved_predictions[i] is None
-                or self.stack_method_[i] not in saved_predictions[i]
-            ):
-                saved_predictions[i] = predictions.pop(0)
-            else:
-                saved_predictions[i] = saved_predictions[i][self.stack_method_[i]]
-
-        predictions = saved_predictions
 
     def _concatenate_predictions(self, X, predictions, save_predictions: bool = False):
         """Concatenate the predictions of each first layer learner and
@@ -474,10 +660,27 @@ class PandasStackingRegressor(_StackingRegressor):
             df = self.preprocessor_.fit_transform(meta_df)
         try:
             df.index = X.index
-        except:
+        except Exception:
             pass
         if save_predictions:
             self.stacked_predictions_ = df
         if self.passthrough:
             df = pd.concat((X, df), axis=1)
         return df
+
+    def _transform(self, X):
+        """Concatenate and return the predictions of the estimators."""
+        check_is_fitted(self)
+        parallel = Parallel(n_jobs=self.n_jobs)
+        pg = get_ray_pg(
+            parallel,
+            self.n_jobs,
+            len(self.estimators_),
+            self.min_n_jobs_per_estimator,
+            self.max_n_jobs_per_estimator,
+        )
+        with ray_pg_context(pg) as pg:
+            predictions = _get_predictions(
+                parallel, self.estimators_, X, self.stack_method_, pg=pg
+            )
+        return self._concatenate_predictions(X, predictions)

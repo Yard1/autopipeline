@@ -1,5 +1,5 @@
-from automl.search.store import CachedObject, CachedSklearn
 from sklearn.utils.validation import check_is_fitted
+from automl.search.cv.base_cv import get_resampling_for_problem_type
 from automl.utils.display import IPythonDisplay
 from sklearn.base import clone
 from typing import List, Optional, Union, Tuple
@@ -8,13 +8,22 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import gc
+import uuid
 
 from copy import deepcopy
 from collections import defaultdict
 
-from sklearn.model_selection import BaseCrossValidator, KFold, StratifiedKFold
+from sklearn.model_selection import (
+    BaseCrossValidator,
+    KFold,
+    StratifiedKFold,
+    cross_validate,
+    BaseShuffleSplit,
+)
 from sklearn.model_selection._split import _RepeatedSplits
 from sklearn.preprocessing import LabelEncoder
+from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.utils import shuffle
 import scipy.optimize
 import contextlib
 import io
@@ -22,17 +31,11 @@ import io
 import joblib
 import ray
 from ray.util.joblib import register_ray
-from ...utils.joblib_backend.ray_backend import (
-    multiprocessing_cache,
-    register_ray_caching,
-)
 
 register_ray()
-register_ray_caching()
 
 from ..ensemble import (
     EnsembleStrategy,
-    RoundRobin,
     EnsembleBest,
     RoundRobinEstimator,
     EnsembleCreator,
@@ -40,20 +43,27 @@ from ..ensemble import (
     VotingEnsembleCreator,
     StackingEnsembleCreator,
     SelectFromModelStackingEnsembleCreator,
+    OneRoundRobinThenEnsembleBest,
     VotingSoftEnsembleCreator,
     VotingSoftByMetricEnsembleCreator,
+    GreedyEnsembleCreator,
 )
 from ..ensemble.ray import (
     ray_fit_ensemble,
     ray_fit_ensemble_and_return_stacked_preds_remote,
 )
-from ..utils import score_test, stack_estimator
+from ..utils import (
+    ray_cross_validate,
+    score_test,
+    stack_estimator,
+)
 from ..metrics.metrics import optimized_precision
 from ..tuners.tuner import Tuner
 from ..tuners.OptunaTPETuner import OptunaTPETuner
 from ..tuners.blendsearch import BlendSearchTuner
 from ..tuners.utils import treat_config
 from ..blueprints.pipeline import create_pipeline_blueprint
+from ..tuners.trainable import _SubsampleMetaSplitterWithStratify
 from ..cv import get_cv_for_problem_type
 from ...components.component import ComponentLevel, ComponentConfig
 from ...components.estimators.linear_model import LogisticRegressionCV, ElasticNetCV
@@ -71,9 +81,9 @@ from automl_models.components.estimators.ensemble import (
     PandasStackingRegressor,
     PandasVotingClassifier,
     PandasVotingRegressor,
-    DummyClassifier,
-    DESSplitter,
+    # DESSplitter,
 )
+from automl_models.components.estimators.ensemble.stack import DeepStackMixin
 
 matthews_corrcoef_scorer = make_scorer(matthews_corrcoef, greater_is_better=True)
 specificity_scorer = make_scorer(recall_score, pos_label=0)
@@ -82,31 +92,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class Trainer:
     def __init__(
         self,
         problem_type: ProblemType,
         cv: Optional[Union[BaseCrossValidator, int]] = None,
+        stacking_cv: Optional[Union[BaseCrossValidator, int]] = None,
         categorical_columns: Optional[list] = None,
         numeric_columns: Optional[list] = None,
         level: ComponentLevel = ComponentLevel.COMMON,
         tuner: Tuner = BlendSearchTuner,
-        tuning_time: int = 600,
+        tuning_time: Union[int, List[int]] = 600,
         target_metric=None,
         secondary_tuning_strategy: Optional[EnsembleStrategy] = None,
         main_stacking_ensemble: Optional[StackingEnsembleCreator] = None,
         secondary_ensembles: Optional[List[EnsembleCreator]] = None,
         stacking_level: int = 0,
         return_test_scores_during_tuning: bool = True,
-        early_stopping: bool = False,
+        early_stopping: bool = True,
         cache: Union[str, bool] = False,
         random_state=None,
         secondary_level: Optional[ComponentLevel] = None,
         tune_kwargs: dict = None,
     ) -> None:
+        self.run_id = f"autopipeline_{str(uuid.uuid1().hex)[:8]}"
         self.problem_type = problem_type
         self.cv = cv
+        self.stacking_cv = stacking_cv
         self.categorical_columns = categorical_columns
         self.numeric_columns = numeric_columns
         self.level = level
@@ -115,50 +127,68 @@ class Trainer:
         self.target_metric = target_metric or self.default_metric_name
         self.random_state = random_state
         self.early_stopping = early_stopping
-        self.cache = cache
+        self.cache = dynamic_memory_factory(cache, run_id=self.run_id)
         self.secondary_tuning_strategy = (
             secondary_tuning_strategy
-            or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=15)
+            or RoundRobinEstimator(configurations_to_select=10, percentile_threshold=85)
         )
         self.stacking_level = stacking_level
         self.main_stacking_ensemble = main_stacking_ensemble or StackingEnsembleCreator(
             ensemble_strategy=RoundRobinEstimator(
-                configurations_to_select=10, percentile_threshold=15
+                configurations_to_select=10, percentile_threshold=51
             ),
             problem_type=self.problem_type,
+            stack=True,
         )
-        self.secondary_ensembles = (
-            secondary_ensembles
-            or [
-                VotingEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
+        self.secondary_ensembles = secondary_ensembles or [
+            GreedyEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=100,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
                 ),
-                VotingByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
-                    ),
-                    problem_type=self.problem_type,
+                problem_type=self.problem_type,
+                n_initial_estimators=5,
+            ),
+            VotingEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=20,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
                 ),
-                # SelectFromModelStackingEnsembleCreator(
-                #     ensemble_strategy=EnsembleBest(
-                #         configurations_to_select=100, percentile_threshold=1
-                #     ),
-                #     problem_type=self.problem_type,
-                # ),
-            ]
-            + [
+                problem_type=self.problem_type,
+            ),
+            VotingByMetricEnsembleCreator(
+                ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                    configurations_to_select=20,
+                    percentile_threshold=85,
+                    use_only_last_results=False,
+                ),
+                problem_type=self.problem_type,
+            ),
+            # SelectFromModelStackingEnsembleCreator(
+            #     ensemble_strategy=EnsembleBest(
+            #         configurations_to_select=100,
+            #         percentile_threshold=1,
+            #         use_only_last_results=False,
+            #     ),
+            #     problem_type=self.problem_type,
+            # ),
+        ] + (
+            [
                 VotingSoftEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
                 VotingSoftByMetricEnsembleCreator(
-                    ensemble_strategy=RoundRobinEstimator(
-                        configurations_to_select=50, percentile_threshold=15
+                    ensemble_strategy=OneRoundRobinThenEnsembleBest(
+                        configurations_to_select=20,
+                        percentile_threshold=85,
+                        use_only_last_results=False,
                     ),
                     problem_type=self.problem_type,
                 ),
@@ -166,7 +196,9 @@ class Trainer:
             if self.problem_type.is_classification()
             else []
         )
-        self.secondary_level = secondary_level
+        self.secondary_level = (
+            ComponentLevel.translate(secondary_level) if secondary_level else None
+        )
         self.tune_kwargs = tune_kwargs or {}
 
         self.secondary_tuner = None
@@ -176,31 +208,23 @@ class Trainer:
             "tuner_plot_display": IPythonDisplay("tuner_plot_display"),
         }
 
-    def get_main_stacking_ensemble_at_level(
-        self, stacking_level, get_from_cache: bool = True
-    ):
+    def get_main_stacking_ensemble_at_level(self, stacking_level):
         if stacking_level < 0:
             return None
-        ret = self.ensembles_[stacking_level][self.main_stacking_ensemble_name]
-        if get_from_cache and isinstance(ret, CachedObject):
-            ret = ret.object
+        ret = self.ensembles_[stacking_level].get(self.main_stacking_ensemble_name, None)
         return ret
-
-    @property
-    def previous_main_stacking_ensemble(self):
-        return self.get_main_stacking_ensemble_at_level(self.current_stacking_level - 1)
 
     @property
     def main_stacking_ensemble_name(self) -> str:
         return self.main_stacking_ensemble._ensemble_name
 
     @property
-    def last_tuner_(self) -> Tuner:
-        return self.tuners_[-1]
+    def last_tuner_(self) -> Optional[Tuner]:
+        return self.tuners_[-1] if self.tuners_ else None
 
     @property
-    def first_tuner_(self) -> Tuner:
-        return self.tuners_[0]
+    def first_tuner_(self) -> Optional[Tuner]:
+        return self.tuners_[0] if self.tuners_ else None
 
     @property
     def scoring_dict(self) -> dict:
@@ -242,19 +266,42 @@ class Trainer:
     @property
     def default_metric_name(self) -> str:
         if self.problem_type == ProblemType.BINARY:
-            return "optimized_precision"
+            return "f1"
         elif self.problem_type == ProblemType.MULTICLASS:
             return "matthews_corrcoef"
         elif self.problem_type == ProblemType.REGRESSION:
             return "r2"
 
-    def _get_cv(self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int]):
+    def _get_cv(
+        self, problem_type: ProblemType, cv: Union[BaseCrossValidator, int, None]
+    ):
         validate_type(cv, "cv", (BaseCrossValidator, _RepeatedSplits, int, None))
         return get_cv_for_problem_type(problem_type, n_splits=cv)
+
+    def _get_resampling(
+        self,
+        problem_type: ProblemType,
+        cv: Union[BaseCrossValidator, BaseShuffleSplit, float, int, None],
+        time_budget: float,
+        X: pd.DataFrame,
+    ):
+        validate_type(
+            cv,
+            "cv",
+            (BaseCrossValidator, _RepeatedSplits, BaseShuffleSplit, float, int, None),
+        )
+        return get_resampling_for_problem_type(
+            problem_type,
+            n_splits=cv,
+            time_budget=time_budget,
+            shape=X.shape,
+            random_state=self.random_state,
+        )
 
     def _tune(self, X, y, X_test=None, y_test=None, groups=None):
         categorical_columns = list(X.select_dtypes(include="category").columns)
         numeric_columns = list(X.select_dtypes(exclude="category").columns)
+        # TODO pass stacked X
         pipeline_blueprint = create_pipeline_blueprint(
             problem_type=self.problem_type,
             categorical_columns=categorical_columns,
@@ -278,18 +325,28 @@ class Trainer:
         else:
             secondary_pipeline_blueprint = None
 
+        if isinstance(self.tuning_time, list):
+            assert len(self.tuning_time) == self.stacking_level + 1
+            tuning_time = self.tuning_time[self.current_stacking_level]
+        else:
+            tuning_time = self.tuning_time / (self.stacking_level + 1)
+
         tuner = self.tuner(
             problem_type=self.problem_type,
             pipeline_blueprint=pipeline_blueprint,
             secondary_pipeline_blueprint=secondary_pipeline_blueprint,
             random_state=self.random_state,
-            cv=self.cv_,
+            cv=deepcopy(self.cv_),
             early_stopping=self.early_stopping,
             cache=self.cache,
-            time_budget_s=self.tuning_time // (self.stacking_level + 1),
+            time_budget_s=tuning_time,
             scoring=self.scoring_dict,
             target_metric=self.target_metric,
             display=self._displays["tuner_plot_display"],
+            widget=self.last_tuner_.widget_ if self.last_tuner_ else None,
+            plot_callback=self.last_tuner_.plot_callback_ if self.last_tuner_ else None,
+            stacking_level=self.current_stacking_level,
+            previous_stack=self.previous_stack,
             **self.tune_kwargs,
         )
         self.tuners_.append(tuner)
@@ -309,19 +366,12 @@ class Trainer:
                 logger.debug(f"removing {trial_id}")
                 continue
             if "config" in result:
-                if trial_id in self.last_tuner_.fitted_estimators_:
-                    result["estimator"] = self.last_tuner_.fitted_estimators_[trial_id]
-                else:
-                    est = self._create_estimator(
-                        result["config"],
-                        pipeline_blueprint=pipeline_blueprint,
-                        cache=self.last_tuner_._cache,  # TODO make dynamic
-                    )
-                    cached_est = CachedSklearn(
-                        self.last_tuner_.ray_cache_name_, "fitted_estimators", trial_id
-                    )
-                    cached_est.object = est
-                    result["estimator"] = cached_est
+                est = self._create_estimator(
+                    result["config"],
+                    pipeline_blueprint=pipeline_blueprint,
+                    cache=self.last_tuner_._cache,  # TODO make dynamic
+                )
+                result["estimator"] = est
         results = {k: v for k, v in results.items() if k not in trial_ids_to_remove}
         results_df = self.last_tuner_.analysis_.results_df
         results_df = results_df[results_df.index.isin(set(results))]
@@ -337,6 +387,8 @@ class Trainer:
         y_test=None,
         X_test_original=None,
         y_test_original=None,
+        X_original=None,
+        y_original=None,
         groups=None,
     ):
         self.current_stacking_level += 1
@@ -349,7 +401,56 @@ class Trainer:
         else:
             X_test_tuning = None
             y_test_tuning = None
-        results, results_df, pipeline_blueprint = self._tune(
+
+        if self.previous_stack:
+            min_resource = self.last_tuner_._searcher_kwargs.get("min_resource", 1.0)
+            reduction_factor = self.last_tuner_._searcher_kwargs.get(
+                "reduction_factor", 1
+            )
+            resource_fractions = {min_resource}
+            resource = min_resource
+            while resource < 1.0:
+                if resource * reduction_factor > 1.0:
+                    resource = 1.0
+                else:
+                    resource *= reduction_factor
+                resource_fractions.add(resource)
+
+            for prune_attr in resource_fractions:
+                is_early_stopping_on = prune_attr and prune_attr < 1.0
+
+                if is_early_stopping_on:
+                    subsample_cv = _SubsampleMetaSplitterWithStratify(
+                        base_cv=self.cv_,
+                        fraction=prune_attr,
+                        subsample_test=True,
+                        random_state=self.random_state,
+                        stratify=self.problem_type.is_classification(),
+                    )
+                else:
+                    subsample_cv = self.cv_
+
+                stack = clone(self.previous_stack)
+                final_estimator = DummyClassifier(strategy="constant", constant=0) if self.problem_type.is_classification() else DummyRegressor(strategy="constant", constant=0)
+                stack.set_params(n_jobs=-1)
+                stack = stack_estimator(final_estimator, stack)
+                print(f"starting stack job for {prune_attr}")
+                with joblib.parallel_backend("ray"):
+                    cross_validate(
+                        stack,
+                        X,
+                        y,
+                        cv=subsample_cv,
+                        groups=groups,
+                        error_score="raise",
+                        return_estimator=False,
+                        n_jobs=1,
+                        verbose=1,
+                    )
+                    if X_test_tuning is not None:
+                        stack.fit(X, y)
+
+        results, _, pipeline_blueprint = self._tune(
             X, y, X_test=X_test_tuning, y_test=y_test_tuning, groups=groups
         )
 
@@ -363,111 +464,115 @@ class Trainer:
 
         gc.collect()
 
-        # with joblib.parallel_backend("ray"):
-        X_stack, X_test_stack = self._create_ensembles(
-            X,
-            y,
-            results,
-            results_df,
-            pipeline_blueprint,
-            X_test=X_test,
-            y_test=y_test,
-            X_test_original=X_test_original,
-            y_test_original=y_test_original,
-        )
-        self.last_tuner_.ray_cache_.clean.remote("fold_predictions")
-        self.last_tuner_.ray_cache_.clean.remote("test_predictions")
-        del self.last_tuner_.fold_predictions_
-        del self.last_tuner_.test_predictions_
+        if self.all_results_:
+            with joblib.parallel_backend("ray"):
+                self._create_ensembles(
+                    X_original,
+                    y_original,
+                    self.all_results_,
+                    pipeline_blueprint,
+                    X_test=X_test,
+                    y_test=y_test,
+                    X_test_original=X_test_original,
+                    y_test_original=y_test_original,
+                    groups=groups,
+                )
+        else:
+            return
+
+        gc.collect()
         if self.current_stacking_level >= self.stacking_level:
             # logger.debug("fitting final ensemble", flush=True)
             # self.final_ensemble_ = self._create_final_stack()
             # self.final_ensemble_ = self._create_dynamic_ensemble(X, y)
             return
-        self.meta_columns_.extend(X_stack.columns)
-        multiprocessing_cache.clear()
         return self._fit_one_layer(
-            pd.concat((X, X_stack), axis=1),
+            X,
             y,
-            X_test=pd.concat((X_test, X_test_stack), axis=1)
-            if X_test is not None
-            else X_test,
+            X_test=X_test,
             y_test=y_test,
             X_test_original=X_test_original,
             y_test_original=y_test_original,
+            X_original=X_original,
+            y_original=y_original,
             groups=groups,
         )
+
+    @property
+    def previous_stack(self):
+        return self.get_main_stacking_ensemble_at_level(self.current_stacking_level - 1)
 
     def _create_ensembles(
         self,
         X,
         y,
         results,
-        results_df,
         pipeline_blueprint,
         X_test=None,
         y_test=None,
         X_test_original=None,
         y_test_original=None,
-        save_to_ray: bool = True,
+        groups=None,
+        stacking_groups=None,
     ):
         ensemble_config = {
             "X": X,
             "y": y,
-            "results": results,
-            "results_df": results_df,
+            "results": results.copy(),
             "pipeline_blueprint": pipeline_blueprint,
             "metric_name": self.default_metric_name,
             # TODO fix this
-            "metric": self.scoring_dict[self.target_metric]
-            if self.problem_type == ProblemType.REGRESSION
-            else self.scoring_dict["balanced_accuracy"],
+            "metric": self.scoring_dict[self.target_metric],
             "random_state": self.random_state,
             "current_stacking_level": self.current_stacking_level,
-            "previous_stack": self.get_main_stacking_ensemble_at_level(
-                self.current_stacking_level - 1, get_from_cache=False
-            ),
+            "previous_stack": self.previous_stack,
             "X_test": X_test,
             "y_test": y_test,
             "X_test_original": X_test_original,
             "y_test_original": y_test_original,
-            "fold_predictions": self.last_tuner_.fold_predictions_,
-            "test_predictions": self.last_tuner_.test_predictions_,
-            "refit_estimators": False,
-            "cv": self.cv_,
+            "stacking_cv": deepcopy(self.stacking_cv_),
+            "cv": deepcopy(self.cv_),
+            "cache": self.last_tuner_._cache,  # TODO make dynamic
         }
 
         print("creating ensembles")
 
         # cpus_available = ray.available_resources()["CPU"]
 
-        ray_ensemble_config = ray.put(ensemble_config)
-        ray_scoring_dict = ray.put(self.scoring_dict)
+        ray_ensemble_config = ensemble_config
+        ray_scoring_dict = self.scoring_dict
         ray_jobs = [
-            ray_fit_ensemble_and_return_stacked_preds_remote.remote(
-                self.main_stacking_ensemble,
-                ray_ensemble_config,
-                ray_scoring_dict,
-                ray_cache_actor=self.last_tuner_.ray_cache_,
+            (
+                self.main_stacking_ensemble._ensemble_name,
+                ray_fit_ensemble_and_return_stacked_preds_remote(
+                    self.main_stacking_ensemble,
+                    ray_ensemble_config,
+                    ray_scoring_dict,
+                    # ray_cache_actor=self.last_tuner_.ray_cache_,
+                ),
             )
         ]
-        ray_jobs += [
-            ray_fit_ensemble.remote(
-                ensemble,
-                ray_ensemble_config,
-                ray_scoring_dict,
-                ray_cache_actor=self.last_tuner_.ray_cache_,
-            )
-            for ensemble in self.secondary_ensembles or []
-        ]
-        print("starting ensemble jobs")
 
-        def to_iterator(obj_ids):
-            while obj_ids:
-                done, obj_ids = ray.wait(obj_ids)
-                yield ray.get(done[0])
+        if self.current_stacking_level >= self.stacking_level:
+            ray_jobs += [
+                (
+                    ensemble._ensemble_name,
+                    ray_fit_ensemble(
+                        ensemble,
+                        ray_ensemble_config,
+                        ray_scoring_dict,
+                        # ray_cache_actor=self.last_tuner_.ray_cache_,
+                    ),
+                )
+                for ensemble in self.secondary_ensembles or []
+            ]
 
-        ray_results = [x for x in tqdm(to_iterator(ray_jobs), total=len(ray_jobs))]
+        # def to_iterator(obj_ids):
+        #     while obj_ids:
+        #         done, obj_ids = ray.wait(obj_ids)
+        #         yield ray.get(done[0])
+
+        ray_results = ray_jobs
 
         print("ensemble jobs returned")
 
@@ -477,31 +582,27 @@ class Trainer:
                     return i
             return None
 
-        main_result = ray_results.pop(
-            index_of_first(ray_results, lambda x: len(x) > 2)
-        )
-        (
-            main_stacking_ensemble_fitted,
-            X_stack,
-            X_test_stack,
-            score
-        ) = main_result
-        scores = {self.main_stacking_ensemble._ensemble_name: score}
+        main_result = ray_results.pop(0)
+        main_result_name, main_result = main_result
+        (main_stacking_ensemble_fitted, score) = main_result
+        scores = {main_result_name: score}
         if ray_results:
             scores = {
                 **scores,
                 **{
-                    ensemble._ensemble_name: ray_results[i][1]
-                    for i, ensemble in enumerate(self.secondary_ensembles or [])
+                    result[0]: result[1][1]
+                    for i, result in enumerate(ray_results)
+                    if result[1][1]
                 },
             }
             fitted_ensembles = {
-                ensemble._ensemble_name: ray_results[i][0]
-                for i, ensemble in enumerate(self.secondary_ensembles or [])
+                result[0]: result[1][0]
+                for i, result in enumerate(ray_results)
+                if result[1][0]
             }
-        fitted_ensembles[
-            self.main_stacking_ensemble._ensemble_name
-        ] = main_stacking_ensemble_fitted
+        else:
+            fitted_ensembles = {}
+        fitted_ensembles[main_result_name] = main_stacking_ensemble_fitted
 
         self.ensemble_results_.append({})
         self.ensembles_.append(fitted_ensembles)
@@ -509,7 +610,17 @@ class Trainer:
         for ensemble_name, score in scores.items():
             self._score_ensemble(ensemble_name, score)
 
-        return X_stack, X_test_stack
+        # if self.cache and self.current_stacking_level < self.stacking_level:
+        #     estimator = stack_estimator(
+        #         DummyClassifier(strategy="constant", constant=1)
+        #         if self.problem_type.is_classification()
+        #         else DummyRegressor(strategy="constant", constant=1),
+        #         main_stacking_ensemble_fitted,
+        #     )
+        #     cv = deepcopy(self.cv_)
+        #     cross_validate(estimator, X, y, cv=cv, verbose=1, groups=groups, n_jobs=1)
+
+        return
 
     def _score_ensemble(
         self,
@@ -522,16 +633,16 @@ class Trainer:
             )
         self.ensemble_results_[-1][ensemble_name] = scores
 
-    def _create_dynamic_ensemble(self, X, y):
-        # TODO fix
-        des = DESSplitter(
-            [est for name, est in self.ensembles_[-1].estimators],
-            METADES(DFP=True),
-            random_state=self.random_state,
-            n_jobs=-1,
-        )
-        des.fit(X, y)
-        return des
+    # def _create_dynamic_ensemble(self, X, y):
+    #     # TODO fix
+    #     des = DESSplitter(
+    #         [est for name, est in self.ensembles_[-1].estimators],
+    #         METADES(DFP=True),
+    #         random_state=self.random_state,
+    #         n_jobs=-1,
+    #     )
+    #     des.fit(X, y)
+    #     return des
 
     def _create_final_stack(self):
         # TODO change isinstance
@@ -553,7 +664,8 @@ class Trainer:
     def _run_secondary_tuning(self, X, y, pipeline_blueprint, groups=None):
         raise NotImplementedError()
         groupby_list = [
-            f"config.{k}" for k in pipeline_blueprint.get_all_distributions().keys()
+            f"config{DELIM}{k}"
+            for k in pipeline_blueprint.get_all_distributions().keys()
         ]
         groupby_list.reverse()
         grouped_results_df = self.all_results_df_[-1].groupby(by=groupby_list)
@@ -611,6 +723,8 @@ class Trainer:
                 )
 
     def _stack_estimator_if_needed(self, estimator, stacking_level):
+        if isinstance(estimator, DeepStackMixin):
+            return estimator
         stack = self.get_main_stacking_ensemble_at_level(stacking_level)
         return stack_estimator(estimator, stack)
 
@@ -630,8 +744,6 @@ class Trainer:
             self.last_tuner_.hyperparameter_names_,
             self.random_state,
         )
-        if "maxBins" in config_called:
-            raise ValueError(str(estimator) + str(config_called))
         estimator.set_params(**config_called)
         if cache:
             memory = dynamic_memory_factory(cache)  # TODO make dynamic
@@ -642,8 +754,6 @@ class Trainer:
         check_is_fitted(self)
         stacking_level, ensemble_name = ensemble_id.split("_")
         ret = self.ensembles_[int(stacking_level)][ensemble_name]
-        if isinstance(ret, CachedObject):
-            ret = ret.object
         return ret
 
     def get_pipeline_by_id(self, id):
@@ -664,9 +774,16 @@ class Trainer:
             return self.get_pipeline_by_id(id)
 
     def fit(self, X, y, X_test=None, y_test=None, groups=None):
+        if self.target_metric not in self.scoring_dict:
+            raise ValueError(
+                f"Wrong target metric {self.target_metric}. "
+                f"Valid metrics: {self.scoring_dict.keys()}"
+            )
+
         self.current_stacking_level = -1
 
-        self.cv_ = self._get_cv(self.problem_type, self.cv)
+        self.cv_ = self._get_resampling(self.problem_type, self.cv, self.tuning_time, X)
+        self.stacking_cv_ = self._get_cv(self.problem_type, self.stacking_cv)
         self.pipeline_blueprints_: List[TopPipeline] = []
         self.secondary_pipeline_blueprints_: List[TopPipeline] = []
         self.tuners_: List[Tuner] = []
@@ -677,6 +794,8 @@ class Trainer:
         self.ensemble_results_ = []
         self.meta_columns_ = []
 
+        print(f"Using resampling {self.cv_}")
+
         self._fit_one_layer(
             X,
             y,
@@ -684,6 +803,8 @@ class Trainer:
             y_test=y_test,
             X_test_original=X_test,
             y_test_original=y_test,
+            X_original=X,
+            y_original=y,
             groups=groups,
         )
         return self

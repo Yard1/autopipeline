@@ -56,7 +56,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
         int_dtype: Optional[type] = None,
         ordinal_columns: Optional[Dict[str, list]] = None,
         copy_X: bool = True,
-        variance_threshold: float = 0.01,
+        variance_threshold: float = 0.0,
         missing_values_threshold: float = 0.3,
     ) -> None:
         if allowed_dtypes is not None and not allowed_dtypes:
@@ -110,10 +110,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
             return col.astype(self.int_dtype)
 
         if is_categorical_dtype(col.dtype):
-            if col.dtype.ordered:
-                col = col.copy()
-                return col.cat.codes.replace(-1, None)
-            return col
+            return self._remove_unused_categories(col)
 
         col_unqiue = col.unique()
         if is_bool_dtype(col.dtype) or (
@@ -137,7 +134,7 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
                     pd.CategoricalDtype(
                         self._ordinal_columns_not_none[col.name], ordered=True
                     )
-                ).cat.codes.replace(-1, None)
+                )
             try:
                 return col.astype(pd.CategoricalDtype(col_unqiue))
             except Exception:
@@ -145,12 +142,23 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         return col
 
+    def _ordinal_to_int(self, col):
+        if is_categorical_dtype(col.dtype) and (col.name in self._ordinal_columns_not_none or col.dtype.ordered):
+            return col.cat.codes.replace(-1, None)
+        return col
+
+    def _remove_unused_categories(self, col):
+        if is_categorical_dtype(col.dtype):
+            return col.cat.remove_unused_categories()
+        return col
+
     def _convert_dtypes(self, col):
         if col.name in self.datetime_columns_:
             col = pd.to_datetime(
                 col, infer_datetime_format=True, utc=False, errors="raise"
             )
-        return col.astype(self.final_dtypes_[col.name])
+        col = col.astype(self.final_dtypes_[col.name])
+        return self._ordinal_to_int(col)
 
     def _drop_variance_missing_values(self, X):
         cols_to_drop = []
@@ -229,6 +237,9 @@ class PrepareDataFrame(TransformerMixin, BaseEstimator):
 
         self.final_columns_ = X.columns
         self.final_dtypes_ = X.dtypes
+
+        X = X.apply(self._ordinal_to_int)
+
         self.datetime_columns_ = self.final_dtypes_.apply(is_datetime64_any_dtype)
         self.datetime_columns_ = set(
             self.datetime_columns_[self.datetime_columns_].index

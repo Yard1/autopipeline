@@ -22,6 +22,7 @@ from joblib.logger import format_time
 
 from .hashing import hash
 
+BYTES_LIMIT = 1024 * 1024 * 1024 * 10
 
 class DynamicMemorizedFunc(MemorizedFunc):
     def __init__(
@@ -58,14 +59,21 @@ class DynamicMemorizedFunc(MemorizedFunc):
         """Force the execution of the function with the given arguments and
         persist the output values.
         """
+        if hasattr(self, "_output_identifiers"):
+            func_id, args_id = self._output_identifiers
+            del self._output_identifiers
+        else:
+            func_id, args_id = (None, None)
         start_time = time.time()
-        func_id, args_id = self._get_output_identifiers(*args, **kwargs)
         if self._verbose > 0:
             print(format_call(self.func, args, kwargs))
         func_start_time = time.time()
         output = self.func(*args, **kwargs)
         func_duration = time.time() - func_start_time
         if func_duration >= self.min_time_to_cache:
+            self.store_backend.reduce_store_size(BYTES_LIMIT)
+            if func_id is None:
+                func_id, args_id = self._get_output_identifiers(*args, **kwargs)
             self.store_backend.dump_item(
                 [func_id, args_id], output, verbose=self._verbose
             )
@@ -173,6 +181,7 @@ class DynamicMemorizedFunc(MemorizedFunc):
                 must_call = True
 
         if must_call:
+            self._output_identifiers = (func_id, args_id)
             out, metadata = self.call(*args, **kwargs)
             if self.mmap_mode is not None and metadata is not None:
                 # Memmap the output at the first call to be consistent with
@@ -293,9 +302,10 @@ class DynamicMemory(Memory):
         )
 
 
-def dynamic_memory_factory(cache, **kwargs):
+def dynamic_memory_factory(cache, *, run_id=None, **kwargs):
     if isinstance(cache, Memory):
         return cache
     memory = tempfile.gettempdir() if cache is True else cache
+    memory = os.path.join(memory, run_id) if run_id else memory
     memory = memory if not memory == os.getcwd() else ".."
     return DynamicMemory(memory, **kwargs)
